@@ -1,0 +1,44 @@
+{% extends "web/base.html" %}
+{% load humanize %}
+{% block title %}Rekonsiliasi · Truth of Auditor{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <h1>Rekonsiliasi</h1>
+  <p>Cocokkan Panel ↔ Bracket / Bank / Gateway dengan toleransi yang bisa diatur.</p>
+</div>
+
+<div class="grid cols-2">
+  <div class="card reveal">
+    <h3 style="margin:0 0 16px">Jalankan Pencocokan</h3>
+    <form method="post">
+      {% csrf_token %}
+      <div class="field"><label>Relasi</label>
+        <select name="relation" required>{% for val,lbl in relations %}<option value="{{ val }}">{{ lbl }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Profil Toleransi</label>
+        <select name="tolerance">{% for t in tolerances %}<option value="{{ t.name }}">{{ t.name }} (±{{ t.date_window_days }} hari)</option>{% endfor %}</select></div>
+      <div class="row">
+        <div class="field"><label>Dari tanggal (opsional)</label><input type="date" name="date_from"></div>
+        <div class="field"><label>Sampai tanggal (opsional)</label><input type="date" name="date_to"></div>
+      </div>
+      <button class="btn primary" type="submit" style="margin-top:8px">▶ Jalankan Rekonsiliasi</button>
+    </form>
+  </div>
+
+  <div class="card reveal">
+    <h3 style="margin:0 0 8px">Riwayat Run</h3>
+    <div style="max-height:340px;overflow:auto">
+    {% for run in runs %}
+    <a href="{% url 'run_detail' run.pk %}" style="display:block;padding:13px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b style="font-size:14px">{{ run.get_relation_display }}</b><span class="faint" style="font-size:12px">#{{ run.pk }} · {{ run.created_at|date:"d/m H:i" }}</span>
+      </div>
+      {% if run.summary %}<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+        <span class="badge ok">{{ run.summary.cocok|intcomma }} cocok</span>
+        <span class="badge warn">{{ run.summary.perlu_tinjau|intcomma }} tinjau</span>
+        <span class="badge bad">{{ run.summary.tidak_cocok|intcomma }} tidak</span></div>{% endif %}
+    </a>
+    {% empty %}<p class="muted">Belum ada run.</p>{% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

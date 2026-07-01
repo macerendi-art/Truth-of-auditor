@@ -1,0 +1,88 @@
+from django.db import models
+
+from core.models import TimeStampedModel
+
+
+class ToleranceProfile(TimeStampedModel):
+    """Parameter toleransi pencocokan (bisa diedit & dipakai ulang)."""
+
+    name = models.CharField(max_length=100, unique=True)
+    date_window_days = models.IntegerField(default=1)
+    date_direction = models.CharField(
+        max_length=30,
+        default="target_after_base",
+        help_text="target_after_base = sisi uang (Bank) >= sisi kredit (Panel)",
+    )
+    amount_abs_tol = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    amount_pct_tol = models.DecimalField(max_digits=6, decimal_places=4, default=0)
+    fuzzy_threshold = models.IntegerField(default=85)
+
+    def __str__(self):
+        return self.name
+
+
+class MatchRun(TimeStampedModel):
+    class Relation(models.TextChoices):
+        PANEL_BRACKET = "panel_bracket", "Panel ↔ Bracket"
+        PANEL_BANK = "panel_bank", "Panel ↔ Bank/Gateway"
+        BRACKET_BANK = "bracket_bank", "Bracket ↔ Bank/Gateway"
+        SALDO = "saldo", "Rekonsiliasi Saldo"
+
+    relation = models.CharField(max_length=20, choices=Relation.choices)
+    tolerance = models.ForeignKey(ToleranceProfile, on_delete=models.PROTECT)
+    date_from = models.DateField(null=True, blank=True)
+    date_to = models.DateField(null=True, blank=True)
+    params = models.JSONField(default=dict)
+    summary = models.JSONField(default=dict)
+    created_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True
+    )
+
+    def __str__(self):
+        return f"{self.get_relation_display()} #{self.pk}"
+
+
+class MatchResult(TimeStampedModel):
+    class Bucket(models.TextChoices):
+        COCOK = "cocok", "Cocok"
+        TIDAK = "tidak_cocok", "Tidak Cocok"
+        TINJAU = "perlu_tinjau", "Perlu Ditinjau"
+
+    run = models.ForeignKey(MatchRun, on_delete=models.CASCADE, related_name="results")
+    bucket = models.CharField(max_length=15, choices=Bucket.choices)
+    left = models.ForeignKey(
+        "transactions.Transaction",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    right = models.ForeignKey(
+        "transactions.Transaction",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    score = models.FloatField(default=0)
+    reason_code = models.CharField(max_length=50, blank=True)
+    reason_detail = models.TextField(blank=True)
+
+    def __str__(self):
+        return f"{self.bucket} ({self.reason_code})"
+
+
+class ReviewAction(TimeStampedModel):
+    """Jejak override manual auditor."""
+
+    result = models.ForeignKey(
+        MatchResult, on_delete=models.CASCADE, related_name="reviews"
+    )
+    action = models.CharField(max_length=30)
+    reason = models.TextField(blank=True)
+    reviewer = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True
+    )
+
+    def __str__(self):
+        return f"{self.action} on #{self.result_id}"

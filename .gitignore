@@ -1,0 +1,18 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Django
+db.sqlite3
+media/
+staticfiles/
+*.log
+
+# Data sampel (SENSITIF — jangan commit)
+/samples/
+
+# Env & OS
+.env
+.DS_Store

@@ -1,0 +1,48 @@
+{% extends "web/base.html" %}
+{% load humanize %}
+{% block title %}Run #{{ run.pk }} · Truth of Auditor{% endblock %}
+{% block content %}
+<div class="page-head reveal" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+  <div>
+    <h1>{{ run.get_relation_display }}</h1>
+    <p>Run #{{ run.pk }} · toleransi <b>{{ run.tolerance.name }}</b> (±{{ run.tolerance.date_window_days }} hari) · {{ run.created_at|date:"d/m/Y H:i" }}</p>
+  </div>
+  <a class="btn" href="{% url 'export_run' run.pk %}">⬇ Export Excel</a>
+</div>
+
+{% if run.summary %}
+<div class="grid cols-4 reveal">
+  <div class="card stat"><div class="k">Kiri (Panel)</div><div class="v">{{ run.summary.left|intcomma }}</div></div>
+  <div class="card stat"><div class="k" style="color:var(--ok)">Cocok</div><div class="v" style="color:var(--ok)">{{ run.summary.cocok|intcomma }}</div></div>
+  <div class="card stat"><div class="k" style="color:var(--warn)">Perlu Ditinjau</div><div class="v" style="color:var(--warn)">{{ run.summary.perlu_tinjau|intcomma }}</div></div>
+  <div class="card stat"><div class="k" style="color:var(--bad)">Tidak Cocok</div><div class="v" style="color:var(--bad)">{{ run.summary.tidak_cocok|intcomma }}</div></div>
+</div>
+{% endif %}
+
+<div class="tabs reveal" style="margin-top:24px">
+  <a href="?" class="{% if not bucket %}active{% endif %}">Semua</a>
+  <a href="?bucket=cocok" class="{% if bucket == 'cocok' %}active{% endif %}">Cocok</a>
+  <a href="?bucket=perlu_tinjau" class="{% if bucket == 'perlu_tinjau' %}active{% endif %}">Perlu Ditinjau</a>
+  <a href="?bucket=tidak_cocok" class="{% if bucket == 'tidak_cocok' %}active{% endif %}">Tidak Cocok</a>
+</div>
+
+<div class="card pad0 reveal">
+  <div class="table-wrap" style="border:none">
+  <table>
+    <thead><tr><th>Status</th><th>Kiri (Panel)</th><th class="num">Amount</th><th>Kanan</th><th class="num">Amount</th><th>Alasan</th><th style="text-align:center">Aksi</th></tr></thead>
+    <tbody>
+    {% for r in page %}{% include "web/_result_row.html" %}{% empty %}
+      <tr><td colspan="7" class="muted" style="padding:28px;text-align:center">Tidak ada hasil pada bucket ini.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+{% if page.has_other_pages %}
+<div class="pager">
+  {% if page.has_previous %}<a class="btn sm" href="?bucket={{ bucket }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
+  <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
+  {% if page.has_next %}<a class="btn sm" href="?bucket={{ bucket }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

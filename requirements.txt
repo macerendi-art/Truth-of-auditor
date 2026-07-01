@@ -1,0 +1,12 @@
+Django>=5.2,<5.3
+pandas
+openpyxl
+pdfplumber
+rapidfuzz
+python-dateutil
+
+# deployment (Railway/produksi)
+gunicorn
+whitenoise
+psycopg2-binary
+dj-database-url

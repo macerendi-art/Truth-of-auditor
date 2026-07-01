@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m pip --version)",
+      "Read(//Users/macads/Downloads/Telegram Desktop/**)",
+      "Bash(unzip -l \"SAMPLING TO RND \\(TOKO= OKE25\\).zip\")"
+    ]
+  }
+}

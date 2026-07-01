@@ -1,0 +1,66 @@
+{% extends "web/base.html" %}
+{% load humanize %}
+{% block title %}Dashboard · Truth of Auditor{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <h1>Dashboard</h1>
+  <p>Ringkasan data terparse &amp; rekonsiliasi terkini.</p>
+</div>
+
+<div class="grid cols-4">
+  <div class="card stat reveal"><div class="glow"></div><div class="k">Total Transaksi</div><div class="v">{{ tx_total|intcomma }}</div></div>
+  <div class="card stat reveal"><div class="glow"></div><div class="k">File Di-upload</div><div class="v">{{ upload_total|intcomma }}</div></div>
+  <div class="card stat reveal"><div class="glow"></div><div class="k">Rekonsiliasi</div><div class="v">{{ run_total|intcomma }}</div></div>
+  <div class="card stat reveal"><div class="glow"></div><div class="k">Jenis Sumber</div><div class="v">{{ by_source|length }}</div></div>
+</div>
+
+<div class="grid cols-2" style="margin-top:18px">
+  <div class="card reveal">
+    <h3 style="margin:0 0 18px">Transaksi per Sumber</h3>
+    {% for s in by_source %}
+    <div style="margin-bottom:15px">
+      <div style="display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:6px">
+        <span><span class="badge src">{{ s.source_type__key }}</span> {{ s.source_type__name }}</span>
+        <b class="mono">{{ s.n|intcomma }}</b>
+      </div>
+      <div style="height:8px;border-radius:99px;background:rgba(255,255,255,.05);overflow:hidden">
+        <div style="height:100%;width:{% widthratio s.n tx_total 100 %}%;background:var(--grad);border-radius:99px"></div>
+      </div>
+    </div>
+    {% empty %}<p class="muted">Belum ada data. <a class="grad-text" href="{% url 'upload' %}">Upload file →</a></p>{% endfor %}
+  </div>
+
+  <div class="card reveal">
+    <h3 style="margin:0 0 16px">Rekonsiliasi Terkini</h3>
+    {% for run in runs %}
+    <a href="{% url 'run_detail' run.pk %}" style="display:block;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b style="font-size:14px">{{ run.get_relation_display }}</b>
+        <span class="faint" style="font-size:12px">#{{ run.pk }}</span>
+      </div>
+      {% if run.summary %}<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+        <span class="badge ok">{{ run.summary.cocok|intcomma }}</span>
+        <span class="badge warn">{{ run.summary.perlu_tinjau|intcomma }}</span>
+        <span class="badge bad">{{ run.summary.tidak_cocok|intcomma }}</span>
+      </div>{% endif %}
+    </a>
+    {% empty %}<p class="muted">Belum ada rekonsiliasi. <a class="grad-text" href="{% url 'reconcile' %}">Jalankan →</a></p>{% endfor %}
+  </div>
+</div>
+
+<div class="card pad0 reveal" style="margin-top:18px">
+  <div style="padding:20px 22px 4px"><h3 style="margin:0">Upload Terakhir</h3></div>
+  <div class="table-wrap" style="border:none">
+  <table>
+    <thead><tr><th>File</th><th>Sumber</th><th>Flow</th><th class="num">Baris</th><th class="num">Duplikat</th><th>Waktu</th></tr></thead>
+    <tbody>
+    {% for u in uploads %}
+      <tr><td>{{ u.original_name }}</td><td><span class="badge src">{{ u.source_type.key }}</span></td>
+      <td class="faint">{{ u.flow|default:"—" }}</td><td class="num mono">{{ u.rows_parsed|intcomma }}</td>
+      <td class="num faint mono">{{ u.rows_duplicate|intcomma }}</td><td class="faint">{{ u.created_at|date:"d/m/Y H:i" }}</td></tr>
+    {% empty %}<tr><td colspan="6" class="muted" style="padding:24px">Belum ada file.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
