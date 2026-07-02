@@ -25,7 +25,7 @@ PARSERS = {
 }
 
 
-def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=None):
+def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=None, toko=None, provider=""):
     """Parse `file_path` dengan parser `parser_key`, simpan sebagai Transaction.
 
     Mengembalikan (upload, created, duplicate).
@@ -41,6 +41,8 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
         up = Upload.objects.create(
             source_type=st,
             account=account,
+            toko=toko,
+            provider=provider,
             flow=flow or "",
             recon_date=recon_date,
             original_name=Path(file_path).name,
@@ -62,6 +64,7 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
                     upload=up,
                     source_type=st,
                     account=account,
+                    toko=toko,
                     occurred_at=row["occurred_at"],
                     posted_date=row["posted_date"],
                     jenis=row["jenis"],

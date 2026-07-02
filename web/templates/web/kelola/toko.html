@@ -1,0 +1,48 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% block title %}Kelola Toko · Truth of Auditor{% endblock %}
+{% block crumb %}Admin · Kelola Toko{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <h1>Kelola Toko</h1>
+  <p>Tambah kode toko baru atau nonaktifkan yang tidak dipakai. Data per toko tetap tersimpan.</p>
+</div>
+
+<div class="card reveal" style="max-width:430px">
+  <h3>Tambah Toko</h3>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create">
+    <div class="field"><label>Kode toko (mis. AHK)</label>
+      <input name="kode" maxlength="30" placeholder="KODE" required style="text-transform:uppercase"></div>
+    <button class="btn primary" type="submit">+ Tambah</button>
+  </form>
+</div>
+
+<div class="card reveal pad0" style="margin-top:16px">
+  <div style="padding:18px 20px 6px"><h3 style="margin:0">Daftar Toko ({{ tokos|length }})</h3></div>
+  <div class="twrap" style="border:none">
+  <table>
+    <thead><tr><th>Kode</th><th class="r">Transaksi</th><th class="r">Upload</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for t in tokos %}
+      <tr>
+        <td style="font-weight:600">{{ t.name }}</td>
+        <td class="r num">{{ t.n_tx|intcomma }}</td>
+        <td class="r num">{{ t.n_up|intcomma }}</td>
+        <td>{% if t.is_active %}<span class="badge ok">aktif</span>{% else %}<span class="badge bad">nonaktif</span>{% endif %}</td>
+        <td class="r">
+          <form method="post" style="display:inline">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="toggle">
+            <input type="hidden" name="toko_id" value="{{ t.id }}">
+            <button class="btn sm" type="submit">{% if t.is_active %}Nonaktifkan{% else %}Aktifkan{% endif %}</button>
+          </form>
+        </td>
+      </tr>
+    {% empty %}<tr><td colspan="5" class="faint">Belum ada toko.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,10 +1,11 @@
-{% extends "web/base.html" %}
+{% extends "web/app_base.html" %}
 {% load humanize %}
 {% block title %}Transaksi · Truth of Auditor{% endblock %}
+{% block crumb %}Transaksi{% endblock %}
 {% block content %}
 <div class="page-head reveal">
   <h1>Transaksi</h1>
-  <p>{{ total|intcomma }} baris kanonik dari semua sumber.</p>
+  <p>{{ total|intcomma }} baris kanonik untuk <b>{{ active_toko.name }}</b>.</p>
 </div>
 
 <div class="card reveal" style="margin-bottom:18px">
@@ -17,7 +18,7 @@
       {% for val,lbl in jenis_choices %}<option value="{{ val }}" {% if jenis == val %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></div>
     <div class="field" style="flex:2"><label>Cari (username / ticket / referensi / nama)</label>
       <input name="q" value="{{ q }}" placeholder="mis. Wacor20 atau D1757153"></div>
-    <button class="btn primary" type="submit">Filter</button>
+    <button class="btn primary" type="submit" style="flex:0 0 auto;align-self:end">Filter</button>
   </form>
 </div>
 

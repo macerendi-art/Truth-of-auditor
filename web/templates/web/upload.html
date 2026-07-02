@@ -1,48 +1,104 @@
-{% extends "web/base.html" %}
+{% extends "web/app_base.html" %}
 {% block title %}Upload · Truth of Auditor{% endblock %}
+{% block crumb %}Upload &amp; Parse{% endblock %}
 {% block content %}
 <div class="page-head reveal">
   <h1>Upload &amp; Parse</h1>
-  <p>Unggah file mentah — sistem menyeragamkannya ke format transaksi kanonik.</p>
+  <p>Lempar beberapa file sekaligus untuk <b>{{ active_toko.name }}</b> — sistem menentukan jenisnya otomatis.</p>
 </div>
 
-<div class="grid cols-2">
-  <div class="card reveal">
-    <form method="post" enctype="multipart/form-data">
-      {% csrf_token %}
-      <div class="field">
-        <label>Jenis Sumber / Parser</label>
-        <select name="parser_key" required>
-          <option value="">— pilih parser —</option>
-          {% for p in parsers %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="field">
-        <label>Flow (opsional — otomatis dari nama file)</label>
-        <select name="flow"><option value="">otomatis</option><option value="dp">Deposit (DP)</option><option value="wd">Withdraw (WD)</option></select>
-      </div>
-      <div class="field">
-        <label>File (xlsx / csv / pdf)</label>
-        <input type="file" name="file" required accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF">
-      </div>
-      <button class="btn primary" type="submit">Parse &amp; Simpan →</button>
-    </form>
-  </div>
+<div class="card reveal">
+  <form method="post" enctype="multipart/form-data" id="upform">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="analyze">
+    <label class="dz" for="fileInput">
+      <div class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></div>
+      <div style="font-weight:600">Lepas file di sini atau klik untuk pilih</div>
+      <div class="faint" style="font-size:13px;margin-top:4px">xlsx · csv · pdf — bisa banyak sekaligus</div>
+      <div id="flist" class="faint" style="font-size:13px;margin-top:8px"></div>
+      <input id="fileInput" type="file" name="files" multiple required accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF" style="display:none">
+    </label>
+    <button class="btn primary" type="submit" style="margin-top:16px">Analisa File →</button>
+  </form>
+</div>
+<script>
+(function(){var i=document.getElementById('fileInput'),l=document.getElementById('flist');
+  if(i)i.addEventListener('change',function(){l.textContent=i.files.length?[].map.call(i.files,function(f){return f.name;}).join(' · '):'';});})();
+</script>
 
-  <div class="card reveal">
-    <h3 style="margin:0 0 14px">Panduan Parser</h3>
+{% if preview %}
+<div class="card reveal">
+  <h3>Preview — konfirmasi jenis sebelum simpan</h3>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="commit">
+    <div class="twrap">
     <table>
-      <tbody style="font-size:13px">
-        <tr><td><b>panel</b></td><td class="faint">HISTORI DP/WD PANEL (kredit ×1000)</td></tr>
-        <tr><td><b>bracket</b></td><td class="faint">FR BRACKET (jembatan CS)</td></tr>
-        <tr><td><b>bri</b></td><td class="faint">Mutasi BRI (CSV)</td></tr>
-        <tr><td><b>bca_csv</b></td><td class="faint">Mutasi BCA (CSV)</td></tr>
-        <tr><td><b>bca_pdf</b></td><td class="faint">Rekening koran BCA (PDF)</td></tr>
-        <tr><td><b>mandiri</b></td><td class="faint">e-Statement Mandiri (xlsx)</td></tr>
-        <tr><td><b>nxpay</b></td><td class="faint">Gateway NXPAY (xlsx)</td></tr>
-        <tr><td><b>qrflyer</b></td><td class="faint">Gateway QR FLYER / QRIS (xlsx)</td></tr>
+      <thead><tr><th>File</th><th>Jenis terdeteksi</th><th>Keyakinan</th><th>DP/WD</th></tr></thead>
+      <tbody>
+      {% for p in preview %}
+      <tr>
+        <td>{{ p.name }}<input type="hidden" name="staged" value="{{ p.staged }}"></td>
+        <td>
+          <select name="parser_key" class="f">
+            {% for pk in parsers %}<option value="{{ pk }}" {% if pk == p.parser_key %}selected{% endif %}>{{ pk }}</option>{% endfor %}
+          </select>
+        </td>
+        <td>{% if p.needs_confirm %}<span class="badge warn">{{ p.confidence }}% — cek</span>{% else %}<span class="badge ok">{{ p.confidence }}%</span>{% endif %}</td>
+        <td>
+          <select name="flow" class="f">
+            <option value="" {% if p.flow == '' %}selected{% endif %}>otomatis</option>
+            <option value="dp" {% if p.flow == 'dp' %}selected{% endif %}>DP</option>
+            <option value="wd" {% if p.flow == 'wd' %}selected{% endif %}>WD</option>
+          </select>
+        </td>
+      </tr>
+      {% endfor %}
       </tbody>
     </table>
+    </div>
+    <div class="field" style="margin-top:14px;max-width:260px">
+      <label>Panel Provider (opsional)</label>
+      <input type="text" name="provider" placeholder="mis. Nexus">
+    </div>
+    <button class="btn primary" type="submit">Simpan &amp; Parse ({{ preview|length }} file)</button>
+  </form>
+</div>
+{% endif %}
+
+{% load humanize %}
+<div class="card reveal" style="padding:0;overflow:hidden">
+  <div style="padding:18px 20px 6px"><h3 style="margin:0">Riwayat Upload — {{ active_toko.name }}</h3></div>
+  <div class="twrap" style="border:none">
+  <table>
+    <thead><tr><th>File</th><th>Jenis</th><th>Provider</th><th>DP/WD</th><th class="r">Baris</th><th class="r">Dup</th><th>Status</th><th>Oleh</th><th>Waktu</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for u in uploads %}
+      <tr>
+        <td>{{ u.original_name|default:u.pk }}</td>
+        <td>{{ u.source_type.name }}</td>
+        <td>{{ u.provider|default:"—" }}</td>
+        <td>{{ u.flow|default:"—" }}</td>
+        <td class="r num">{{ u.rows_parsed|intcomma }}</td>
+        <td class="r num faint">{{ u.rows_duplicate|intcomma }}</td>
+        <td>{% if u.status == 'parsed' %}<span class="badge ok">parsed</span>{% elif u.status == 'error' %}<span class="badge bad">error</span>{% else %}<span class="badge warn">{{ u.status }}</span>{% endif %}</td>
+        <td>{{ u.uploaded_by.username|default:"—" }}</td>
+        <td class="faint">{{ u.created_at|date:"d/m H:i" }}</td>
+        {% if is_admin_user %}
+        <td class="r">
+          <form method="post" action="{% url 'delete_upload' u.pk %}" style="display:inline"
+                onsubmit="return confirm('Hapus {{ u.original_name|default:u.pk }}? {{ u.rows_parsed }} baris transaksi ikut terhapus. Tidak bisa dibatalkan.')">
+            {% csrf_token %}
+            <button class="btn sm ghost" type="submit" style="color:var(--bad)">Hapus</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+    {% empty %}
+      <tr><td colspan="{% if is_admin_user %}10{% else %}9{% endif %}" class="faint">Belum ada upload untuk toko ini.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
   </div>
 </div>
 {% endblock %}

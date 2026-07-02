@@ -48,65 +48,59 @@
 <script>
 /* ───────────────────────────────────────────────────────────────
  * build-premium-website-twist-threejs — random roll (this round)
- *   WebGL effect : ASCII / dithering shader   (trend-confirmed: ordered Bayer dither, Lusion/codrops)
- *   Motion       : Lenis smooth scroll · Page-transition wipe / preloader
- *   Visual       : Kinetic typography focus
- *   Anchor       : Lusion / Locomotive agency style
- *   Adapted to   : existing Django "Truth of Auditor" UI (Django templates + Three.js/GSAP CDN)
- *   Date         : 2026-06-30
+ *   WebGL effect : Particle field reacting to cursor   (trend-confirmed: GPGPU/points parallax, awwwards staple)
+ *   Motion       : Lenis smooth scroll · Magnetic buttons / cursor-following
+ *   Visual       : Glassmorphism
+ *   Anchor       : Stripe-level polish
+ *   Adapted to   : existing Django "Truth of Auditor" login (Django templates + Three.js/GSAP CDN)
+ *   Date         : 2026-07-02
  * ─────────────────────────────────────────────────────────────── */
 (function(){
   const canvas=document.getElementById('gl');
   const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
   function hasWebGL(){try{const c=document.createElement('canvas');return !!(window.WebGLRenderingContext&&(c.getContext('webgl')||c.getContext('experimental-webgl')));}catch(e){return false;}}
-  // Kinetic heading reveal (mask up) — always, cheap
+  // Heading + card reveal (Stripe-polish, cheap)
   if(window.gsap){
-    gsap.from('#card',{y:26,opacity:0,duration:.9,ease:'power3.out',delay:.15});
-    gsap.from('.auth-card h1 .kin',{yPercent:110,duration:1.0,ease:'power4.out',delay:.28});
+    gsap.from('#card',{y:24,opacity:0,duration:.9,ease:'power3.out',delay:.12});
+    gsap.from('.auth-card h1 .kin',{opacity:0,y:16,duration:.9,ease:'power3.out',delay:.26});
   }
   if(!hasWebGL()){ canvas.style.display='none'; return; }  // CSS gradient fallback shows
   let renderer;
-  try{ renderer=new THREE.WebGLRenderer({canvas,antialias:false,powerPreference:'high-performance'}); }
+  try{ renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference:'high-performance'}); }
   catch(e){ canvas.style.display='none'; return; }
   const isMobile=matchMedia('(max-width:768px)').matches;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, isMobile?1.5:2));
   const scene=new THREE.Scene();
-  const cam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
-  const uniforms={uTime:{value:0},uRes:{value:new THREE.Vector2()}};
-  const frag=`
-    precision highp float;
-    uniform float uTime; uniform vec2 uRes; varying vec2 vUv;
-    float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
-    float noise(vec2 p){vec2 i=floor(p),f=fract(p);vec2 u=f*f*(3.-2.*f);
-      return mix(mix(hash(i),hash(i+vec2(1,0)),u.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x),u.y);}
-    float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<5;i++){v+=a*noise(p);p*=2.03;a*=.5;}return v;}
-    float bayer2(vec2 a){a=floor(a);return fract(a.x/2.+a.y*a.y*.75);}
-    #define bayer4(a) (bayer2(.5*(a))*.25+bayer2(a))
-    #define bayer8(a) (bayer4(.5*(a))*.25+bayer2(a))
-    void main(){
-      vec2 uv=vUv; float asp=uRes.x/max(uRes.y,1.);
-      vec2 p=vec2(uv.x*asp,uv.y)*3.0; float t=uTime*.045;
-      float n=fbm(p+vec2(t,t*.6)+fbm(p*.8-t*.35));
-      n+=.38*pow(max(0.,1.-distance(uv,vec2(.28,.72))),2.0);
-      n+=.16*pow(max(0.,1.-distance(uv,vec2(.82,.32))),2.4);
-      float lum=clamp(n,0.,1.);
-      float dith=bayer8(gl_FragCoord.xy/3.0);
-      float q=floor(lum*5.0+dith)/5.0;                 // ordered-dither quantization
-      vec3 c1=vec3(.04,.035,.09), c2=vec3(.486,.42,1.0), c3=vec3(.133,.827,.933);
-      vec3 col=mix(c1,c2,smoothstep(.1,.75,q));
-      col=mix(col,c3,smoothstep(.62,1.0,q)*.8);
-      float d=distance(uv,vec2(.5)); col*=1.0-d*.4;
-      gl_FragColor=vec4(col,1.0);
-    }`;
-  const mat=new THREE.ShaderMaterial({uniforms,
-    vertexShader:`varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position,1.0);}`,
-    fragmentShader:frag});
-  scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat));
-  function resize(){renderer.setSize(innerWidth,innerHeight);
-    uniforms.uRes.value.set(innerWidth*renderer.getPixelRatio(),innerHeight*renderer.getPixelRatio());}
-  addEventListener('resize',resize);resize();
-  if(reduce){ uniforms.uTime.value=8.0; renderer.render(scene,cam); }   // static frame
-  else{ renderer.setAnimationLoop(t=>{uniforms.uTime.value=t*0.001;renderer.render(scene,cam);}); }
+  const cam=new THREE.PerspectiveCamera(62, innerWidth/innerHeight, .1, 100); cam.position.z=15;
+  // ── Particle field (cursor-reactive) ──
+  const N=isMobile?1600:4200;
+  const pos=new Float32Array(N*3), col=new Float32Array(N*3);
+  const cA=new THREE.Color(0x2563eb), cB=new THREE.Color(0x22d3ee);
+  for(let i=0;i<N;i++){
+    const r=6+Math.random()*7.5, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
+    pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos[i*3+2]=r*Math.cos(ph);
+    const c=cA.clone().lerp(cB, Math.random());
+    col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const mat=new THREE.PointsMaterial({size:isMobile?.06:.05,vertexColors:true,transparent:true,
+    opacity:.92,blending:THREE.AdditiveBlending,depthWrite:false});
+  const pts=new THREE.Points(geo,mat); scene.add(pts);
+  let mx=0,my=0,tx=0,ty=0;
+  addEventListener('mousemove',e=>{ mx=e.clientX/innerWidth-.5; my=e.clientY/innerHeight-.5; });
+  function resize(){ cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); }
+  addEventListener('resize',resize); resize();
+  function frame(t){
+    tx+=(mx-tx)*.045; ty+=(my-ty)*.045;
+    pts.rotation.y=(t||0)*0.00006 + tx*0.6;
+    pts.rotation.x=ty*0.4;
+    cam.position.x=tx*3.2; cam.position.y=-ty*3.2; cam.lookAt(0,0,0);
+    renderer.render(scene,cam);
+  }
+  if(reduce){ frame(0); }   // static frame, no RAF
+  else{ renderer.setAnimationLoop(frame); }
 })();
 </script>
 {% endblock %}

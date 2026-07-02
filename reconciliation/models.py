@@ -37,9 +37,29 @@ class MatchRun(TimeStampedModel):
     created_by = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True
     )
+    batch = models.ForeignKey(
+        "ReconBatch", on_delete=models.CASCADE, null=True, blank=True, related_name="runs"
+    )
 
     def __str__(self):
         return f"{self.get_relation_display()} #{self.pk}"
+
+
+class ReconBatch(TimeStampedModel):
+    """Satu sesi rekonsiliasi paralel untuk satu Toko + periode."""
+
+    toko = models.ForeignKey("sources.Toko", on_delete=models.PROTECT, null=True, blank=True)
+    tolerance = models.ForeignKey(ToleranceProfile, on_delete=models.PROTECT)
+    date_from = models.DateField(null=True, blank=True)
+    date_to = models.DateField(null=True, blank=True)
+    summary = models.JSONField(default=dict)
+    completeness = models.JSONField(default=dict)
+    created_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True
+    )
+
+    def __str__(self):
+        return f"Batch #{self.pk}"
 
 
 class MatchResult(TimeStampedModel):

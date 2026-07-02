@@ -21,6 +21,9 @@ class Transaction(TimeStampedModel):
     account = models.ForeignKey(
         "sources.Account", on_delete=models.SET_NULL, null=True, blank=True
     )
+    toko = models.ForeignKey(
+        "sources.Toko", on_delete=models.PROTECT, null=True, blank=True
+    )
 
     occurred_at = models.DateTimeField(
         null=True, blank=True, help_text="Waktu transaksi asli"

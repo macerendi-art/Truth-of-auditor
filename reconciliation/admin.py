@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import MatchResult, MatchRun, ReviewAction, ToleranceProfile
+from .models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
 
 
 @admin.register(ToleranceProfile)
@@ -27,3 +27,9 @@ class MatchResultAdmin(admin.ModelAdmin):
 @admin.register(ReviewAction)
 class ReviewActionAdmin(admin.ModelAdmin):
     list_display = ("id", "result", "action", "reviewer", "created_at")
+
+
+@admin.register(ReconBatch)
+class ReconBatchAdmin(admin.ModelAdmin):
+    list_display = ("id", "toko", "tolerance", "date_from", "date_to", "created_at")
+    list_filter = ("toko",)

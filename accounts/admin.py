@@ -8,4 +8,5 @@ from .models import User
 class CustomUserAdmin(UserAdmin):
     list_display = ("username", "email", "role", "is_staff", "is_active")
     list_filter = ("role", "is_staff", "is_active")
-    fieldsets = UserAdmin.fieldsets + (("Audit", {"fields": ("role",)}),)
+    filter_horizontal = UserAdmin.filter_horizontal + ("allowed_tokos",)
+    fieldsets = UserAdmin.fieldsets + (("Audit", {"fields": ("role", "allowed_tokos")}),)

@@ -5,12 +5,14 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 
-from reconciliation.engine import MATCHERS, run_match
-from reconciliation.models import MatchResult, MatchRun, ReviewAction, ToleranceProfile
+from reconciliation.engine import MATCHERS, check_completeness, run_batch, run_match
+from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
+from sources.detect import detect_source
 from sources.management.commands.ingest import detect_flow
 from sources.models import SourceType, Upload
 from sources.services import PARSERS, ingest
 from transactions.models import Transaction
+from web.access import tokos_for
 
 BUCKET_META = {
     "cocok": {"label": "Cocok", "cls": "ok"},
@@ -19,50 +21,107 @@ BUCKET_META = {
 }
 
 
+def _active_toko(request):
+    allowed = tokos_for(request.user)
+    tid = request.session.get("active_toko_id")
+    t = allowed.filter(id=tid).first() if tid else None
+    return t or allowed.first()
+
+
+@login_required
+def set_toko(request):
+    if request.method == "POST":
+        tid = request.POST.get("toko_id", "")
+        if tid.isdecimal() and tokos_for(request.user).filter(id=tid).exists():
+            request.session["active_toko_id"] = int(tid)
+    return redirect(request.POST.get("next") or "dashboard")
+
+
 @login_required
 def dashboard(request):
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    tx = Transaction.objects.filter(toko=active)
+    uploads = Upload.objects.filter(toko=active)
+    runs = MatchRun.objects.filter(batch__toko=active)
     by_source = list(
-        Transaction.objects.values("source_type__name", "source_type__key")
+        tx.values("source_type__name", "source_type__key")
         .annotate(n=Count("id"))
         .order_by("-n")
     )
     ctx = {
-        "tx_total": Transaction.objects.count(),
-        "upload_total": Upload.objects.count(),
-        "run_total": MatchRun.objects.count(),
+        "active_toko": active,
+        "tx_total": tx.count(),
+        "upload_total": uploads.count(),
+        "run_total": runs.count(),
         "by_source": by_source,
-        "uploads": Upload.objects.select_related("source_type").order_by("-id")[:8],
-        "runs": MatchRun.objects.order_by("-id")[:8],
+        "uploads": uploads.select_related("source_type").order_by("-id")[:8],
+        "runs": runs.order_by("-id")[:8],
     }
     return render(request, "web/dashboard.html", ctx)
 
 
 @login_required
 def upload(request):
-    if request.method == "POST":
-        f = request.FILES.get("file")
-        parser_key = request.POST.get("parser_key")
-        flow = request.POST.get("flow") or (detect_flow(f.name) if f else "")
-        if not f or parser_key not in PARSERS:
-            messages.error(request, "Pilih file dan jenis parser yang valid.")
-        else:
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    if request.method == "POST" and request.POST.get("action") == "commit":
+        staged = request.POST.getlist("staged")
+        keys = request.POST.getlist("parser_key")
+        flows = request.POST.getlist("flow")
+        provider = request.POST.get("provider", "")
+        n_ok = n_err = 0
+        for path_rel, key, flow in zip(staged, keys, flows):
+            if key not in PARSERS:
+                n_err += 1
+                continue
             try:
-                saved = default_storage.save(f"uploads/{f.name}", f)
-                up, created, dup = ingest(
-                    parser_key, default_storage.path(saved), flow=flow, user=request.user
+                ingest(
+                    key, default_storage.path(path_rel), flow=flow,
+                    user=request.user, toko=active, provider=provider,
                 )
-                messages.success(
-                    request, f"{f.name}: {created} transaksi dibuat, {dup} duplikat (Upload #{up.pk})."
-                )
+                n_ok += 1
             except Exception as e:  # noqa: BLE001 - tampilkan error parse ke user
-                messages.error(request, f"Gagal parse: {e}")
+                messages.error(request, f"{path_rel}: {e}")
+                n_err += 1
+            finally:
+                if default_storage.exists(path_rel):
+                    default_storage.delete(path_rel)
+        messages.success(request, f"{n_ok} file diproses, {n_err} gagal.")
         return redirect("upload")
-    return render(request, "web/upload.html", {"parsers": sorted(PARSERS.keys())})
+    if request.method == "POST" and request.POST.get("action") == "analyze":
+        preview = []
+        for f in request.FILES.getlist("files"):
+            saved = default_storage.save(f"staging/{f.name}", f)
+            cands = detect_source(default_storage.path(saved), f.name)
+            top = cands[0] if cands else None
+            preview.append({
+                "name": f.name,
+                "staged": saved,
+                "parser_key": top["parser_key"] if top else "",
+                "confidence": round(top["confidence"] * 100) if top else 0,
+                "needs_confirm": (top is None) or top["confidence"] < 0.8,
+                "flow": detect_flow(f.name),
+            })
+        return render(request, "web/upload.html", {
+            "preview": preview, "parsers": sorted(PARSERS.keys()),
+            "flows": ["", "dp", "wd"], "active_toko": active,
+            "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
+        })
+    return render(request, "web/upload.html", {
+        "parsers": sorted(PARSERS.keys()), "active_toko": active,
+        "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
+    })
 
 
 @login_required
 def transactions(request):
-    qs = Transaction.objects.select_related("source_type").order_by("-occurred_at")
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    qs = Transaction.objects.filter(toko=active).select_related("source_type").order_by("-occurred_at")
     src = request.GET.get("source", "")
     jenis = request.GET.get("jenis", "")
     q = request.GET.get("q", "").strip()
@@ -92,32 +151,43 @@ def transactions(request):
 
 @login_required
 def reconcile(request):
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
     if request.method == "POST":
-        rel = request.POST.get("relation")
-        if rel not in MATCHERS:
-            messages.error(request, "Relasi tidak didukung.")
-            return redirect("reconcile")
         tol = ToleranceProfile.objects.get(name=request.POST.get("tolerance", "Default"))
-        run = run_match(
-            rel,
-            tol,
+        batch = run_batch(
+            active, tol,
             request.POST.get("date_from") or None,
             request.POST.get("date_to") or None,
             user=request.user,
         )
-        messages.success(request, f"Rekonsiliasi selesai (Run #{run.pk}).")
-        return redirect("run_detail", pk=run.pk)
+        messages.success(request, f"Rekonsiliasi selesai (Batch #{batch.pk}).")
+        return redirect("batch_detail", pk=batch.pk)
+
+    df = request.GET.get("date_from") or None
+    dt = request.GET.get("date_to") or None
     ctx = {
-        "relations": [(r.value, r.label) for r in MatchRun.Relation if r.value in MATCHERS],
+        "active_toko": active,
+        "completeness": check_completeness(active, df, dt),
         "tolerances": ToleranceProfile.objects.all(),
-        "runs": MatchRun.objects.order_by("-id")[:20],
+        "batches": ReconBatch.objects.filter(toko=active).order_by("-id")[:20],
+        "date_from": df or "", "date_to": dt or "",
     }
     return render(request, "web/reconcile.html", ctx)
 
 
 @login_required
+def batch_detail(request, pk):
+    batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
+    return render(request, "web/batch_detail.html", {
+        "batch": batch, "s": batch.summary or {}, "runs": batch.runs.all(),
+    })
+
+
+@login_required
 def run_detail(request, pk):
-    run = get_object_or_404(MatchRun, pk=pk)
+    run = get_object_or_404(MatchRun, pk=pk, batch__toko__in=tokos_for(request.user))
     qs = MatchResult.objects.filter(run=run).select_related("left", "right").order_by("bucket", "-score")
     bucket = request.GET.get("bucket", "")
     if bucket:
@@ -129,7 +199,7 @@ def run_detail(request, pk):
 
 @login_required
 def review(request, pk):
-    r = get_object_or_404(MatchResult, pk=pk)
+    r = get_object_or_404(MatchResult, pk=pk, run__batch__toko__in=tokos_for(request.user))
     action = request.POST.get("action", "")
     reason = request.POST.get("reason", "")
     if action == "mark_matched":
@@ -152,7 +222,7 @@ def export_run(request, pk):
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
-    run = get_object_or_404(MatchRun, pk=pk)
+    run = get_object_or_404(MatchRun, pk=pk, batch__toko__in=tokos_for(request.user))
     wb = Workbook()
     ws = wb.active
     ws.title = "Ringkasan"
