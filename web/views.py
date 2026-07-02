@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from reconciliation.engine import MATCHERS, run_match
 from reconciliation.models import MatchResult, MatchRun, ReviewAction, ToleranceProfile
+from sources.detect import detect_source
 from sources.management.commands.ingest import detect_flow
 from sources.models import SourceType, Toko, Upload
 from sources.services import PARSERS, ingest
@@ -54,25 +55,30 @@ def dashboard(request):
 
 @login_required
 def upload(request):
-    if request.method == "POST":
-        f = request.FILES.get("file")
-        parser_key = request.POST.get("parser_key")
-        flow = request.POST.get("flow") or (detect_flow(f.name) if f else "")
-        if not f or parser_key not in PARSERS:
-            messages.error(request, "Pilih file dan jenis parser yang valid.")
-        else:
-            try:
-                saved = default_storage.save(f"uploads/{f.name}", f)
-                up, created, dup = ingest(
-                    parser_key, default_storage.path(saved), flow=flow, user=request.user
-                )
-                messages.success(
-                    request, f"{f.name}: {created} transaksi dibuat, {dup} duplikat (Upload #{up.pk})."
-                )
-            except Exception as e:  # noqa: BLE001 - tampilkan error parse ke user
-                messages.error(request, f"Gagal parse: {e}")
-        return redirect("upload")
-    return render(request, "web/upload.html", {"parsers": sorted(PARSERS.keys())})
+    active = _active_toko(request)
+    if request.method == "POST" and request.POST.get("action") == "analyze":
+        preview = []
+        for f in request.FILES.getlist("files"):
+            saved = default_storage.save(f"staging/{f.name}", f)
+            cands = detect_source(default_storage.path(saved), f.name)
+            top = cands[0] if cands else None
+            preview.append({
+                "name": f.name,
+                "staged": saved,
+                "parser_key": top["parser_key"] if top else "",
+                "confidence": round(top["confidence"] * 100) if top else 0,
+                "needs_confirm": (top is None) or top["confidence"] < 0.8,
+                "flow": detect_flow(f.name),
+            })
+        return render(request, "web/upload.html", {
+            "preview": preview, "parsers": sorted(PARSERS.keys()),
+            "flows": ["", "dp", "wd"], "active_toko": active,
+            "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
+        })
+    return render(request, "web/upload.html", {
+        "parsers": sorted(PARSERS.keys()), "active_toko": active,
+        "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
+    })
 
 
 @login_required

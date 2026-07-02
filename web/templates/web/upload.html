@@ -1,48 +1,60 @@
-{% extends "web/base.html" %}
+{% extends "web/app_base.html" %}
 {% block title %}Upload · Truth of Auditor{% endblock %}
 {% block content %}
-<div class="page-head reveal">
+<div class="page-head">
   <h1>Upload &amp; Parse</h1>
-  <p>Unggah file mentah — sistem menyeragamkannya ke format transaksi kanonik.</p>
+  <p>Lempar beberapa file sekaligus untuk <b>{{ active_toko.name }}</b> — sistem menentukan jenisnya otomatis.</p>
 </div>
 
-<div class="grid cols-2">
-  <div class="card reveal">
-    <form method="post" enctype="multipart/form-data">
-      {% csrf_token %}
-      <div class="field">
-        <label>Jenis Sumber / Parser</label>
-        <select name="parser_key" required>
-          <option value="">— pilih parser —</option>
-          {% for p in parsers %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="field">
-        <label>Flow (opsional — otomatis dari nama file)</label>
-        <select name="flow"><option value="">otomatis</option><option value="dp">Deposit (DP)</option><option value="wd">Withdraw (WD)</option></select>
-      </div>
-      <div class="field">
-        <label>File (xlsx / csv / pdf)</label>
-        <input type="file" name="file" required accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF">
-      </div>
-      <button class="btn primary" type="submit">Parse &amp; Simpan →</button>
-    </form>
-  </div>
+<div class="card">
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="analyze">
+    <div class="field">
+      <label>File (xlsx / csv / pdf) — bisa banyak</label>
+      <input type="file" name="files" multiple required accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF">
+    </div>
+    <button class="btn primary" type="submit">Analisa File →</button>
+  </form>
+</div>
 
-  <div class="card reveal">
-    <h3 style="margin:0 0 14px">Panduan Parser</h3>
+{% if preview %}
+<div class="card">
+  <h3 style="margin:0 0 12px">Preview — konfirmasi jenis sebelum simpan</h3>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="commit">
     <table>
-      <tbody style="font-size:13px">
-        <tr><td><b>panel</b></td><td class="faint">HISTORI DP/WD PANEL (kredit ×1000)</td></tr>
-        <tr><td><b>bracket</b></td><td class="faint">FR BRACKET (jembatan CS)</td></tr>
-        <tr><td><b>bri</b></td><td class="faint">Mutasi BRI (CSV)</td></tr>
-        <tr><td><b>bca_csv</b></td><td class="faint">Mutasi BCA (CSV)</td></tr>
-        <tr><td><b>bca_pdf</b></td><td class="faint">Rekening koran BCA (PDF)</td></tr>
-        <tr><td><b>mandiri</b></td><td class="faint">e-Statement Mandiri (xlsx)</td></tr>
-        <tr><td><b>nxpay</b></td><td class="faint">Gateway NXPAY (xlsx)</td></tr>
-        <tr><td><b>qrflyer</b></td><td class="faint">Gateway QR FLYER / QRIS (xlsx)</td></tr>
+      <thead><tr><th>File</th><th>Jenis terdeteksi</th><th>Keyakinan</th><th>DP/WD</th></tr></thead>
+      <tbody>
+      {% for p in preview %}
+      <tr>
+        <td>{{ p.name }}<input type="hidden" name="staged" value="{{ p.staged }}"></td>
+        <td>
+          <select name="parser_key" class="f">
+            {% for pk in parsers %}<option value="{{ pk }}" {% if pk == p.parser_key %}selected{% endif %}>{{ pk }}</option>{% endfor %}
+          </select>
+        </td>
+        <td>{% if p.needs_confirm %}<span class="badge warn">{{ p.confidence }}% — cek</span>{% else %}<span class="badge ok">{{ p.confidence }}%</span>{% endif %}</td>
+        <td>
+          <select name="flow" class="f">
+            <option value="" {% if p.flow == '' %}selected{% endif %}>otomatis</option>
+            <option value="dp" {% if p.flow == 'dp' %}selected{% endif %}>DP</option>
+            <option value="wd" {% if p.flow == 'wd' %}selected{% endif %}>WD</option>
+          </select>
+        </td>
+      </tr>
+      {% endfor %}
       </tbody>
     </table>
-  </div>
+    <div class="field" style="margin-top:12px;max-width:260px">
+      <label>Panel Provider (opsional)</label>
+      <input type="text" name="provider" placeholder="mis. Nexus">
+    </div>
+    <button class="btn primary" type="submit">Simpan &amp; Parse ({{ preview|length }} file)</button>
+  </form>
 </div>
+{% endif %}
+
+{% block upload_history %}{% endblock %}
 {% endblock %}
