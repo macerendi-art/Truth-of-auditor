@@ -13,4 +13,6 @@ urlpatterns = [
     path("run/<int:pk>/export/", views.export_run, name="export_run"),
     path("result/<int:pk>/review/", views.review, name="review"),
     path("kelola/toko/", admin_views.kelola_toko, name="kelola_toko"),
+    path("kelola/user/", admin_views.kelola_user, name="kelola_user"),
+    path("kelola/user/<int:pk>/", admin_views.kelola_user_edit, name="kelola_user_edit"),
 ]

@@ -48,3 +48,48 @@ class KelolaTokoCrudTests(TestCase):
         self.client.post(reverse("kelola_toko"), {"action": "toggle", "toko_id": t.id})
         t.refresh_from_db()
         self.assertFalse(t.is_active)
+
+
+class KelolaUserCreateTests(TestCase):
+    def setUp(self):
+        User.objects.create_user("adm", password="pw123456", role="admin")
+        self.client.login(username="adm", password="pw123456")
+        self.lbs = Toko.objects.get(key="lbs")
+
+    def _post(self, **over):
+        data = {
+            "username": "budi", "password": "rahasia123", "nama": "Budi S",
+            "role": "auditor", "tokos": [self.lbs.id],
+        }
+        data.update(over)
+        return self.client.post(reverse("kelola_user"), data)
+
+    def test_create_auditor(self):
+        self._post()
+        u = User.objects.get(username="budi")
+        self.assertEqual(u.first_name, "Budi S")
+        self.assertEqual(u.role, "auditor")
+        self.assertEqual(list(u.allowed_tokos.all()), [self.lbs])
+        self.assertTrue(u.check_password("rahasia123"))
+
+    def test_create_supervisor_tanpa_toko(self):
+        self._post(username="sinta", role="supervisor", tokos=[])
+        self.assertEqual(User.objects.get(username="sinta").allowed_tokos.count(), 0)
+
+    def test_auditor_tanpa_toko_ditolak(self):
+        self._post(username="tono", tokos=[])
+        self.assertFalse(User.objects.filter(username="tono").exists())
+
+    def test_password_pendek_ditolak(self):
+        self._post(username="tini", password="1234567")
+        self.assertFalse(User.objects.filter(username="tini").exists())
+
+    def test_username_duplikat_ditolak(self):
+        self._post()
+        self._post(nama="Budi 2")
+        self.assertEqual(User.objects.filter(username="budi").count(), 1)
+
+    def test_list_tampil(self):
+        r = self.client.get(reverse("kelola_user"))
+        self.assertContains(r, "adm")
+        self.assertContains(r, "Kelola Pengguna")

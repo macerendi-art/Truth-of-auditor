@@ -1,0 +1,63 @@
+{% extends "web/app_base.html" %}
+{% block title %}Kelola Pengguna · Truth of Auditor{% endblock %}
+{% block crumb %}Admin · Kelola Pengguna{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <h1>Kelola Pengguna</h1>
+  <p>Tambah admin, supervisor, atau auditor. Auditor hanya melihat toko yang dicentang.</p>
+</div>
+
+<div class="card reveal">
+  <h3>Tambah Pengguna</h3>
+  <form method="post">
+    {% csrf_token %}
+    <div class="row">
+      <div class="field"><label>Username</label><input name="username" required autocomplete="off"></div>
+      <div class="field"><label>Password (min. 8)</label><input name="password" type="password" minlength="8" required autocomplete="new-password"></div>
+      <div class="field"><label>Nama</label><input name="nama" placeholder="Nama lengkap"></div>
+      <div class="field"><label>Role</label>
+        <select name="role" class="f" id="roleSel">
+          {% for val, label in roles %}<option value="{{ val }}" {% if val == 'auditor' %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <div class="field" id="tokoPick" style="margin-top:8px">
+      <label>Toko untuk auditor (wajib ≥1)</label>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px">
+        {% for t in tokos %}
+        <label style="display:flex;gap:7px;align-items:center;font-weight:500;color:var(--ink);margin:0">
+          <input type="checkbox" name="tokos" value="{{ t.id }}" style="width:auto"> {{ t.name }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    <button class="btn primary" type="submit" style="margin-top:12px">+ Buat User</button>
+  </form>
+</div>
+<script>
+(function(){var s=document.getElementById('roleSel'),p=document.getElementById('tokoPick');
+  function sync(){p.style.display = s.value==='auditor' ? '' : 'none';}
+  s.addEventListener('change',sync);sync();})();
+</script>
+
+<div class="card reveal pad0" style="margin-top:16px">
+  <div style="padding:18px 20px 6px"><h3 style="margin:0">Daftar Pengguna</h3></div>
+  <div class="twrap" style="border:none">
+  <table>
+    <thead><tr><th>Username</th><th>Nama</th><th>Role</th><th>Toko</th><th>Status</th><th>Login terakhir</th><th></th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr>
+        <td style="font-weight:600">{{ u.username }}</td>
+        <td>{{ u.first_name|default:"—" }}</td>
+        <td><span class="badge src plain">{{ u.get_role_display }}</span></td>
+        <td class="faint">{% if u.role == 'auditor' %}{{ u.allowed_tokos.all|join:", "|default:"—" }}{% else %}semua{% endif %}</td>
+        <td>{% if u.is_active %}<span class="badge ok">aktif</span>{% else %}<span class="badge bad">nonaktif</span>{% endif %}</td>
+        <td class="faint">{{ u.last_login|date:"d/m H:i"|default:"—" }}</td>
+        <td class="r"><a class="btn sm" href="{% url 'kelola_user_edit' u.pk %}">Kelola →</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
