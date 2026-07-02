@@ -12,6 +12,7 @@ from sources.management.commands.ingest import detect_flow
 from sources.models import SourceType, Toko, Upload
 from sources.services import PARSERS, ingest
 from transactions.models import Transaction
+from web.access import tokos_for
 
 BUCKET_META = {
     "cocok": {"label": "Cocok", "cls": "ok"},
@@ -21,16 +22,17 @@ BUCKET_META = {
 
 
 def _active_toko(request):
+    allowed = tokos_for(request.user)
     tid = request.session.get("active_toko_id")
-    t = Toko.objects.filter(id=tid, is_active=True).first() if tid else None
-    return t or Toko.objects.filter(is_active=True).order_by("name").first()
+    t = allowed.filter(id=tid).first() if tid else None
+    return t or allowed.first()
 
 
 @login_required
 def set_toko(request):
     if request.method == "POST":
         tid = request.POST.get("toko_id")
-        if tid and Toko.objects.filter(id=tid, is_active=True).exists():
+        if tid and tokos_for(request.user).filter(id=tid).exists():
             request.session["active_toko_id"] = int(tid)
     return redirect(request.POST.get("next") or "dashboard")
 
@@ -38,6 +40,8 @@ def set_toko(request):
 @login_required
 def dashboard(request):
     active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
     tx = Transaction.objects.filter(toko=active)
     uploads = Upload.objects.filter(toko=active)
     runs = MatchRun.objects.filter(batch__toko=active)
@@ -61,6 +65,8 @@ def dashboard(request):
 @login_required
 def upload(request):
     active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
     if request.method == "POST" and request.POST.get("action") == "commit":
         staged = request.POST.getlist("staged")
         keys = request.POST.getlist("parser_key")
@@ -113,6 +119,8 @@ def upload(request):
 @login_required
 def transactions(request):
     active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
     qs = Transaction.objects.filter(toko=active).select_related("source_type").order_by("-occurred_at")
     src = request.GET.get("source", "")
     jenis = request.GET.get("jenis", "")
@@ -144,6 +152,8 @@ def transactions(request):
 @login_required
 def reconcile(request):
     active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
     if request.method == "POST":
         tol = ToleranceProfile.objects.get(name=request.POST.get("tolerance", "Default"))
         batch = run_batch(

@@ -8,7 +8,7 @@ from sources.models import Toko
 class TokoSelectorTests(TestCase):
     def setUp(self):
         User = get_user_model()
-        self.u = User.objects.create_user("aud", "a@a.co", "pw12345")
+        self.u = User.objects.create_user("aud", "a@a.co", "pw12345", role="supervisor")
         self.client.login(username="aud", password="pw12345")
 
     def test_set_toko_updates_session(self):

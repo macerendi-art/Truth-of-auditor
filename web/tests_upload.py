@@ -16,7 +16,7 @@ from sources.models import SourceType, Toko, Upload
 class UploadAnalyzeTests(TestCase):
     def setUp(self):
         User = get_user_model()
-        User.objects.create_user("aud", "a@a.co", "pw12345")
+        User.objects.create_user("aud", "a@a.co", "pw12345", role="supervisor")
         self.client.login(username="aud", password="pw12345")
 
     def test_analyze_detects_bri(self):
@@ -52,7 +52,7 @@ class _DummyBracket:
 class UploadCommitTests(TestCase):
     def setUp(self):
         User = get_user_model()
-        User.objects.create_user("aud", "a@a.co", "pw12345")
+        User.objects.create_user("aud", "a@a.co", "pw12345", role="supervisor")
         self.client.login(username="aud", password="pw12345")
         SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})
         self.lbs = Toko.objects.get(key="lbs")
@@ -76,7 +76,7 @@ class UploadCommitTests(TestCase):
 class UploadHistoryTests(TestCase):
     def setUp(self):
         User = get_user_model()
-        self.u = User.objects.create_user("aud", "a@a.co", "pw12345")
+        self.u = User.objects.create_user("aud", "a@a.co", "pw12345", role="supervisor")
         self.client.login(username="aud", password="pw12345")
         self.lbs = Toko.objects.get(key="lbs")
         self.slo = Toko.objects.get(key="slo")
