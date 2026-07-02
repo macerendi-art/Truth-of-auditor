@@ -9,7 +9,7 @@ from reconciliation.engine import MATCHERS, check_completeness, run_batch, run_m
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
 from sources.detect import detect_source
 from sources.management.commands.ingest import detect_flow
-from sources.models import SourceType, Toko, Upload
+from sources.models import SourceType, Upload
 from sources.services import PARSERS, ingest
 from transactions.models import Transaction
 from web.access import tokos_for
@@ -31,8 +31,8 @@ def _active_toko(request):
 @login_required
 def set_toko(request):
     if request.method == "POST":
-        tid = request.POST.get("toko_id")
-        if tid and tokos_for(request.user).filter(id=tid).exists():
+        tid = request.POST.get("toko_id", "")
+        if tid.isdigit() and tokos_for(request.user).filter(id=tid).exists():
             request.session["active_toko_id"] = int(tid)
     return redirect(request.POST.get("next") or "dashboard")
 
@@ -179,7 +179,7 @@ def reconcile(request):
 
 @login_required
 def batch_detail(request, pk):
-    batch = get_object_or_404(ReconBatch, pk=pk)
+    batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
     return render(request, "web/batch_detail.html", {
         "batch": batch, "s": batch.summary or {}, "runs": batch.runs.all(),
     })
@@ -187,7 +187,7 @@ def batch_detail(request, pk):
 
 @login_required
 def run_detail(request, pk):
-    run = get_object_or_404(MatchRun, pk=pk)
+    run = get_object_or_404(MatchRun, pk=pk, batch__toko__in=tokos_for(request.user))
     qs = MatchResult.objects.filter(run=run).select_related("left", "right").order_by("bucket", "-score")
     bucket = request.GET.get("bucket", "")
     if bucket:
@@ -199,7 +199,7 @@ def run_detail(request, pk):
 
 @login_required
 def review(request, pk):
-    r = get_object_or_404(MatchResult, pk=pk)
+    r = get_object_or_404(MatchResult, pk=pk, run__batch__toko__in=tokos_for(request.user))
     action = request.POST.get("action", "")
     reason = request.POST.get("reason", "")
     if action == "mark_matched":
@@ -222,7 +222,7 @@ def export_run(request, pk):
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
-    run = get_object_or_404(MatchRun, pk=pk)
+    run = get_object_or_404(MatchRun, pk=pk, batch__toko__in=tokos_for(request.user))
     wb = Workbook()
     ws = wb.active
     ws.title = "Ringkasan"

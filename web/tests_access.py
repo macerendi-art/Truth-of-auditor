@@ -75,3 +75,68 @@ class RbacScopeTests(TestCase):
         self.aud.allowed_tokos.clear()  # akses dicabut
         r = self.client.get(reverse("dashboard"))
         self.assertContains(r, "Tidak ada toko yang ditugaskan")
+
+
+class RbacObjectScopeTests(TestCase):
+    def setUp(self):
+        from datetime import datetime
+        from decimal import Decimal
+
+        from reconciliation.engine import run_batch
+        from reconciliation.models import ToleranceProfile
+        from sources.models import SourceType, Upload
+        from transactions.models import Transaction
+
+        self.lbs = Toko.objects.get(key="lbs")
+        self.slo = Toko.objects.get(key="slo")
+        tol = ToleranceProfile.objects.get_or_create(name="Default", defaults={"date_window_days": 1})[0]
+        panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        up = Upload.objects.create(source_type=panel, toko=self.slo)
+        for st, rh in [(panel, "s1"), (bank, "s2")]:
+            Transaction.objects.create(
+                upload=up, source_type=st, toko=self.slo, jenis="depo",
+                amount=Decimal("50000"), money_delta=Decimal("50000"),
+                occurred_at=datetime(2026, 6, 27, 10, 0), row_hash=rh,
+            )
+        self.slo_batch = run_batch(self.slo, tol)
+        self.slo_run = self.slo_batch.runs.first()
+        self.aud = User.objects.create_user("aud_lbs", password="pw123456", role="auditor")
+        self.aud.allowed_tokos.add(self.lbs)
+
+    def test_auditor_tidak_bisa_buka_batch_toko_lain(self):
+        self.client.login(username="aud_lbs", password="pw123456")
+        r = self.client.get(reverse("batch_detail", args=[self.slo_batch.pk]))
+        self.assertEqual(r.status_code, 404)
+
+    def test_auditor_tidak_bisa_buka_run_toko_lain(self):
+        self.client.login(username="aud_lbs", password="pw123456")
+        r = self.client.get(reverse("run_detail", args=[self.slo_run.pk]))
+        self.assertEqual(r.status_code, 404)
+        r = self.client.get(reverse("export_run", args=[self.slo_run.pk]))
+        self.assertEqual(r.status_code, 404)
+
+    def test_auditor_tidak_bisa_review_hasil_toko_lain(self):
+        self.client.login(username="aud_lbs", password="pw123456")
+        result = self.slo_run.results.first()
+        if result is None:  # run tanpa hasil — buat pasangan minimal agar test bermakna
+            self.skipTest("run tidak menghasilkan MatchResult")
+        r = self.client.post(reverse("review", args=[result.pk]), {"action": "mark_matched"})
+        self.assertEqual(r.status_code, 404)
+
+    def test_supervisor_bisa_buka_batch_mana_pun(self):
+        User.objects.create_user("sup_all", password="pw123456", role="supervisor")
+        self.client.login(username="sup_all", password="pw123456")
+        r = self.client.get(reverse("batch_detail", args=[self.slo_batch.pk]))
+        self.assertEqual(r.status_code, 200)
+
+    def test_auditor_bisa_buka_batch_tokonya_sendiri(self):
+        self.aud.allowed_tokos.add(self.slo)
+        self.client.login(username="aud_lbs", password="pw123456")
+        r = self.client.get(reverse("batch_detail", args=[self.slo_batch.pk]))
+        self.assertEqual(r.status_code, 200)
+
+    def test_set_toko_id_non_numerik_tidak_crash(self):
+        self.client.login(username="aud_lbs", password="pw123456")
+        r = self.client.post(reverse("set_toko"), {"toko_id": "abc"})
+        self.assertEqual(r.status_code, 302)  # redirect, bukan 500
