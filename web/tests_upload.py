@@ -71,3 +71,21 @@ class UploadCommitTests(TestCase):
         self.assertEqual(up.provider, "Nexus")
         self.assertEqual(up.rows_parsed, 1)
         self.assertFalse(default_storage.exists(staged))
+
+
+class UploadHistoryTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.u = User.objects.create_user("aud", "a@a.co", "pw12345")
+        self.client.login(username="aud", password="pw12345")
+        self.lbs = Toko.objects.get(key="lbs")
+        self.slo = Toko.objects.get(key="slo")
+        self.bracket = SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})[0]
+
+    def test_history_scoped_to_active_toko(self):
+        Upload.objects.create(source_type=self.bracket, toko=self.lbs, original_name="lbs-file.xlsx", uploaded_by=self.u)
+        Upload.objects.create(source_type=self.bracket, toko=self.slo, original_name="slo-file.xlsx", uploaded_by=self.u)
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
+        r = self.client.get(reverse("upload"))
+        self.assertContains(r, "lbs-file.xlsx")
+        self.assertNotContains(r, "slo-file.xlsx")
