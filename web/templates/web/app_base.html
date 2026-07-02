@@ -1,0 +1,76 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Truth of Auditor{% endblock %}</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<style>
+:root{--bg:#f6f7fb;--panel:#fff;--border:#e6e8ef;--text:#0f1424;--muted:#6b7280;
+  --brand:#2563eb;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--radius:12px;}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh}
+a{color:inherit;text-decoration:none}
+.side{width:210px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:16px 12px;position:sticky;top:0;height:100vh}
+.side .brand{font-weight:700;font-size:16px;padding:6px 10px 16px}
+.side a.link{display:block;padding:9px 12px;border-radius:9px;color:var(--muted);font-weight:500;font-size:14px;margin-bottom:2px}
+.side a.link:hover{background:var(--bg)}
+.side a.link.active{background:#eef2ff;color:var(--brand)}
+.side .spacer{flex:1}
+.side .user{font-size:12px;color:var(--muted);padding:10px}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:12px;padding:14px 26px;border-bottom:1px solid var(--border);background:var(--panel)}
+.topbar .spacer{flex:1}
+.topbar select{padding:8px 12px;border:1px solid var(--border);border-radius:9px;background:#fff;font-size:14px}
+.content{padding:26px;max-width:1200px;width:100%}
+.page-head h1{margin:0 0 4px;font-size:24px}
+.page-head p{margin:0 0 20px;color:var(--muted);font-size:14px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+.grid{display:grid;gap:14px}.cols-2{grid-template-columns:1fr 1fr}.cols-4{grid-template-columns:repeat(4,1fr)}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:5px}
+.field{margin-bottom:14px}
+input,select.f,.f{padding:9px 11px;border:1px solid var(--border);border-radius:9px;font-size:14px;width:100%;background:#fff}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:9px;border:1px solid var(--border);background:#fff;font-weight:600;font-size:14px;cursor:pointer}
+.btn.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--border)}
+th{color:var(--muted);font-weight:600}
+.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
+.badge.ok{background:#dcfce7;color:var(--ok)}.badge.warn{background:#fef3c7;color:var(--warn)}.badge.bad{background:#fee2e2;color:var(--bad)}
+.msg{padding:10px 14px;border-radius:9px;margin-bottom:10px;font-size:14px}
+.msg.success{background:#dcfce7}.msg.error{background:#fee2e2}
+.faint{color:var(--muted)}
+</style>
+</head>
+<body>
+<aside class="side">
+  <div class="brand">Truth of Auditor</div>
+  <a class="link" href="{% url 'dashboard' %}">Dashboard</a>
+  <a class="link" href="{% url 'upload' %}">Upload</a>
+  <a class="link" href="{% url 'transactions' %}">Transaksi</a>
+  <a class="link" href="{% url 'reconcile' %}">Rekonsiliasi</a>
+  <div class="spacer"></div>
+  <div class="user">{{ request.user.username }}<br><a class="faint" href="{% url 'logout' %}">Keluar</a></div>
+</aside>
+<div class="main">
+  <div class="topbar">
+    <div class="spacer"></div>
+    <form method="post" action="{% url 'set_toko' %}">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.path }}">
+      <select name="toko_id" class="f" onchange="this.form.submit()">
+        {% for t in all_tokos %}
+        <option value="{{ t.id }}" {% if active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+  <div class="content">
+    {% if messages %}{% for m in messages %}<div class="msg {{ m.tags }}">{{ m }}</div>{% endfor %}{% endif %}
+    {% block content %}{% endblock %}
+  </div>
+</div>
+</body>
+</html>

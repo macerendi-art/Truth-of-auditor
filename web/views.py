@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from reconciliation.engine import MATCHERS, run_match
 from reconciliation.models import MatchResult, MatchRun, ReviewAction, ToleranceProfile
 from sources.management.commands.ingest import detect_flow
-from sources.models import SourceType, Upload
+from sources.models import SourceType, Toko, Upload
 from sources.services import PARSERS, ingest
 from transactions.models import Transaction
 
@@ -17,6 +17,21 @@ BUCKET_META = {
     "perlu_tinjau": {"label": "Perlu Ditinjau", "cls": "warn"},
     "tidak_cocok": {"label": "Tidak Cocok", "cls": "bad"},
 }
+
+
+def _active_toko(request):
+    tid = request.session.get("active_toko_id")
+    t = Toko.objects.filter(id=tid, is_active=True).first() if tid else None
+    return t or Toko.objects.filter(is_active=True).order_by("name").first()
+
+
+@login_required
+def set_toko(request):
+    if request.method == "POST":
+        tid = request.POST.get("toko_id")
+        if tid and Toko.objects.filter(id=tid, is_active=True).exists():
+            request.session["active_toko_id"] = int(tid)
+    return redirect(request.POST.get("next") or "dashboard")
 
 
 @login_required
