@@ -8,6 +8,7 @@ urlpatterns = [
     path("upload/", views.upload, name="upload"),
     path("transactions/", views.transactions, name="transactions"),
     path("reconcile/", views.reconcile, name="reconcile"),
+    path("batch/<int:pk>/", views.batch_detail, name="batch_detail"),
     path("run/<int:pk>/", views.run_detail, name="run_detail"),
     path("run/<int:pk>/export/", views.export_run, name="export_run"),
     path("result/<int:pk>/review/", views.review, name="review"),

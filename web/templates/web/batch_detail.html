@@ -1,0 +1,54 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% block title %}Batch #{{ batch.pk }} · Rekonsiliasi{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Batch #{{ batch.pk }} — {{ batch.toko.name }}</h1>
+  <p>{{ batch.created_at|date:"d/m/Y H:i" }} · Toleransi {{ batch.tolerance.name }}</p>
+</div>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3 style="margin:0 0 12px">Deposit (DP)</h3>
+    <table>
+      <tr><td>Panel (koin)</td><td>{{ s.dp.panel|default:0|floatformat:0|intcomma }}</td></tr>
+      <tr><td>Uang real</td><td>{{ s.dp.money|default:0|floatformat:0|intcomma }}</td></tr>
+      <tr><td><b>Selisih</b></td><td>{% if s.dp.selisih == 0 %}<span class="badge ok">Balanced ✓</span>{% else %}<span class="badge warn">{{ s.dp.selisih|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 12px">Withdraw (WD)</h3>
+    <table>
+      <tr><td>Panel (koin)</td><td>{{ s.wd.panel|default:0|floatformat:0|intcomma }}</td></tr>
+      <tr><td>Uang real</td><td>{{ s.wd.money|default:0|floatformat:0|intcomma }}</td></tr>
+      <tr><td><b>Selisih</b></td><td>{% if s.wd.selisih == 0 %}<span class="badge ok">Balanced ✓</span>{% else %}<span class="badge warn">{{ s.wd.selisih|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin:0 0 12px">Ringkasan Bucket</h3>
+  <span class="badge ok">{{ s.buckets.cocok|default:0|intcomma }} cocok</span>
+  <span class="badge warn">{{ s.buckets.perlu_tinjau|default:0|intcomma }} tinjau</span>
+  <span class="badge bad">{{ s.buckets.tidak_cocok|default:0|intcomma }} tidak cocok</span>
+  {% if s.skipped %}<p class="faint" style="margin-top:10px">Dilewati (data tidak ada): {{ s.skipped|join:", " }}</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin:0 0 12px">Relasi</h3>
+  <table>
+    <thead><tr><th>Relasi</th><th>Cocok</th><th>Tinjau</th><th>Tidak</th><th></th></tr></thead>
+    <tbody>
+    {% for run in runs %}
+      <tr>
+        <td>{{ run.get_relation_display }}</td>
+        <td>{{ run.summary.cocok|default:0|intcomma }}</td>
+        <td>{{ run.summary.perlu_tinjau|default:0|intcomma }}</td>
+        <td>{{ run.summary.tidak_cocok|default:0|intcomma }}</td>
+        <td><a class="btn" href="{% url 'run_detail' run.pk %}">Detail →</a> <a class="btn" href="{% url 'export_run' run.pk %}">Excel</a></td>
+      </tr>
+    {% empty %}<tr><td colspan="5" class="faint">Tidak ada relasi dijalankan.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

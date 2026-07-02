@@ -5,8 +5,8 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 
-from reconciliation.engine import MATCHERS, run_match
-from reconciliation.models import MatchResult, MatchRun, ReviewAction, ToleranceProfile
+from reconciliation.engine import MATCHERS, check_completeness, run_batch, run_match
+from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
 from sources.detect import detect_source
 from sources.management.commands.ingest import detect_flow
 from sources.models import SourceType, Toko, Upload
@@ -137,27 +137,36 @@ def transactions(request):
 
 @login_required
 def reconcile(request):
+    active = _active_toko(request)
     if request.method == "POST":
-        rel = request.POST.get("relation")
-        if rel not in MATCHERS:
-            messages.error(request, "Relasi tidak didukung.")
-            return redirect("reconcile")
         tol = ToleranceProfile.objects.get(name=request.POST.get("tolerance", "Default"))
-        run = run_match(
-            rel,
-            tol,
+        batch = run_batch(
+            active, tol,
             request.POST.get("date_from") or None,
             request.POST.get("date_to") or None,
             user=request.user,
         )
-        messages.success(request, f"Rekonsiliasi selesai (Run #{run.pk}).")
-        return redirect("run_detail", pk=run.pk)
+        messages.success(request, f"Rekonsiliasi selesai (Batch #{batch.pk}).")
+        return redirect("batch_detail", pk=batch.pk)
+
+    df = request.GET.get("date_from") or None
+    dt = request.GET.get("date_to") or None
     ctx = {
-        "relations": [(r.value, r.label) for r in MatchRun.Relation if r.value in MATCHERS],
+        "active_toko": active,
+        "completeness": check_completeness(active, df, dt),
         "tolerances": ToleranceProfile.objects.all(),
-        "runs": MatchRun.objects.order_by("-id")[:20],
+        "batches": ReconBatch.objects.filter(toko=active).order_by("-id")[:20],
+        "date_from": df or "", "date_to": dt or "",
     }
     return render(request, "web/reconcile.html", ctx)
+
+
+@login_required
+def batch_detail(request, pk):
+    batch = get_object_or_404(ReconBatch, pk=pk)
+    return render(request, "web/batch_detail.html", {
+        "batch": batch, "s": batch.summary or {}, "runs": batch.runs.all(),
+    })
 
 
 @login_required
