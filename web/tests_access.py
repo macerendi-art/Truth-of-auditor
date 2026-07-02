@@ -140,3 +140,5 @@ class RbacObjectScopeTests(TestCase):
         self.client.login(username="aud_lbs", password="pw123456")
         r = self.client.post(reverse("set_toko"), {"toko_id": "abc"})
         self.assertEqual(r.status_code, 302)  # redirect, bukan 500
+        r2 = self.client.post(reverse("set_toko"), {"toko_id": "²"})
+        self.assertEqual(r2.status_code, 302)  # unicode digit tidak boleh 500

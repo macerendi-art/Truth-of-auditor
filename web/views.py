@@ -32,7 +32,7 @@ def _active_toko(request):
 def set_toko(request):
     if request.method == "POST":
         tid = request.POST.get("toko_id", "")
-        if tid.isdigit() and tokos_for(request.user).filter(id=tid).exists():
+        if tid.isdecimal() and tokos_for(request.user).filter(id=tid).exists():
             request.session["active_toko_id"] = int(tid)
     return redirect(request.POST.get("next") or "dashboard")
 
