@@ -1,14 +1,15 @@
 {% extends "web/app_base.html" %}
 {% load humanize %}
 {% block title %}Rekonsiliasi · Truth of Auditor{% endblock %}
+{% block crumb %}Rekonsiliasi{% endblock %}
 {% block content %}
-<div class="page-head">
+<div class="page-head reveal">
   <h1>Rekonsiliasi — {{ active_toko.name }}</h1>
   <p>Jalankan Panel↔Bracket &amp; Panel↔Bank/Gateway sekaligus. Cek kelengkapan dulu.</p>
 </div>
 
 <div class="grid cols-2">
-  <div class="card">
+  <div class="card reveal">
     <h3 style="margin:0 0 12px">Kelengkapan Data</h3>
     {% with c=completeness %}
     <table>
@@ -22,7 +23,7 @@
     {% endwith %}
   </div>
 
-  <div class="card">
+  <div class="card reveal">
     <h3 style="margin:0 0 12px">Jalankan</h3>
     <form method="post">
       {% csrf_token %}
@@ -37,21 +38,23 @@
   </div>
 </div>
 
-<div class="card">
-  <h3 style="margin:0 0 12px">Riwayat Batch</h3>
+<div class="card reveal" style="padding:0;overflow:hidden">
+  <div style="padding:18px 20px 6px"><h3 style="margin:0">Riwayat Batch</h3></div>
+  <div class="twrap" style="border:none">
   <table>
     <thead><tr><th>Batch</th><th>Waktu</th><th>DP selisih</th><th>WD selisih</th><th>Cocok</th></tr></thead>
     <tbody>
     {% for b in batches %}
       <tr>
-        <td><a href="{% url 'batch_detail' b.pk %}">#{{ b.pk }}</a></td>
+        <td><a class="grad-text" style="font-weight:600" href="{% url 'batch_detail' b.pk %}">#{{ b.pk }}</a></td>
         <td class="faint">{{ b.created_at|date:"d/m H:i" }}</td>
-        <td>{{ b.summary.dp.selisih|default:0|floatformat:0|intcomma }}</td>
-        <td>{{ b.summary.wd.selisih|default:0|floatformat:0|intcomma }}</td>
-        <td>{{ b.summary.buckets.cocok|default:0|intcomma }}</td>
+        <td class="num">{{ b.summary.dp.selisih|default:0|floatformat:0|intcomma }}</td>
+        <td class="num">{{ b.summary.wd.selisih|default:0|floatformat:0|intcomma }}</td>
+        <td><span class="badge ok">{{ b.summary.buckets.cocok|default:0|intcomma }}</span></td>
       </tr>
     {% empty %}<tr><td colspan="5" class="faint">Belum ada batch.</td></tr>{% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}

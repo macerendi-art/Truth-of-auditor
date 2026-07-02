@@ -1,29 +1,38 @@
 {% extends "web/app_base.html" %}
 {% block title %}Upload · Truth of Auditor{% endblock %}
+{% block crumb %}Upload &amp; Parse{% endblock %}
 {% block content %}
-<div class="page-head">
+<div class="page-head reveal">
   <h1>Upload &amp; Parse</h1>
   <p>Lempar beberapa file sekaligus untuk <b>{{ active_toko.name }}</b> — sistem menentukan jenisnya otomatis.</p>
 </div>
 
-<div class="card">
-  <form method="post" enctype="multipart/form-data">
+<div class="card reveal">
+  <form method="post" enctype="multipart/form-data" id="upform">
     {% csrf_token %}
     <input type="hidden" name="action" value="analyze">
-    <div class="field">
-      <label>File (xlsx / csv / pdf) — bisa banyak</label>
-      <input type="file" name="files" multiple required accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF">
-    </div>
-    <button class="btn primary" type="submit">Analisa File →</button>
+    <label class="dz" for="fileInput">
+      <div class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></div>
+      <div style="font-weight:600">Lepas file di sini atau klik untuk pilih</div>
+      <div class="faint" style="font-size:13px;margin-top:4px">xlsx · csv · pdf — bisa banyak sekaligus</div>
+      <div id="flist" class="faint" style="font-size:13px;margin-top:8px"></div>
+      <input id="fileInput" type="file" name="files" multiple required accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF" style="display:none">
+    </label>
+    <button class="btn primary" type="submit" style="margin-top:16px">Analisa File →</button>
   </form>
 </div>
+<script>
+(function(){var i=document.getElementById('fileInput'),l=document.getElementById('flist');
+  if(i)i.addEventListener('change',function(){l.textContent=i.files.length?[].map.call(i.files,function(f){return f.name;}).join(' · '):'';});})();
+</script>
 
 {% if preview %}
-<div class="card">
-  <h3 style="margin:0 0 12px">Preview — konfirmasi jenis sebelum simpan</h3>
+<div class="card reveal">
+  <h3>Preview — konfirmasi jenis sebelum simpan</h3>
   <form method="post">
     {% csrf_token %}
     <input type="hidden" name="action" value="commit">
+    <div class="twrap">
     <table>
       <thead><tr><th>File</th><th>Jenis terdeteksi</th><th>Keyakinan</th><th>DP/WD</th></tr></thead>
       <tbody>
@@ -47,7 +56,8 @@
       {% endfor %}
       </tbody>
     </table>
-    <div class="field" style="margin-top:12px;max-width:260px">
+    </div>
+    <div class="field" style="margin-top:14px;max-width:260px">
       <label>Panel Provider (opsional)</label>
       <input type="text" name="provider" placeholder="mis. Nexus">
     </div>
@@ -57,10 +67,11 @@
 {% endif %}
 
 {% load humanize %}
-<div class="card">
-  <h3 style="margin:0 0 12px">Riwayat Upload — {{ active_toko.name }}</h3>
+<div class="card reveal" style="padding:0;overflow:hidden">
+  <div style="padding:18px 20px 6px"><h3 style="margin:0">Riwayat Upload — {{ active_toko.name }}</h3></div>
+  <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>File</th><th>Jenis</th><th>Provider</th><th>DP/WD</th><th>Baris</th><th>Dup</th><th>Status</th><th>Oleh</th><th>Waktu</th></tr></thead>
+    <thead><tr><th>File</th><th>Jenis</th><th>Provider</th><th>DP/WD</th><th class="r">Baris</th><th class="r">Dup</th><th>Status</th><th>Oleh</th><th>Waktu</th></tr></thead>
     <tbody>
     {% for u in uploads %}
       <tr>
@@ -68,8 +79,8 @@
         <td>{{ u.source_type.name }}</td>
         <td>{{ u.provider|default:"—" }}</td>
         <td>{{ u.flow|default:"—" }}</td>
-        <td>{{ u.rows_parsed|intcomma }}</td>
-        <td>{{ u.rows_duplicate|intcomma }}</td>
+        <td class="r num">{{ u.rows_parsed|intcomma }}</td>
+        <td class="r num faint">{{ u.rows_duplicate|intcomma }}</td>
         <td>{% if u.status == 'parsed' %}<span class="badge ok">parsed</span>{% elif u.status == 'error' %}<span class="badge bad">error</span>{% else %}<span class="badge warn">{{ u.status }}</span>{% endif %}</td>
         <td>{{ u.uploaded_by.username|default:"—" }}</td>
         <td class="faint">{{ u.created_at|date:"d/m H:i" }}</td>
@@ -79,5 +90,6 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}
