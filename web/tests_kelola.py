@@ -93,3 +93,63 @@ class KelolaUserCreateTests(TestCase):
         r = self.client.get(reverse("kelola_user"))
         self.assertContains(r, "adm")
         self.assertContains(r, "Kelola Pengguna")
+
+
+class KelolaUserEditTests(TestCase):
+    def setUp(self):
+        self.adm = User.objects.create_user("adm", password="pw123456", role="admin")
+        self.client.login(username="adm", password="pw123456")
+        self.lbs = Toko.objects.get(key="lbs")
+        self.slo = Toko.objects.get(key="slo")
+        self.target = User.objects.create_user("budi", password="rahasia123", role="auditor")
+        self.target.allowed_tokos.add(self.lbs)
+        self.url = reverse("kelola_user_edit", args=[self.target.pk])
+
+    def test_save_ubah_nama_role_toko(self):
+        self.client.post(self.url, {
+            "action": "save", "nama": "Budi Baru", "role": "auditor",
+            "tokos": [self.lbs.id, self.slo.id],
+        })
+        self.target.refresh_from_db()
+        self.assertEqual(self.target.first_name, "Budi Baru")
+        self.assertEqual(self.target.allowed_tokos.count(), 2)
+
+    def test_save_auditor_tanpa_toko_ditolak(self):
+        self.client.post(self.url, {"action": "save", "nama": "X", "role": "auditor", "tokos": []})
+        self.target.refresh_from_db()
+        self.assertEqual(self.target.allowed_tokos.count(), 1)  # tak berubah
+
+    def test_naik_ke_supervisor_mengosongkan_toko(self):
+        self.client.post(self.url, {"action": "save", "nama": "", "role": "supervisor", "tokos": []})
+        self.target.refresh_from_db()
+        self.assertEqual(self.target.role, "supervisor")
+        self.assertEqual(self.target.allowed_tokos.count(), 0)
+
+    def test_reset_password(self):
+        self.client.post(self.url, {"action": "reset_password", "password": "barubanget9"})
+        self.target.refresh_from_db()
+        self.assertTrue(self.target.check_password("barubanget9"))
+
+    def test_reset_password_pendek_ditolak(self):
+        self.client.post(self.url, {"action": "reset_password", "password": "1234567"})
+        self.target.refresh_from_db()
+        self.assertTrue(self.target.check_password("rahasia123"))
+
+    def test_toggle_nonaktif_lalu_login_gagal(self):
+        self.client.post(self.url, {"action": "toggle"})
+        self.target.refresh_from_db()
+        self.assertFalse(self.target.is_active)
+        c2 = self.client.__class__()
+        self.assertFalse(c2.login(username="budi", password="rahasia123"))
+
+    def test_tidak_bisa_nonaktifkan_diri_sendiri(self):
+        url_self = reverse("kelola_user_edit", args=[self.adm.pk])
+        self.client.post(url_self, {"action": "toggle"})
+        self.adm.refresh_from_db()
+        self.assertTrue(self.adm.is_active)
+
+    def test_tidak_bisa_turunkan_role_sendiri(self):
+        url_self = reverse("kelola_user_edit", args=[self.adm.pk])
+        self.client.post(url_self, {"action": "save", "nama": "", "role": "auditor", "tokos": [self.lbs.id]})
+        self.adm.refresh_from_db()
+        self.assertEqual(self.adm.role, "admin")

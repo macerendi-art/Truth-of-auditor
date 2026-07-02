@@ -1,0 +1,60 @@
+{% extends "web/app_base.html" %}
+{% block title %}Kelola {{ target.username }} · Truth of Auditor{% endblock %}
+{% block crumb %}Admin · Pengguna · {{ target.username }}{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <h1>{{ target.username }}</h1>
+  <p>{{ target.get_role_display }} — {% if target.is_active %}aktif{% else %}nonaktif{% endif %} · <a href="{% url 'kelola_user' %}" class="grad-text" style="font-weight:600">← kembali</a></p>
+</div>
+
+<div class="grid cols-2">
+  <div class="card reveal">
+    <h3>Data &amp; Akses</h3>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save">
+      <div class="field"><label>Nama</label><input name="nama" value="{{ target.first_name }}"></div>
+      <div class="field"><label>Role</label>
+        <select name="role" class="f" id="roleSel">
+          {% for val, label in roles %}<option value="{{ val }}" {% if val == target.role %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select></div>
+      <div class="field" id="tokoPick">
+        <label>Toko untuk auditor (wajib ≥1)</label>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px">
+          {% for t in tokos %}
+          <label style="display:flex;gap:7px;align-items:center;font-weight:500;color:var(--ink);margin:0">
+            <input type="checkbox" name="tokos" value="{{ t.id }}" {% if t.id in target_toko_ids %}checked{% endif %} style="width:auto"> {{ t.name }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <button class="btn primary" type="submit">Simpan</button>
+    </form>
+  </div>
+
+  <div>
+    <div class="card reveal">
+      <h3>Reset Password</h3>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="reset_password">
+        <div class="field"><label>Password baru (min. 8)</label><input name="password" type="password" minlength="8" required autocomplete="new-password"></div>
+        <button class="btn" type="submit">Reset Password</button>
+      </form>
+    </div>
+    <div class="card reveal" style="margin-top:16px">
+      <h3>Status Akun</h3>
+      <form method="post" onsubmit="return confirm('{% if target.is_active %}Nonaktifkan{% else %}Aktifkan{% endif %} {{ target.username }}?')">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="toggle">
+        <button class="btn" type="submit">{% if target.is_active %}Nonaktifkan Akun{% else %}Aktifkan Akun{% endif %}</button>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+(function(){var s=document.getElementById('roleSel'),p=document.getElementById('tokoPick');
+  function sync(){p.style.display = s.value==='auditor' ? '' : 'none';}
+  s.addEventListener('change',sync);sync();})();
+</script>
+{% endblock %}

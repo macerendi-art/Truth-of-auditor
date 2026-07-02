@@ -76,6 +76,50 @@ def kelola_user(request):
 def kelola_user_edit(request, pk):
     User = get_user_model()
     target = get_object_or_404(User, pk=pk)
+    action = request.POST.get("action", "") if request.method == "POST" else ""
+
+    if action == "save":
+        nama = request.POST.get("nama", "").strip()
+        role = request.POST.get("role", target.role)
+        toko_ids = request.POST.getlist("tokos")
+        if role not in VALID_ROLES:
+            messages.error(request, "Role tidak dikenal.")
+        elif target == request.user and role != "admin":
+            messages.error(request, "Tidak bisa menurunkan role akunmu sendiri.")
+        elif role == "auditor" and not toko_ids:
+            messages.error(request, "Auditor wajib ditugaskan minimal 1 toko.")
+        else:
+            target.first_name = nama
+            target.role = role
+            target.save(update_fields=["first_name", "role"])
+            target.allowed_tokos.set(
+                Toko.objects.filter(id__in=toko_ids, is_active=True) if role == "auditor" else []
+            )
+            messages.success(request, f"User {target.username} diperbarui.")
+            return redirect("kelola_user")
+    elif action == "reset_password":
+        pw = request.POST.get("password", "")
+        if len(pw) < 8:
+            messages.error(request, "Password minimal 8 karakter.")
+        else:
+            target.set_password(pw)
+            target.save()
+            if target == request.user:
+                update_session_auth_hash(request, target)
+            messages.success(request, f"Password {target.username} di-reset.")
+            return redirect("kelola_user")
+    elif action == "toggle":
+        if target == request.user:
+            messages.error(request, "Tidak bisa menonaktifkan akunmu sendiri.")
+        else:
+            target.is_active = not target.is_active
+            target.save(update_fields=["is_active"])
+            messages.success(
+                request,
+                f"User {target.username} {'diaktifkan' if target.is_active else 'dinonaktifkan'}.",
+            )
+        return redirect("kelola_user")
+
     return render(request, "web/kelola/user_edit.html", {
         "target": target,
         "tokos": Toko.objects.filter(is_active=True).order_by("name"),
