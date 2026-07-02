@@ -18,6 +18,16 @@ class TokoModelTests(TestCase):
         self.assertTrue(Toko.objects.filter(key="lbs").exists())
         self.assertTrue(Toko.objects.filter(key="slo").exists())
 
+    def test_seed_16_toko(self):
+        keys = {
+            "ahk", "mul", "stn", "lbs", "w25", "m25", "mxw", "hks",
+            "bwn", "ltn", "wlg", "ssn", "ctr", "slo", "g25", "k25",
+        }
+        have = set(Toko.objects.values_list("key", flat=True))
+        self.assertTrue(keys <= have, f"kurang: {keys - have}")
+        self.assertEqual(Toko.objects.get(key="ahk").name, "AHK")
+        self.assertEqual(Toko.objects.filter(key="lbs").count(), 1)  # tidak duplikat
+
 
 _CANON = {
     "occurred_at": datetime(2026, 6, 27, 10, 0), "posted_date": None, "jenis": "depo",
