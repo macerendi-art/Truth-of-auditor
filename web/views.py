@@ -37,18 +37,23 @@ def set_toko(request):
 
 @login_required
 def dashboard(request):
+    active = _active_toko(request)
+    tx = Transaction.objects.filter(toko=active)
+    uploads = Upload.objects.filter(toko=active)
+    runs = MatchRun.objects.filter(batch__toko=active)
     by_source = list(
-        Transaction.objects.values("source_type__name", "source_type__key")
+        tx.values("source_type__name", "source_type__key")
         .annotate(n=Count("id"))
         .order_by("-n")
     )
     ctx = {
-        "tx_total": Transaction.objects.count(),
-        "upload_total": Upload.objects.count(),
-        "run_total": MatchRun.objects.count(),
+        "active_toko": active,
+        "tx_total": tx.count(),
+        "upload_total": uploads.count(),
+        "run_total": runs.count(),
         "by_source": by_source,
-        "uploads": Upload.objects.select_related("source_type").order_by("-id")[:8],
-        "runs": MatchRun.objects.order_by("-id")[:8],
+        "uploads": uploads.select_related("source_type").order_by("-id")[:8],
+        "runs": runs.order_by("-id")[:8],
     }
     return render(request, "web/dashboard.html", ctx)
 
@@ -107,7 +112,8 @@ def upload(request):
 
 @login_required
 def transactions(request):
-    qs = Transaction.objects.select_related("source_type").order_by("-occurred_at")
+    active = _active_toko(request)
+    qs = Transaction.objects.filter(toko=active).select_related("source_type").order_by("-occurred_at")
     src = request.GET.get("source", "")
     jenis = request.GET.get("jenis", "")
     q = request.GET.get("q", "").strip()
