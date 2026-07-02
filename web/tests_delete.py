@@ -66,3 +66,38 @@ class DeleteUploadTests(TestCase):
         self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
         r = self.client.get(reverse("upload"))
         self.assertContains(r, "/delete/")
+
+
+class DeleteBatchTests(TestCase):
+    def setUp(self):
+        from reconciliation.engine import run_batch
+        from reconciliation.models import ToleranceProfile
+        self.lbs = Toko.objects.get(key="lbs")
+        tol = ToleranceProfile.objects.get_or_create(name="Default", defaults={"date_window_days": 1})[0]
+        self.batch = run_batch(self.lbs, tol)
+        User.objects.create_user("adm", password="pw123456", role="admin")
+
+    def test_admin_hapus_batch_transaksi_utuh(self):
+        from datetime import datetime
+        from decimal import Decimal
+        from reconciliation.models import MatchRun, ReconBatch
+        st = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        up = Upload.objects.create(source_type=st, toko=self.lbs)
+        Transaction.objects.create(
+            upload=up, source_type=st, toko=self.lbs, jenis="depo",
+            amount=Decimal("1"), money_delta=Decimal("1"),
+            occurred_at=datetime(2026, 6, 27, 10, 0), row_hash="keep-1",
+        )
+        self.client.login(username="adm", password="pw123456")
+        r = self.client.post(reverse("delete_batch", args=[self.batch.pk]))
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(ReconBatch.objects.filter(pk=self.batch.pk).exists())
+        self.assertEqual(MatchRun.objects.filter(batch_id=self.batch.pk).count(), 0)
+        self.assertEqual(Transaction.objects.count(), 1)  # transaksi TIDAK ikut terhapus
+
+    def test_supervisor_ditolak(self):
+        from reconciliation.models import ReconBatch
+        User.objects.create_user("sup", password="pw123456", role="supervisor")
+        self.client.login(username="sup", password="pw123456")
+        self.client.post(reverse("delete_batch", args=[self.batch.pk]))
+        self.assertTrue(ReconBatch.objects.filter(pk=self.batch.pk).exists())

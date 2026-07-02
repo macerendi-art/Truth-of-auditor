@@ -3,9 +3,18 @@
 {% block title %}Batch #{{ batch.pk }} · Rekonsiliasi{% endblock %}
 {% block crumb %}Rekonsiliasi · Batch #{{ batch.pk }}{% endblock %}
 {% block content %}
-<div class="page-head reveal">
-  <h1>Batch #{{ batch.pk }} — {{ batch.toko.name }}</h1>
-  <p>{{ batch.created_at|date:"d/m/Y H:i" }} · Toleransi {{ batch.tolerance.name }}</p>
+<div class="page-head reveal" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+  <div>
+    <h1>Batch #{{ batch.pk }} — {{ batch.toko.name }}</h1>
+    <p>{{ batch.created_at|date:"d/m/Y H:i" }} · Toleransi {{ batch.tolerance.name }}</p>
+  </div>
+  {% if is_admin_user %}
+  <form method="post" action="{% url 'delete_batch' batch.pk %}"
+        onsubmit="return confirm('Hapus Batch #{{ batch.pk }}? Semua hasil rekonsiliasinya terhapus (transaksi tetap utuh).')">
+    {% csrf_token %}
+    <button class="btn" type="submit" style="color:var(--bad)">Hapus Laporan</button>
+  </form>
+  {% endif %}
 </div>
 
 <div class="grid cols-2">

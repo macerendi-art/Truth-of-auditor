@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model, update_session_auth_hash
 from django.db.models import Count
 from django.shortcuts import get_object_or_404, redirect, render
 
+from reconciliation.models import ReconBatch
 from sources.models import Toko, Upload
 from web.access import admin_required
 
@@ -139,3 +140,13 @@ def delete_upload(request, pk):
         up.delete()
         messages.success(request, f"{name} dihapus — {n_tx} transaksi ikut terhapus.")
     return redirect("upload")
+
+
+@admin_required
+def delete_batch(request, pk):
+    batch = get_object_or_404(ReconBatch, pk=pk)
+    if request.method == "POST":
+        n_runs = batch.runs.count()
+        batch.delete()
+        messages.success(request, f"Batch #{pk} dihapus — {n_runs} run ikut terhapus. Transaksi tetap utuh.")
+    return redirect("reconcile")
