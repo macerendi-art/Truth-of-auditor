@@ -153,3 +153,18 @@ class KelolaUserEditTests(TestCase):
         self.client.post(url_self, {"action": "save", "nama": "", "role": "auditor", "tokos": [self.lbs.id]})
         self.adm.refresh_from_db()
         self.assertEqual(self.adm.role, "admin")
+
+
+class SidebarAdminTests(TestCase):
+    def test_admin_melihat_menu_admin(self):
+        User.objects.create_user("adm", password="pw123456", role="admin")
+        self.client.login(username="adm", password="pw123456")
+        r = self.client.get(reverse("dashboard"))
+        self.assertContains(r, 'href="/kelola/user/"')
+        self.assertContains(r, 'href="/kelola/toko/"')
+
+    def test_supervisor_tidak_melihat_menu_admin(self):
+        u = User.objects.create_user("sup", password="pw123456", role="supervisor")
+        self.client.login(username="sup", password="pw123456")
+        r = self.client.get(reverse("dashboard"))
+        self.assertNotContains(r, 'href="/kelola/user/"')
