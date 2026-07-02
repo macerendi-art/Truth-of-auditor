@@ -56,6 +56,30 @@ def dashboard(request):
 @login_required
 def upload(request):
     active = _active_toko(request)
+    if request.method == "POST" and request.POST.get("action") == "commit":
+        staged = request.POST.getlist("staged")
+        keys = request.POST.getlist("parser_key")
+        flows = request.POST.getlist("flow")
+        provider = request.POST.get("provider", "")
+        n_ok = n_err = 0
+        for path_rel, key, flow in zip(staged, keys, flows):
+            if key not in PARSERS:
+                n_err += 1
+                continue
+            try:
+                ingest(
+                    key, default_storage.path(path_rel), flow=flow,
+                    user=request.user, toko=active, provider=provider,
+                )
+                n_ok += 1
+            except Exception as e:  # noqa: BLE001 - tampilkan error parse ke user
+                messages.error(request, f"{path_rel}: {e}")
+                n_err += 1
+            finally:
+                if default_storage.exists(path_rel):
+                    default_storage.delete(path_rel)
+        messages.success(request, f"{n_ok} file diproses, {n_err} gagal.")
+        return redirect("upload")
     if request.method == "POST" and request.POST.get("action") == "analyze":
         preview = []
         for f in request.FILES.getlist("files"):
