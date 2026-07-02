@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views
+from . import admin_views, views
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
@@ -12,4 +12,5 @@ urlpatterns = [
     path("run/<int:pk>/", views.run_detail, name="run_detail"),
     path("run/<int:pk>/export/", views.export_run, name="export_run"),
     path("result/<int:pk>/review/", views.review, name="review"),
+    path("kelola/toko/", admin_views.kelola_toko, name="kelola_toko"),
 ]
