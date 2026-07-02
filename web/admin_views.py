@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model, update_session_auth_hash
 from django.db.models import Count
 from django.shortcuts import get_object_or_404, redirect, render
 
-from sources.models import Toko
+from sources.models import Toko, Upload
 from web.access import admin_required
 
 
@@ -126,3 +126,16 @@ def kelola_user_edit(request, pk):
         "roles": User.Role.choices,
         "target_toko_ids": set(target.allowed_tokos.values_list("id", flat=True)),
     })
+
+
+@admin_required
+def delete_upload(request, pk):
+    up = get_object_or_404(Upload, pk=pk)
+    if request.method == "POST":
+        name = up.original_name or f"Upload #{up.pk}"
+        n_tx = up.transactions.count()
+        if up.file:
+            up.file.delete(save=False)
+        up.delete()
+        messages.success(request, f"{name} dihapus — {n_tx} transaksi ikut terhapus.")
+    return redirect("upload")

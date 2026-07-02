@@ -71,7 +71,7 @@
   <div style="padding:18px 20px 6px"><h3 style="margin:0">Riwayat Upload — {{ active_toko.name }}</h3></div>
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>File</th><th>Jenis</th><th>Provider</th><th>DP/WD</th><th class="r">Baris</th><th class="r">Dup</th><th>Status</th><th>Oleh</th><th>Waktu</th></tr></thead>
+    <thead><tr><th>File</th><th>Jenis</th><th>Provider</th><th>DP/WD</th><th class="r">Baris</th><th class="r">Dup</th><th>Status</th><th>Oleh</th><th>Waktu</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
     <tbody>
     {% for u in uploads %}
       <tr>
@@ -84,9 +84,18 @@
         <td>{% if u.status == 'parsed' %}<span class="badge ok">parsed</span>{% elif u.status == 'error' %}<span class="badge bad">error</span>{% else %}<span class="badge warn">{{ u.status }}</span>{% endif %}</td>
         <td>{{ u.uploaded_by.username|default:"—" }}</td>
         <td class="faint">{{ u.created_at|date:"d/m H:i" }}</td>
+        {% if is_admin_user %}
+        <td class="r">
+          <form method="post" action="{% url 'delete_upload' u.pk %}" style="display:inline"
+                onsubmit="return confirm('Hapus {{ u.original_name|default:u.pk }}? {{ u.rows_parsed }} baris transaksi ikut terhapus. Tidak bisa dibatalkan.')">
+            {% csrf_token %}
+            <button class="btn sm ghost" type="submit" style="color:var(--bad)">Hapus</button>
+          </form>
+        </td>
+        {% endif %}
       </tr>
     {% empty %}
-      <tr><td colspan="9" class="faint">Belum ada upload untuk toko ini.</td></tr>
+      <tr><td colspan="{% if is_admin_user %}10{% else %}9{% endif %}" class="faint">Belum ada upload untuk toko ini.</td></tr>
     {% endfor %}
     </tbody>
   </table>
