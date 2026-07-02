@@ -51,6 +51,9 @@ class Account(TimeStampedModel):
     account_no = models.CharField(max_length=64, blank=True)
     flow = models.CharField(max_length=5, choices=FLOW_CHOICES, default=BOTH)
     is_active = models.BooleanField(default=True)
+    toko = models.ForeignKey(
+        "sources.Toko", on_delete=models.SET_NULL, null=True, blank=True
+    )
 
     def __str__(self):
         return f"{self.provider} {self.name}".strip()
@@ -91,6 +94,10 @@ class Upload(TimeStampedModel):
 
     source_type = models.ForeignKey(SourceType, on_delete=models.PROTECT)
     account = models.ForeignKey(Account, on_delete=models.SET_NULL, null=True, blank=True)
+    toko = models.ForeignKey(
+        "sources.Toko", on_delete=models.PROTECT, null=True, blank=True
+    )
+    provider = models.CharField(max_length=50, blank=True, help_text="Panel provider, mis. Nexus")
     template = models.ForeignKey(
         ColumnTemplate, on_delete=models.SET_NULL, null=True, blank=True
     )
