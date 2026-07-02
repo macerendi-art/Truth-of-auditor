@@ -40,15 +40,38 @@ def _date_filter(qs, dfrom, dto):
     return qs
 
 
+def _toko_filter(qs, toko):
+    return qs.filter(toko=toko) if toko is not None else qs
+
+
+def check_completeness(toko, date_from=None, date_to=None):
+    qs = _toko_filter(Transaction.objects.filter(is_duplicate=False), toko)
+    qs = _date_filter(qs, date_from, date_to)
+
+    def has(**kw):
+        return qs.filter(**kw).exists()
+
+    comp = {
+        "panel_dp": has(source_type__key="panel", jenis="depo"),
+        "panel_wd": has(source_type__key="panel", jenis="wd"),
+        "bracket": has(source_type__key="bracket"),
+        "bank": has(source_type__key="bank"),
+        "gateway": has(source_type__key="gateway"),
+    }
+    comp["panel"] = comp["panel_dp"] or comp["panel_wd"]
+    comp["minimum_met"] = comp["panel"] and (comp["bank"] or comp["gateway"])
+    return comp
+
+
 class PanelBracketMatcher:
     """Join via Ticket Number (kuat). Cek kecocokan nominal."""
 
-    def sides(self, dfrom, dto):
+    def sides(self, dfrom, dto, toko=None):
         left = _date_filter(
-            Transaction.objects.filter(source_type__key="panel", is_duplicate=False), dfrom, dto
+            _toko_filter(Transaction.objects.filter(source_type__key="panel", is_duplicate=False), toko), dfrom, dto
         )
         right = _date_filter(
-            Transaction.objects.filter(source_type__key="bracket", is_duplicate=False).exclude(ticket_no=""),
+            _toko_filter(Transaction.objects.filter(source_type__key="bracket", is_duplicate=False).exclude(ticket_no=""), toko),
             dfrom, dto,
         )
         return list(left), list(right)
@@ -89,14 +112,16 @@ class _MoneyMatcher:
 
     left_key = "panel"
 
-    def sides(self, dfrom, dto):
+    def sides(self, dfrom, dto, toko=None):
         left = _date_filter(
-            Transaction.objects.filter(source_type__key=self.left_key, is_duplicate=False)
-            .filter(jenis__in=["depo", "wd"]),
+            _toko_filter(
+                Transaction.objects.filter(source_type__key=self.left_key, is_duplicate=False).filter(jenis__in=["depo", "wd"]),
+                toko,
+            ),
             dfrom, dto,
         )
         right = _date_filter(
-            Transaction.objects.filter(source_type__key__in=MONEY_SOURCES, is_duplicate=False), dfrom, dto
+            _toko_filter(Transaction.objects.filter(source_type__key__in=MONEY_SOURCES, is_duplicate=False), toko), dfrom, dto
         )
         return list(left), list(right)
 
@@ -152,13 +177,14 @@ MATCHERS = {
 }
 
 
-def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None):
+def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None, toko=None, batch=None):
     tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
     matcher = MATCHERS[relation]()
     run = MatchRun.objects.create(
-        relation=relation, tolerance=tolerance, date_from=date_from, date_to=date_to, created_by=user
+        relation=relation, tolerance=tolerance, date_from=date_from, date_to=date_to,
+        created_by=user, batch=batch,
     )
-    left, right = matcher.sides(date_from, date_to)
+    left, right = matcher.sides(date_from, date_to, toko)
     results = matcher.match(run, left, right)
     with db_tx.atomic():
         MatchResult.objects.bulk_create(results, batch_size=2000)
