@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import Account, ColumnTemplate, SourceType, Upload
+from .models import Account, ColumnTemplate, SourceType, Toko, Upload
+
+
+@admin.register(Toko)
+class TokoAdmin(admin.ModelAdmin):
+    list_display = ("name", "key", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("name", "key")
 
 
 @admin.register(SourceType)
