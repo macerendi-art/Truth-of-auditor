@@ -66,6 +66,14 @@ Akses: decorator `@admin_required` (`login_required` + role admin/superuser). No
 - **Tambah:** input kode saja → `key=lower`, `name=UPPER`; unik.
 - **Aktif/Nonaktif.** Tanpa hapus (toko ber-FK ke Transaction/Upload/Account/ReconBatch).
 
+### 6.3 Hapus data — admin-only, di halaman yang sudah ada
+
+Tombol hapus muncul **hanya untuk admin/superuser** dan dicek ulang server-side (`admin_required` di view POST); auditor/supervisor tidak melihat tombol dan POST-nya ditolak.
+
+- **Hapus Upload** (tabel riwayat di halaman Upload): menghapus record Upload + **file fisik di storage** + seluruh Transaction hasil parse-nya (CASCADE) + MatchResult/ReviewAction yang menyentuh transaksi itu (CASCADE). Dialog konfirmasi menampilkan dampak (nama file, jumlah transaksi ikut terhapus).
+- **Hapus Laporan** (daftar batch di halaman Rekonsiliasi & tombol di batch detail): menghapus ReconBatch + MatchRun + MatchResult + ReviewAction (CASCADE). **Transaksi tidak tersentuh** — rekonsiliasi bisa diulang. Dialog konfirmasi menampilkan nomor batch & jumlah run.
+- Semua hapus via POST + konfirmasi (tanpa GET-delete).
+
 ## 7. Struktur kode
 
 | Unit | Isi |
@@ -93,6 +101,7 @@ Tanpa perubahan template login; tanpa perubahan model selain di atas.
 - **RBAC scoping:** auditor tak bisa `set_toko` ke toko yang tak ditugaskan; dropdown terfilter; supervisor melihat semua; auditor tanpa toko → empty-state.
 - **Kelola user:** create (termasuk validasi auditor-≥1-toko & password <8 ditolak), edit role/toko, reset password, nonaktif→login gagal, self-protection.
 - **Kelola toko:** create (normalisasi case, duplikat ditolak), nonaktif → hilang dari dropdown & `tokos_for`.
+- **Hapus data:** admin hapus upload → transaksi & file storage ikut hilang; admin hapus batch → run/result hilang tapi transaksi utuh; auditor/supervisor POST hapus → ditolak; tombol tak dirender untuk non-admin.
 - **Seed:** migration menghasilkan tepat 16 toko, idempotent, LBS/SLO tak terduplikasi.
 
 ## 10. Di luar cakupan (spec berikutnya)
