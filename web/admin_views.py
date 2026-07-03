@@ -152,9 +152,10 @@ def delete_upload(request, pk):
 def delete_batch(request, pk):
     batch = get_object_or_404(ReconBatch, pk=pk)
     if request.method == "POST":
+        no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
         n_runs = batch.runs.count()
         batch.delete()
-        messages.success(request, f"Batch #{pk} dihapus — {n_runs} run ikut terhapus. Transaksi tetap utuh.")
+        messages.success(request, f"Batch #{no} dihapus — {n_runs} run ikut terhapus. Transaksi tetap utuh.")
     return redirect("reconcile")
 
 

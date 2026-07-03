@@ -180,16 +180,21 @@ def reconcile(request):
             request.POST.get("date_to") or None,
             user=request.user,
         )
-        messages.success(request, f"Rekonsiliasi selesai (Batch #{batch.pk}).")
+        no = ReconBatch.objects.filter(toko=active).count()
+        messages.success(request, f"Rekonsiliasi selesai (Batch #{no}).")
         return redirect("batch_detail", pk=batch.pk)
 
     df = request.GET.get("date_from") or None
     dt = request.GET.get("date_to") or None
+    batches = list(ReconBatch.objects.filter(toko=active).order_by("-id")[:20])
+    total = ReconBatch.objects.filter(toko=active).count()
+    for i, b in enumerate(batches):
+        b.no = total - i
     ctx = {
         "active_toko": active,
         "completeness": check_completeness(active, df, dt),
         "tolerances": ToleranceProfile.objects.all(),
-        "batches": ReconBatch.objects.filter(toko=active).order_by("-id")[:20],
+        "batches": batches,
         "date_from": df or "", "date_to": dt or "",
     }
     return render(request, "web/reconcile.html", ctx)
@@ -198,8 +203,9 @@ def reconcile(request):
 @login_required
 def batch_detail(request, pk):
     batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
+    batch_no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
     return render(request, "web/batch_detail.html", {
-        "batch": batch, "s": batch.summary or {}, "runs": batch.runs.all(),
+        "batch": batch, "batch_no": batch_no, "s": batch.summary or {}, "runs": batch.runs.all(),
     })
 
 
