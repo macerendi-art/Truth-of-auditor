@@ -149,6 +149,27 @@ table.flush{border:none} table.flush thead th{background:none}
 .dz:hover{border-color:var(--brand);background:#f2f6ff}
 .dz .di{width:46px;height:46px;border-radius:12px;background:#eef2ff;color:var(--brand);display:grid;place-items:center;margin:0 auto 12px}
 .dz .di svg{width:22px;height:22px}
+
+/* ---- POPUP PENGINGAT TOKO ---- */
+.reminder-overlay{position:fixed;inset:0;background:rgba(12,19,34,.6);backdrop-filter:blur(4px);z-index:100;
+  display:flex;align-items:center;justify-content:center;padding:20px}
+.reminder-card{background:var(--panel);border-radius:16px;box-shadow:var(--shadow-lg);max-width:460px;width:100%;padding:26px;
+  animation:reminder-in .22s ease-out}
+@media(prefers-reduced-motion: reduce){.reminder-card{animation:none}}
+@keyframes reminder-in{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+.reminder-card .ic{width:38px;height:38px;border-radius:10px;background:var(--grad);color:#fff;display:grid;place-items:center;margin-bottom:10px}
+.reminder-card .ic svg{width:19px;height:19px}
+.reminder-card .kicker{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);font-weight:600;margin-bottom:14px}
+.reminder-card h2{font-family:'Sora';font-size:19px;margin:0 0 10px}
+.reminder-card p.desc{font-size:14.5px;color:var(--muted);line-height:1.7;margin:0 0 18px}
+.reminder-card .toko-field{margin-bottom:18px}
+.reminder-card .toko-field small{display:block;margin-top:6px;font-size:12.5px;color:var(--faint)}
+.reminder-card .divider{height:1px;background:var(--line);margin:0 0 16px}
+.reminder-card .credit-intro{font-size:12.5px;color:var(--faint);margin:0 0 10px}
+.reminder-card .credit{font-size:13.5px;line-height:1.6;color:var(--muted);margin:0 0 8px}
+.reminder-card .credit b{color:var(--ink)}
+.reminder-card .credit a{color:var(--brand)}
+.reminder-card .btn.primary{width:100%;justify-content:center;margin-top:6px}
 </style>
 {% block head %}{% endblock %}
 </head>
@@ -239,6 +260,45 @@ table.flush{border:none} table.flush thead th{background:none}
   if(document.readyState!=='loading') run(); else document.addEventListener('DOMContentLoaded', run);
 })();
 </script>
+{% if show_toko_reminder %}
+<div class="reminder-overlay" id="reminderOverlay">
+  <div class="reminder-card" role="dialog" aria-modal="true" aria-labelledby="reminderTitle">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M3 9h18"/></svg></span>
+    <div class="kicker">Pengingat</div>
+    <h2 id="reminderTitle">Pastikan toko aktif sudah tepat</h2>
+    <p class="desc">Setiap berkas yang diunggah dan setiap rekonsiliasi tercatat atas nama toko yang sedang aktif. Sebelum mengunggah atau mencocokkan laporan, pastikan dulu toko di bawah ini sudah benar — ketelitian di langkah kecil ini menjaga hasil audit tetap bersih dan dapat dipertanggungjawabkan.</p>
+    {% if all_tokos %}
+    <div class="toko-field">
+      <label>Toko aktif</label>
+      <form method="post" action="{% url 'set_toko' %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <select name="toko_id" onchange="this.form.submit()">
+          {% for t in all_tokos %}
+          <option value="{{ t.id }}" {% if active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      <small>Ganti di sini bila belum sesuai.</small>
+    </div>
+    {% endif %}
+    <div class="divider"></div>
+    <p class="credit-intro">Terima kasih — panel ini berkembang berkat wawasan dari:</p>
+    <p class="credit"><b>Sendy Auditor</b> — untuk arahan UI/UX yang merapikan tampilan dan alur kerja panel ini. <a href="https://draw-to-data-magic.lovable.app/app" target="_blank" rel="noopener">draw-to-data-magic</a></p>
+    <p class="credit"><b>Pak Bertus DM</b> — untuk gagasan verifikasi Panel ↔ Bank yang menjadi fondasi rekonsiliasi. <a href="https://checkerboard.online/" target="_blank" rel="noopener">checkerboard.online</a></p>
+    <button type="button" class="btn primary" id="reminderClose">Lanjut →</button>
+  </div>
+</div>
+<script>
+(function(){
+  var overlay = document.getElementById('reminderOverlay');
+  function tutup(){ overlay.remove(); }
+  document.getElementById('reminderClose').addEventListener('click', tutup);
+  overlay.addEventListener('click', function(e){ if(e.target === overlay) tutup(); });
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') tutup(); });
+})();
+</script>
+{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>
