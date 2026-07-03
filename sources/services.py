@@ -50,7 +50,7 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
             uploaded_by=user,
         )
         existing = set(
-            Transaction.objects.filter(source_type=st).values_list("row_hash", flat=True)
+            Transaction.objects.filter(source_type=st, toko=toko).values_list("row_hash", flat=True)
         )
         objs, seen, dup = [], set(), 0
         for row in rows:
