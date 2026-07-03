@@ -50,6 +50,17 @@
         <button class="btn" type="submit">{% if target.is_active %}Nonaktifkan Akun{% else %}Aktifkan Akun{% endif %}</button>
       </form>
     </div>
+    {% if target != request.user %}
+    <div class="card reveal" style="margin-top:16px">
+      <h3>Hapus Akun</h3>
+      <p class="faint" style="margin-top:0">Menghapus akun secara permanen. Data (upload, batch) tetap ada tetapi tanpa atribusi.</p>
+      <form method="post" action="{% url 'delete_user' target.pk %}"
+            onsubmit="return confirm('Hapus PERMANEN pengguna {{ target.username }}? Akun ini tidak bisa dikembalikan.')">
+        {% csrf_token %}
+        <button class="btn" type="submit" style="color:#dc2828">Hapus Permanen</button>
+      </form>
+    </div>
+    {% endif %}
   </div>
 </div>
 <script>

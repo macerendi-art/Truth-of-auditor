@@ -1,8 +1,14 @@
+import shutil
+import tempfile
+
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core.files.base import ContentFile
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from sources.models import Toko
+from reconciliation.models import ReconBatch, ToleranceProfile
+from sources.models import SourceType, Toko, Upload
+from transactions.models import Transaction
 
 User = get_user_model()
 
@@ -172,3 +178,82 @@ class SidebarAdminTests(TestCase):
         self.client.login(username="sup", password="pw123456")
         r = self.client.get(reverse("dashboard"))
         self.assertNotContains(r, 'href="/kelola/user/"')
+
+
+def _seed_toko_data(toko):
+    """Beri satu toko: 1 Upload (+file), 1 Transaction, 1 ReconBatch."""
+    st = SourceType.objects.get(key="panel")
+    tol = ToleranceProfile.objects.get(name="Default")
+    up = Upload.objects.create(source_type=st, toko=toko, original_name=f"{toko.key}.csv")
+    up.file.save(f"{toko.key}.csv", ContentFile(b"a,b\n1,2\n"), save=True)
+    Transaction.objects.create(upload=up, source_type=st, toko=toko, row_hash=f"h-{toko.key}")
+    batch = ReconBatch.objects.create(toko=toko, tolerance=tol)
+    return up, batch
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="toa-test-media-"))
+class DeleteTokoTests(TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._overridden_settings["MEDIA_ROOT"], ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        self.adm = User.objects.create_user("adm", password="pw123456", role="admin")
+        self.client.login(username="adm", password="pw123456")
+        self.lbs = Toko.objects.get(key="lbs")
+        self.slo = Toko.objects.get(key="slo")
+        self.lbs_up, self.lbs_batch = _seed_toko_data(self.lbs)
+        self.slo_up, self.slo_batch = _seed_toko_data(self.slo)
+
+    def test_hapus_toko_wipes_semua_data_toko_lain_utuh(self):
+        r = self.client.post(reverse("delete_toko", args=[self.lbs.pk]))
+        self.assertEqual(r.status_code, 302)
+        # Toko lbs + seluruh datanya hilang.
+        self.assertFalse(Toko.objects.filter(pk=self.lbs.pk).exists())
+        self.assertFalse(Transaction.objects.filter(toko=self.lbs).exists())
+        self.assertFalse(Upload.objects.filter(toko=self.lbs).exists())
+        self.assertFalse(ReconBatch.objects.filter(toko=self.lbs).exists())
+        # Toko slo tetap utuh.
+        self.assertTrue(Toko.objects.filter(pk=self.slo.pk).exists())
+        self.assertEqual(Transaction.objects.filter(toko=self.slo).count(), 1)
+        self.assertEqual(Upload.objects.filter(toko=self.slo).count(), 1)
+        self.assertEqual(ReconBatch.objects.filter(toko=self.slo).count(), 1)
+
+    def test_hapus_toko_get_tidak_menghapus(self):
+        # POST-guarded: GET tidak boleh menghapus.
+        self.client.get(reverse("delete_toko", args=[self.lbs.pk]))
+        self.assertTrue(Toko.objects.filter(pk=self.lbs.pk).exists())
+
+    def test_hapus_toko_ditolak_non_admin(self):
+        User.objects.create_user("aud", password="pw123456", role="auditor")
+        c2 = self.client.__class__()
+        c2.login(username="aud", password="pw123456")
+        r = c2.post(reverse("delete_toko", args=[self.lbs.pk]), follow=True)
+        self.assertContains(r, "Akses ditolak")
+        self.assertTrue(Toko.objects.filter(pk=self.lbs.pk).exists())
+
+
+class DeleteUserTests(TestCase):
+    def setUp(self):
+        self.adm = User.objects.create_user("adm", password="pw123456", role="admin")
+        self.client.login(username="adm", password="pw123456")
+        self.target = User.objects.create_user("budi", password="rahasia123", role="auditor")
+
+    def test_hapus_user(self):
+        r = self.client.post(reverse("delete_user", args=[self.target.pk]))
+        self.assertEqual(r.status_code, 302)
+        self.assertFalse(User.objects.filter(username="budi").exists())
+
+    def test_tidak_bisa_hapus_diri_sendiri(self):
+        r = self.client.post(reverse("delete_user", args=[self.adm.pk]), follow=True)
+        self.assertTrue(User.objects.filter(pk=self.adm.pk).exists())
+        self.assertContains(r, "Tidak bisa menghapus akunmu sendiri.")
+
+    def test_hapus_user_ditolak_non_admin(self):
+        User.objects.create_user("aud", password="pw123456", role="auditor")
+        c2 = self.client.__class__()
+        c2.login(username="aud", password="pw123456")
+        r = c2.post(reverse("delete_user", args=[self.target.pk]), follow=True)
+        self.assertContains(r, "Akses ditolak")
+        self.assertTrue(User.objects.filter(username="budi").exists())

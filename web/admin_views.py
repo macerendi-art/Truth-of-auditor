@@ -1,11 +1,13 @@
 """Panel admin: kelola pengguna & toko, hapus data. Semua view digate admin_required."""
 from django.contrib import messages
 from django.contrib.auth import get_user_model, update_session_auth_hash
+from django.db import transaction
 from django.db.models import Count
 from django.shortcuts import get_object_or_404, redirect, render
 
 from reconciliation.models import ReconBatch
 from sources.models import Toko, Upload
+from transactions.models import Transaction
 from web.access import admin_required
 
 
@@ -154,3 +156,42 @@ def delete_batch(request, pk):
         batch.delete()
         messages.success(request, f"Batch #{pk} dihapus — {n_runs} run ikut terhapus. Transaksi tetap utuh.")
     return redirect("reconcile")
+
+
+@admin_required
+def delete_toko(request, pk):
+    t = get_object_or_404(Toko, pk=pk)
+    if request.method == "POST":
+        name = t.name
+        with transaction.atomic():
+            n_tx = Transaction.objects.filter(toko=t).count()
+            n_up = Upload.objects.filter(toko=t).count()
+            n_batch = ReconBatch.objects.filter(toko=t).count()
+            # Hapus file fisik tiap upload sebelum baris DB-nya hilang.
+            for up in Upload.objects.filter(toko=t):
+                if up.file:
+                    up.file.delete(save=False)
+            # Bongkar dependen PROTECT dulu, baru toko-nya (belt-and-suspenders).
+            ReconBatch.objects.filter(toko=t).delete()
+            Upload.objects.filter(toko=t).delete()
+            Transaction.objects.filter(toko=t).delete()
+            t.delete()
+        messages.success(
+            request,
+            f"Toko {name} dihapus permanen — {n_tx} transaksi, {n_up} upload, {n_batch} batch ikut terhapus.",
+        )
+    return redirect("kelola_toko")
+
+
+@admin_required
+def delete_user(request, pk):
+    User = get_user_model()
+    target = get_object_or_404(User, pk=pk)
+    if request.method == "POST":
+        if target == request.user:
+            messages.error(request, "Tidak bisa menghapus akunmu sendiri.")
+        else:
+            username = target.username
+            target.delete()
+            messages.success(request, f"Pengguna {username} dihapus permanen.")
+    return redirect("kelola_user")

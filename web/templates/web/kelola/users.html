@@ -53,7 +53,16 @@
         <td class="faint">{% if u.role == 'auditor' %}{{ u.allowed_tokos.all|join:", "|default:"—" }}{% else %}semua{% endif %}</td>
         <td>{% if u.is_active %}<span class="badge ok">aktif</span>{% else %}<span class="badge bad">nonaktif</span>{% endif %}</td>
         <td class="faint">{{ u.last_login|date:"d/m H:i"|default:"—" }}</td>
-        <td class="r"><a class="btn sm" href="{% url 'kelola_user_edit' u.pk %}">Kelola →</a></td>
+        <td class="r">
+          <a class="btn sm" href="{% url 'kelola_user_edit' u.pk %}">Kelola →</a>
+          {% if u != request.user %}
+          <form method="post" action="{% url 'delete_user' u.pk %}" style="display:inline"
+                onsubmit="return confirm('Hapus PERMANEN pengguna {{ u.username }}? Akun ini tidak bisa dikembalikan.')">
+            {% csrf_token %}
+            <button class="btn sm" type="submit" style="color:#dc2828">Hapus</button>
+          </form>
+          {% endif %}
+        </td>
       </tr>
     {% endfor %}
     </tbody>
