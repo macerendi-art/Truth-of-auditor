@@ -52,6 +52,8 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .side .who b{color:#fff;font-weight:600}
 .side .who a{color:var(--side-muted);font-size:12.5px}
 .side .who a:hover{color:var(--side-ink)}
+.side .who .logout-link{background:none;border:none;padding:0;cursor:pointer;font-family:inherit;color:var(--side-muted);font-size:12.5px}
+.side .who .logout-link:hover{color:var(--side-ink)}
 
 /* ---- MAIN ---- */
 .main{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -175,7 +177,7 @@ table.flush{border:none} table.flush thead th{background:none}
   {% endif %}
   {% endwith %}
   <div class="spacer"></div>
-  <div class="who"><b>{{ request.user.username }}</b><br><a href="{% url 'logout' %}">Keluar →</a></div>
+  <div class="who"><b>{{ request.user.username }}</b><br><form method="post" action="{% url 'logout' %}" style="display:inline">{% csrf_token %}<button type="submit" class="logout-link">Keluar →</button></form></div>
 </aside>
 
 <div class="main">
