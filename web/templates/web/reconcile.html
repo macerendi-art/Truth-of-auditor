@@ -39,7 +39,18 @@
 </div>
 
 <div class="card reveal" style="padding:0;overflow:hidden">
-  <div style="padding:18px 20px 6px"><h3 style="margin:0">Riwayat Batch</h3></div>
+  <div style="padding:18px 20px 6px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+    <h3 style="margin:0">Riwayat Batch</h3>
+    <form method="get" style="margin:0">
+      {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+      {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+      <select name="bank" class="f" style="width:auto;padding:7px 10px" aria-label="Sumber uang" onchange="this.form.submit()">
+        <option value="">Semua sumber</option>
+        <option value="bank" {% if bank == "bank" %}selected{% endif %}>Bank</option>
+        <option value="gateway" {% if bank == "gateway" %}selected{% endif %}>Gateway</option>
+      </select>
+    </form>
+  </div>
   <div class="twrap" style="border:none">
   <table>
     <thead><tr><th>Batch</th><th>Waktu</th><th>DP selisih</th><th>WD selisih</th><th>Cocok</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
@@ -61,7 +72,7 @@
         </td>
         {% endif %}
       </tr>
-    {% empty %}<tr><td colspan="{% if is_admin_user %}6{% else %}5{% endif %}" class="faint">Belum ada batch.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="{% if is_admin_user %}6{% else %}5{% endif %}" class="faint">{% if bank %}Tidak ada batch dengan sumber ini.{% else %}Belum ada batch.{% endif %}</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>

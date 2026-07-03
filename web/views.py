@@ -193,15 +193,24 @@ def reconcile(request):
 
     df = request.GET.get("date_from") or None
     dt = request.GET.get("date_to") or None
-    batches = list(ReconBatch.objects.filter(toko=active).order_by("-id")[:20])
-    total = ReconBatch.objects.filter(toko=active).count()
-    for i, b in enumerate(batches):
+    bank = request.GET.get("bank", "")
+    if bank not in ("bank", "gateway"):
+        bank = ""  # nilai tak dikenal → perlakukan sebagai "semua sumber"
+    # Nomor dihitung dari SEMUA batch toko dulu (posisi asli), BARU difilter —
+    # supaya nomor batch tidak berubah saat filter sumber uang aktif.
+    all_batches = list(ReconBatch.objects.filter(toko=active).order_by("-id"))
+    total = len(all_batches)
+    for i, b in enumerate(all_batches):
         b.no = total - i
+    if bank:
+        all_batches = [b for b in all_batches if (b.completeness or {}).get(bank)]
+    batches = all_batches[:20]
     ctx = {
         "active_toko": active,
         "completeness": check_completeness(active, df, dt),
         "tolerances": ToleranceProfile.objects.all(),
         "batches": batches,
+        "bank": bank,
         "date_from": df or "", "date_to": dt or "",
     }
     return render(request, "web/reconcile.html", ctx)
