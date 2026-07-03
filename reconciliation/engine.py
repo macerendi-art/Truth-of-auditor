@@ -9,6 +9,7 @@ from django.db import transaction as db_tx
 from django.db.models import Sum
 from rapidfuzz import fuzz
 
+from sources.parsers.base import clean_name
 from transactions.models import Transaction
 
 from .models import MatchResult, MatchRun, ReconBatch, ToleranceProfile
@@ -144,9 +145,9 @@ class _MoneyMatcher:
                 if p.username and b.username:
                     s = 100.0 if p.username.lower() == b.username.lower() else 40.0
                     if p.counterparty and b.counterparty:
-                        s = max(s, fuzz.token_set_ratio(p.counterparty.upper(), b.counterparty.upper()))
+                        s = max(s, fuzz.token_set_ratio(clean_name(p.counterparty).upper(), clean_name(b.counterparty).upper()))
                 else:
-                    s = fuzz.token_set_ratio((p.counterparty or "").upper(), (b.counterparty or "").upper())
+                    s = fuzz.token_set_ratio(clean_name(p.counterparty).upper(), clean_name(b.counterparty).upper())
                 if s > best_s:
                     best, best_s = b, s
             if best is not None and best_s >= tol.fuzzy_threshold:

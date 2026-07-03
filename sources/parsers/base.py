@@ -19,6 +19,15 @@ from dateutil import parser as dateparser
 TICKET_RE = re.compile(r"\b([DW]\d{6,9})\b")
 # Reference gateway: 1 huruf + >=12 digit (mis. F260627206100206205).
 REF_RE = re.compile(r"\b([A-Z]\d{12,})\b")
+# Non-alfabet (angka/simbol) pada nama -> diganti spasi sebelum fuzzy matching.
+NAME_CLEAN_RE = re.compile(r"[^A-Za-z\s]")
+
+
+def clean_name(text):
+    """Nama utk matching: buang non-alfabet (angka/simbol -> spasi), rapikan spasi.
+    'John123 Smith!' -> 'John Smith'; 'John123Smith' -> 'John Smith'."""
+    s = NAME_CLEAN_RE.sub(" ", str(text or ""))
+    return re.sub(r"\s+", " ", s).strip()
 
 
 def read_xlsx_rows(path, header_row=1, sheet=None):
