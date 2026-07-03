@@ -143,6 +143,8 @@ class _MoneyMatcher:
                     continue
                 if p.username and b.username:
                     s = 100.0 if p.username.lower() == b.username.lower() else 40.0
+                    if p.counterparty and b.counterparty:
+                        s = max(s, fuzz.token_set_ratio(p.counterparty.upper(), b.counterparty.upper()))
                 else:
                     s = fuzz.token_set_ratio((p.counterparty or "").upper(), (b.counterparty or "").upper())
                 if s > best_s:

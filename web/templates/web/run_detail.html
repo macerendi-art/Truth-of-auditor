@@ -13,7 +13,7 @@
 
 {% if run.summary %}
 <div class="grid cols-4 reveal">
-  <div class="card stat"><div class="k">Kiri (Panel)</div><div class="v">{{ run.summary.left|intcomma }}</div></div>
+  <div class="card stat"><div class="k">{{ left_label }}</div><div class="v">{{ run.summary.left|intcomma }}</div></div>
   <div class="card stat"><div class="k" style="color:var(--ok)">Cocok</div><div class="v" style="color:var(--ok)">{{ run.summary.cocok|intcomma }}</div></div>
   <div class="card stat"><div class="k" style="color:var(--warn)">Perlu Ditinjau</div><div class="v" style="color:var(--warn)">{{ run.summary.perlu_tinjau|intcomma }}</div></div>
   <div class="card stat"><div class="k" style="color:var(--bad)">Tidak Cocok</div><div class="v" style="color:var(--bad)">{{ run.summary.tidak_cocok|intcomma }}</div></div>
@@ -30,7 +30,7 @@
 <div class="card pad0 reveal">
   <div class="table-wrap" style="border:none">
   <table>
-    <thead><tr><th>Status</th><th>Kiri (Panel)</th><th class="num">Amount</th><th>Kanan</th><th class="num">Amount</th><th>Alasan</th><th style="text-align:center">Aksi</th></tr></thead>
+    <thead><tr><th>Status</th><th>{{ left_label }}</th><th class="num">Amount</th><th>{{ right_label }}</th><th class="num">Amount</th><th>Alasan</th><th style="text-align:center">Aksi</th></tr></thead>
     <tbody>
     {% for r in page %}{% include "web/_result_row.html" %}{% empty %}
       <tr><td colspan="7" class="muted" style="padding:28px;text-align:center">Tidak ada hasil pada bucket ini.</td></tr>{% endfor %}

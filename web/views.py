@@ -23,6 +23,13 @@ BUCKET_META = {
     "tidak_cocok": {"label": "Tidak Cocok", "cls": "bad"},
 }
 
+REL_LABELS = {
+    "panel_bracket": ("Panel", "Bracket"),
+    "panel_bank": ("Panel", "Bank/Gateway"),
+    "bracket_bank": ("Bracket", "Bank/Gateway"),
+    "saldo": ("Kiri", "Kanan"),
+}
+
 
 def _active_toko(request):
     allowed = tokos_for(request.user)
@@ -217,7 +224,11 @@ def run_detail(request, pk):
     if bucket:
         qs = qs.filter(bucket=bucket)
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
-    ctx = {"run": run, "page": page, "bucket": bucket, "bucket_meta": BUCKET_META}
+    left_label, right_label = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
+    ctx = {
+        "run": run, "page": page, "bucket": bucket, "bucket_meta": BUCKET_META,
+        "left_label": left_label, "right_label": right_label,
+    }
     return render(request, "web/run_detail.html", ctx)
 
 
@@ -269,8 +280,9 @@ def export_run(request, pk):
         row.font = Font(bold=True)
 
     d = wb.create_sheet("Hasil")
-    headers = ["Bucket", "Panel Ticket", "Panel Amount", "Panel User", "Panel Waktu",
-               "Kanan", "Kanan Sumber", "Kanan Amount", "Kanan Waktu", "Skor", "Alasan", "Detail"]
+    L, R = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
+    headers = ["Bucket", f"{L} Ticket", f"{L} Amount", f"{L} User", f"{L} Nama Lengkap", f"{L} Waktu",
+               R, f"{R} Sumber", f"{R} Amount", f"{R} Waktu", "Skor", "Alasan", "Detail"]
     d.append(headers)
     for c in d[1]:
         c.font = Font(bold=True)
@@ -282,6 +294,7 @@ def export_run(request, pk):
             left.ticket_no if left else "",
             float(left.amount) if left else "",
             left.username if left else "",
+            left.counterparty if left else "",
             left.occurred_at.strftime("%d/%m %H:%M") if left and left.occurred_at else "",
             (right.ticket_no or right.counterparty) if right else "",
             right.source_type.key if right else "",
