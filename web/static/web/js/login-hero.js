@@ -37,25 +37,43 @@ else {
 }
 
 function sampleText(text) {
-  const W = 1200, H = 220, c = document.createElement('canvas');
+  const W = 2048, H = 512, c = document.createElement('canvas');
   c.width = W; c.height = H;
   const x = c.getContext('2d');
+  // Fit font ke lebar canvas dulu supaya teks penuh ("TRUTH OF AUDITOR") tak terpotong di tepi canvas.
+  let fs = 300;
+  x.font = `700 ${fs}px Zodiak, Georgia, serif`;
+  while (x.measureText(text).width > W * 0.92 && fs > 40) { fs -= 6; x.font = `700 ${fs}px Zodiak, Georgia, serif`; }
   x.fillStyle = '#fff';
-  x.font = '700 150px Zodiak, Georgia, serif';
   x.textAlign = 'center'; x.textBaseline = 'middle';
   x.fillText(text, W / 2, H / 2);
   const img = x.getImageData(0, 0, W, H).data, pts = [];
-  const step = isMobile ? 4 : 2;                       // kepadatan sampling
+  const step = isMobile ? 5 : 3;                       // kepadatan sampling (canvas lebih besar → step longgar)
+  let halfW = 1;                                        // extent teks (px) untuk fit ke viewport di init()
   for (let y = 0; y < H; y += step) for (let px = 0; px < W; px += step)
-    if (img[(y * W + px) * 4 + 3] > 128) pts.push([(px - W / 2) / 90, -(y - H / 2) / 90]);
-  return pts;
+    if (img[(y * W + px) * 4 + 3] > 128) {
+      const wx = px - W / 2, wy = -(y - H / 2);
+      pts.push([wx, wy]);
+      if (Math.abs(wx) > halfW) halfW = Math.abs(wx);
+    }
+  return { pts, halfW };
 }
 
 function init(renderer) {
   const CAP = isMobile ? 7000 : 20000;
-  let pts = sampleText('TRUTH OF AUDITOR');
+  const sampled = sampleText('TRUTH OF AUDITOR');
+  const halfW = sampled.halfW;
+  let pts = sampled.pts;
   if (pts.length > CAP) pts = pts.filter((_, i) => i % Math.ceil(pts.length / CAP) === 0);
   const N = pts.length;
+  // Fit wordmark ke viewport (~88% lebar) + naikkan dari tengah; responsif terhadap aspect.
+  const CAM_Z = 9, VFOV = 45 * Math.PI / 180;
+  function layout() {
+    const visH = 2 * CAM_Z * Math.tan(VFOV / 2);
+    const visW = visH * (innerWidth / innerHeight);
+    return { visW, visH, scale: (visW * 0.44) / halfW, yOff: visH * 0.18 };
+  }
+  let lay = layout();
 
   const scene = new THREE.Scene();
   const cam = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, .1, 50);
@@ -66,7 +84,7 @@ function init(renderer) {
   const pos = new Float32Array(N * 3), tgt = new Float32Array(N * 3), seed = new Float32Array(N);
   for (let i = 0; i < N; i++) {
     pos[i * 3] = (Math.random() - .5) * 22; pos[i * 3 + 1] = (Math.random() - .5) * 14; pos[i * 3 + 2] = (Math.random() - .5) * 8;
-    tgt[i * 3] = pts[i][0]; tgt[i * 3 + 1] = pts[i][1]; tgt[i * 3 + 2] = 0;
+    tgt[i * 3] = pts[i][0] * lay.scale; tgt[i * 3 + 1] = pts[i][1] * lay.scale + lay.yOff; tgt[i * 3 + 2] = 0;
     seed[i] = Math.random();
   }
   const geo = new THREE.BufferGeometry();
@@ -115,11 +133,14 @@ function init(renderer) {
   addEventListener('pointermove', (e) => {
     ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
     // proyeksikan ke plane z=0 kamera sederhana:
-    uni.uPointer.value.set(ndc.x * 6.2, ndc.y * 3.9);
+    uni.uPointer.value.set(ndc.x * lay.visW / 2, ndc.y * lay.visH / 2);
   });
   addEventListener('resize', () => {
     cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
+    lay = layout();                                    // refit wordmark ke ukuran/aspect baru
+    for (let i = 0; i < N; i++) { tgt[i * 3] = pts[i][0] * lay.scale; tgt[i * 3 + 1] = pts[i][1] * lay.scale + lay.yOff; }
+    geo.attributes.aTarget.needsUpdate = true;
   });
 
   // assemble saat load (GSAP UMD sudah ada di halaman)
