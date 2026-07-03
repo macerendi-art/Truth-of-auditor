@@ -25,7 +25,11 @@ def kelola_toko(request):
             messages.success(request, f"Toko {kode.upper()} ditambahkan.")
         return redirect("kelola_toko")
     if request.method == "POST" and request.POST.get("action") == "toggle":
-        t = get_object_or_404(Toko, pk=request.POST.get("toko_id"))
+        tid = request.POST.get("toko_id", "")
+        if not tid.isdecimal():
+            messages.error(request, "ID toko tidak valid.")
+            return redirect("kelola_toko")
+        t = get_object_or_404(Toko, pk=tid)
         t.is_active = not t.is_active
         t.save(update_fields=["is_active"])
         messages.success(request, f"Toko {t.name} {'diaktifkan' if t.is_active else 'dinonaktifkan'}.")

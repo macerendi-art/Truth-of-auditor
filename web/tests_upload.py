@@ -11,6 +11,7 @@ from django.urls import reverse
 
 from sources import services
 from sources.models import SourceType, Toko, Upload
+from transactions.models import Transaction
 
 
 class UploadAnalyzeTests(TestCase):
@@ -71,6 +72,30 @@ class UploadCommitTests(TestCase):
         self.assertEqual(up.provider, "Nexus")
         self.assertEqual(up.rows_parsed, 1)
         self.assertFalse(default_storage.exists(staged))
+
+    def test_commit_rejects_non_staging_path(self):
+        n_up = Upload.objects.count()
+        n_tx = Transaction.objects.count()
+        with patch.dict(services.PARSERS, {"dummy": _DummyBracket}, clear=False), \
+                patch("web.views.ingest", side_effect=AssertionError("must not ingest")):
+            r = self.client.post(reverse("upload"), {
+                "action": "commit", "staged": ["uploads/x"],
+                "parser_key": ["dummy"], "flow": [""], "provider": "Nexus",
+            })
+        self.assertEqual(r.status_code, 302)  # redirect, tidak crash
+        self.assertEqual(Upload.objects.count(), n_up)  # tidak ada upload dibuat
+        self.assertEqual(Transaction.objects.count(), n_tx)
+
+    def test_commit_rejects_path_traversal(self):
+        n_up = Upload.objects.count()
+        with patch.dict(services.PARSERS, {"dummy": _DummyBracket}, clear=False), \
+                patch("web.views.ingest", side_effect=AssertionError("must not ingest")):
+            r = self.client.post(reverse("upload"), {
+                "action": "commit", "staged": ["staging/../etc/passwd"],
+                "parser_key": ["dummy"], "flow": [""], "provider": "Nexus",
+            })
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(Upload.objects.count(), n_up)
 
 
 class UploadHistoryTests(TestCase):

@@ -3,7 +3,10 @@ from django.contrib.auth.decorators import login_required
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
+from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 
 from reconciliation.engine import MATCHERS, check_completeness, run_batch, run_match
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
@@ -34,7 +37,12 @@ def set_toko(request):
         tid = request.POST.get("toko_id", "")
         if tid.isdecimal() and tokos_for(request.user).filter(id=tid).exists():
             request.session["active_toko_id"] = int(tid)
-    return redirect(request.POST.get("next") or "dashboard")
+    nxt = request.POST.get("next")
+    if nxt and url_has_allowed_host_and_scheme(
+        nxt, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return redirect(nxt)
+    return redirect("dashboard")
 
 
 @login_required
@@ -74,6 +82,9 @@ def upload(request):
         provider = request.POST.get("provider", "")
         n_ok = n_err = 0
         for path_rel, key, flow in zip(staged, keys, flows):
+            if not path_rel.startswith("staging/") or ".." in path_rel:
+                n_err += 1
+                continue
             if key not in PARSERS:
                 n_err += 1
                 continue
@@ -144,7 +155,7 @@ def transactions(request):
         "src": src,
         "jenis": jenis,
         "q": q,
-        "total": qs.count(),
+        "total": page.paginator.count,
     }
     return render(request, "web/transactions.html", ctx)
 
@@ -155,7 +166,7 @@ def reconcile(request):
     if active is None:
         return render(request, "web/no_toko.html")
     if request.method == "POST":
-        tol = ToleranceProfile.objects.get(name=request.POST.get("tolerance", "Default"))
+        tol = get_object_or_404(ToleranceProfile, name=request.POST.get("tolerance", "Default"))
         batch = run_batch(
             active, tol,
             request.POST.get("date_from") or None,
@@ -198,16 +209,19 @@ def run_detail(request, pk):
 
 
 @login_required
+@require_POST
 def review(request, pk):
     r = get_object_or_404(MatchResult, pk=pk, run__batch__toko__in=tokos_for(request.user))
     action = request.POST.get("action", "")
     reason = request.POST.get("reason", "")
-    if action == "mark_matched":
-        r.bucket = MatchResult.Bucket.COCOK
-    elif action == "mark_review":
-        r.bucket = MatchResult.Bucket.TINJAU
-    elif action == "mark_unmatched":
-        r.bucket = MatchResult.Bucket.TIDAK
+    buckets = {
+        "mark_matched": MatchResult.Bucket.COCOK,
+        "mark_review": MatchResult.Bucket.TINJAU,
+        "mark_unmatched": MatchResult.Bucket.TIDAK,
+    }
+    if action not in buckets:
+        return HttpResponseBadRequest("Aksi tidak dikenal.")
+    r.bucket = buckets[action]
     r.reason_code = "manual_override"
     r.save(update_fields=["bucket", "reason_code"])
     ReviewAction.objects.create(result=r, action=action, reason=reason, reviewer=request.user)

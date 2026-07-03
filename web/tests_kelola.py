@@ -49,6 +49,10 @@ class KelolaTokoCrudTests(TestCase):
         t.refresh_from_db()
         self.assertFalse(t.is_active)
 
+    def test_toggle_id_non_numerik_tidak_crash(self):
+        r = self.client.post(reverse("kelola_toko"), {"action": "toggle", "toko_id": "abc"})
+        self.assertEqual(r.status_code, 302)  # redirect, bukan 500
+
 
 class KelolaUserCreateTests(TestCase):
     def setUp(self):

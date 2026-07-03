@@ -34,3 +34,20 @@ class ScopeTests(TestCase):
         r = self.client.get(reverse("transactions"))
         self.assertContains(r, "lbsuser")
         self.assertNotContains(r, "slouser")
+
+    def test_set_toko_external_next_redirects_to_dashboard(self):
+        r = self.client.post(
+            reverse("set_toko"),
+            {"toko_id": self.lbs.id, "next": "https://evil.example"},
+        )
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.url, reverse("dashboard"))
+        self.assertNotIn("evil.example", r.url)
+
+    def test_set_toko_safe_next_is_honored(self):
+        r = self.client.post(
+            reverse("set_toko"),
+            {"toko_id": self.lbs.id, "next": reverse("transactions")},
+        )
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.url, reverse("transactions"))
