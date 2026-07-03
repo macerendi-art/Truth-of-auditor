@@ -1,6 +1,7 @@
 Django>=5.2,<5.3
 pandas
 openpyxl
+msoffcrypto-tool
 pdfplumber
 rapidfuzz
 python-dateutil

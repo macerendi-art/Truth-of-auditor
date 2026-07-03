@@ -34,7 +34,7 @@
     <input type="hidden" name="action" value="commit">
     <div class="twrap">
     <table>
-      <thead><tr><th>File</th><th>Jenis terdeteksi</th><th>Keyakinan</th><th>DP/WD</th></tr></thead>
+      <thead><tr><th>File</th><th>Jenis terdeteksi</th><th>Keyakinan</th><th>DP/WD</th><th>Password</th></tr></thead>
       <tbody>
       {% for p in preview %}
       <tr>
@@ -51,6 +51,11 @@
             <option value="dp" {% if p.flow == 'dp' %}selected{% endif %}>DP</option>
             <option value="wd" {% if p.flow == 'wd' %}selected{% endif %}>WD</option>
           </select>
+        </td>
+        <td>
+          <input type="password" name="password" class="f" autocomplete="off"
+                 placeholder="{% if p.needs_password %}terkunci — isi password{% else %}—{% endif %}">
+          {% if p.needs_password %}<div class="faint" style="font-size:12px;margin-top:4px">🔒 terkunci — isi password</div>{% endif %}
         </td>
       </tr>
       {% endfor %}

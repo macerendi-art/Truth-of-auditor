@@ -13,7 +13,7 @@ from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewActio
 from sources.detect import detect_source
 from sources.management.commands.ingest import detect_flow
 from sources.models import SourceType, Upload
-from sources.services import PARSERS, ingest
+from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction
 from web.access import tokos_for
 
@@ -79,9 +79,10 @@ def upload(request):
         staged = request.POST.getlist("staged")
         keys = request.POST.getlist("parser_key")
         flows = request.POST.getlist("flow")
+        passwords = request.POST.getlist("password")
         provider = request.POST.get("provider", "")
         n_ok = n_err = 0
-        for path_rel, key, flow in zip(staged, keys, flows):
+        for i, (path_rel, key, flow) in enumerate(zip(staged, keys, flows)):
             if not path_rel.startswith("staging/") or ".." in path_rel:
                 n_err += 1
                 continue
@@ -92,6 +93,7 @@ def upload(request):
                 ingest(
                     key, default_storage.path(path_rel), flow=flow,
                     user=request.user, toko=active, provider=provider,
+                    password=(passwords[i] if i < len(passwords) else ""),
                 )
                 n_ok += 1
             except Exception as e:  # noqa: BLE001 - tampilkan error parse ke user
@@ -106,14 +108,19 @@ def upload(request):
         preview = []
         for f in request.FILES.getlist("files"):
             saved = default_storage.save(f"staging/{f.name}", f)
+            needs_password = is_encrypted_xlsx(default_storage.path(saved))
             cands = detect_source(default_storage.path(saved), f.name)
             top = cands[0] if cands else None
+            parser_key = top["parser_key"] if top else ""
+            if not parser_key and needs_password:
+                parser_key = "mandiri"
             preview.append({
                 "name": f.name,
                 "staged": saved,
-                "parser_key": top["parser_key"] if top else "",
+                "parser_key": parser_key,
                 "confidence": round(top["confidence"] * 100) if top else 0,
                 "needs_confirm": (top is None) or top["confidence"] < 0.8,
+                "needs_password": needs_password,
                 "flow": detect_flow(f.name),
             })
         return render(request, "web/upload.html", {
