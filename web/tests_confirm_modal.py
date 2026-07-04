@@ -45,6 +45,13 @@ class ModalComponentRenderTests(TestCase):
         # handler global yang mengintersep form[data-confirm]
         self.assertContains(r, "data-confirm")
 
+    def test_komentar_template_tidak_bocor_ke_halaman(self):
+        # Regresi: {# ... #} Django itu SINGLE-LINE — komentar multi-baris wajib
+        # {% comment %}. Yang salah ke-render sebagai teks mentah di atas halaman.
+        r = self.client.get(reverse("dashboard"))
+        self.assertNotContains(r, "Modal konfirmasi reusable")
+        self.assertNotContains(r, "#}")
+
     def test_tidak_ada_confirm_native_di_app_base(self):
         r = self.client.get(reverse("dashboard"))
         # tak boleh ada pemakaian onsubmit-confirm native di kerangka
