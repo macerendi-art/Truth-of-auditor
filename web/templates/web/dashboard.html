@@ -1,33 +1,58 @@
 {% extends "web/app_base.html" %}
 {% load humanize %}
+{% load web_extras %}
 {% block title %}Dashboard · Truth of Auditor{% endblock %}
 {% block crumb %}Dashboard{% endblock %}
 {% block content %}
 <div class="page-head reveal">
   <h1>Dashboard</h1>
-  <p>Ringkasan data terparse &amp; rekonsiliasi untuk <b>{{ active_toko.name }}</b>.</p>
+  <p>Kesehatan audit &amp; ringkasan data untuk <b>{{ active_toko.name }}</b>.</p>
 </div>
 
+{# ── Strip kesehatan audit: selisih terbuka / antrean hari / ekor / donat ── #}
 <div class="grid cols-4">
-  <div class="card stat reveal">
-    <div class="top"><span class="k">Total Transaksi</span>
-      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span></div>
-    <div class="v num" data-count="{{ tx_total }}">{{ tx_total|intcomma }}</div>
+  <div class="card stat kpi-hero reveal">
+    <div class="top"><span class="k">Selisih terbuka</span>
+      <span class="ic {% if health.selisih_terbuka %}r{% else %}g{% endif %}"><svg width="19" height="19"><use href="#i-circle-alert"/></svg></span></div>
+    {% if health.selisih_terbuka %}
+    <div class="v num amount" style="color:var(--bad)" data-count="{{ health.selisih_terbuka }}">{{ health.selisih_terbuka|intcomma }}</div>
+    <svg class="spark" viewBox="0 0 120 32" role="img" aria-label="Tren selisih 7 hari"><polyline points="{{ health.selisih_trend|sparkline_points }}"/></svg>
+    {% else %}
+    <div class="v" style="color:var(--ok)">Balanced ✓</div>
+    {% endif %}
   </div>
+
   <div class="card stat reveal">
-    <div class="top"><span class="k">File Di-upload</span>
-      <span class="ic g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></span></div>
-    <div class="v num" data-count="{{ upload_total }}">{{ upload_total|intcomma }}</div>
+    <div class="top"><span class="k">Belum direkonsiliasi</span>
+      <span class="ic {% if health.hari_tertunda %}a{% else %}g{% endif %}"><svg width="19" height="19"><use href="#i-calendar-check"/></svg></span></div>
+    <div class="v num" data-count="{{ health.hari_tertunda }}">{{ health.hari_tertunda }}</div>
+    {% if health.saran_tanggal %}
+    <a class="btn sm primary" style="align-self:flex-start" href="{% url 'reconcile' %}">Rekonsiliasi {{ health.saran_tanggal|date:"d/m" }} →</a>
+    {% else %}<span class="faint" style="font-size:12.5px">Belum ada data untuk direkonsiliasi.</span>{% endif %}
   </div>
+
   <div class="card stat reveal">
-    <div class="top"><span class="k">Rekonsiliasi</span>
-      <span class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v16a2 2 0 0 0 2 2h12"/><path d="M18 8l-4-4 4-4"/><path d="M2 12h13a4 4 0 0 1 4 4v4"/></svg></span></div>
-    <div class="v num" data-count="{{ run_total }}">{{ run_total|intcomma }}</div>
+    <div class="top"><span class="k">Batch ekor terbuka</span>
+      <span class="ic {% if health.ekor_terbuka %}a{% else %}g{% endif %}"><svg width="19" height="19"><use href="#i-rotate-cw"/></svg></span></div>
+    <div class="v num" data-count="{{ health.ekor_terbuka }}">{{ health.ekor_terbuka }}</div>
+    <span class="faint" style="font-size:12.5px">Menunggu uang susulan (sembuh otomatis saat upload).</span>
   </div>
+
   <div class="card stat reveal">
-    <div class="top"><span class="k">Jenis Sumber</span>
-      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h7v7H3z"/><path d="M14 3h7v7h-7z"/><path d="M14 14h7v7h-7z"/><path d="M3 14h7v7H3z"/></svg></span></div>
-    <div class="v num" data-count="{{ by_source|length }}">{{ by_source|length }}</div>
+    <div class="top"><span class="k">Kesehatan bucket</span></div>
+    {% with b=health.buckets_agg %}{% with total=b.cocok|add:b.perlu_tinjau|add:b.tidak_cocok %}
+    {% if total %}
+    <div style="display:flex;align-items:center;gap:14px">
+      <div class="donut" role="img" aria-label="{{ b.cocok }} cocok, {{ b.perlu_tinjau }} tinjau, {{ b.tidak_cocok }} tidak cocok"
+           style="--donut-stops:var(--ok-700) 0 {% widthratio b.cocok total 100 %}%,var(--warn-700) {% widthratio b.cocok total 100 %}% {% widthratio b.cocok|add:b.perlu_tinjau total 100 %}%,var(--bad-700) {% widthratio b.cocok|add:b.perlu_tinjau total 100 %}% 100%"></div>
+      <div class="summary-line" style="flex-direction:column;align-items:flex-start;gap:4px">
+        <span class="badge ok">{{ b.cocok|intcomma }}</span>
+        <span class="badge warn">{{ b.perlu_tinjau|intcomma }}</span>
+        <span class="badge bad">{{ b.tidak_cocok|intcomma }}</span>
+      </div>
+    </div>
+    {% else %}<p class="muted" style="margin:0">Belum ada batch.</p>{% endif %}
+    {% endwith %}{% endwith %}
   </div>
 </div>
 
@@ -40,8 +65,8 @@
         <span><span class="badge src plain">{{ s.source_type__key }}</span> {{ s.source_type__name }}</span>
         <b class="num">{{ s.n|intcomma }}</b>
       </div>
-      <div style="height:8px;border-radius:99px;background:#eef1f6;overflow:hidden">
-        <div style="height:100%;width:{% widthratio s.n tx_total 100 %}%;background:var(--grad);border-radius:99px"></div>
+      <div style="height:8px;border-radius:99px;background:var(--line);overflow:hidden">
+        <div style="height:100%;width:{% widthratio s.n tx_total 100 %}%;background:var(--periwinkle);border-radius:99px"></div>
       </div>
     </div>
     {% empty %}<p class="muted">Belum ada data. <a class="grad-text" href="{% url 'upload' %}">Upload file →</a></p>{% endfor %}
@@ -55,17 +80,25 @@
         <b style="font-size:14px">{{ run.get_relation_display }}</b>
         <span class="faint" style="font-size:12px">{{ run.created_at|date:"d/m H:i" }}</span>
       </div>
-      {% if run.summary %}<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+      {% if run.summary %}
+      {% with s=run.summary %}{% with total=s.cocok|add:s.perlu_tinjau|add:s.tidak_cocok %}
+      {% if total %}
+      <div class="bucket-bar" role="img" aria-label="{{ s.cocok }} cocok, {{ s.perlu_tinjau }} tinjau, {{ s.tidak_cocok }} tidak cocok" style="margin-top:9px">
+        <span class="s-ok" style="width:{% widthratio s.cocok total 100 %}%"></span><span class="s-warn" style="width:{% widthratio s.perlu_tinjau total 100 %}%"></span><span class="s-bad" style="width:{% widthratio s.tidak_cocok total 100 %}%"></span>
+      </div>
+      {% endif %}{% endwith %}{% endwith %}
+      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
         <span class="badge ok">{{ run.summary.cocok|intcomma }} cocok</span>
         <span class="badge warn">{{ run.summary.perlu_tinjau|intcomma }} tinjau</span>
         <span class="badge bad">{{ run.summary.tidak_cocok|intcomma }} tidak</span>
-      </div>{% endif %}
+      </div>
+      {% endif %}
     </a>
     {% empty %}<p class="muted">Belum ada rekonsiliasi. <a class="grad-text" href="{% url 'reconcile' %}">Jalankan →</a></p>{% endfor %}
   </div>
 </div>
 
-<div class="card reveal" style="margin-top:16px;padding:0;overflow:hidden">
+<div class="card reveal pad0" style="margin-top:16px">
   <div style="padding:18px 20px 6px"><h3 style="margin:0">Upload Terakhir</h3></div>
   <div class="twrap" style="border:none">
   <table>

@@ -1,6 +1,6 @@
 import os
 import zipfile
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.contrib import messages
 from django.core.files.base import ContentFile
@@ -78,6 +78,43 @@ def set_toko(request):
     return redirect("dashboard")
 
 
+def _dashboard_health(toko):
+    """KPI kesehatan audit: agregat ringan dari summary 30 batch terakhir.
+
+    Menjawab tiga pertanyaan ritual harian saat mendarat: (a) ada selisih
+    terbuka? (b) berapa hari belum direkonsiliasi? (c) berapa batch masih
+    punya ekor tidak_cocok yang menunggu uang susulan."""
+    recent = list(ReconBatch.objects.filter(toko=toko).order_by("-id")[:30])
+    selisih_total, ekor = 0, 0
+    buckets = {"cocok": 0, "perlu_tinjau": 0, "tidak_cocok": 0}
+    for b in recent:
+        s = b.summary or {}
+        selisih_total += abs((s.get("dp") or {}).get("selisih") or 0)
+        selisih_total += abs((s.get("wd") or {}).get("selisih") or 0)
+        bk = s.get("buckets") or {}
+        if (bk.get("tidak_cocok") or 0) > 0:
+            ekor += 1
+        for k in buckets:
+            buckets[k] += bk.get(k) or 0
+    today = date.today()
+    days = [today - timedelta(days=i) for i in range(6, -1, -1)]
+    per_day = dict.fromkeys(days, 0)
+    for b in recent:
+        if b.date_to in per_day:
+            s = b.summary or {}
+            per_day[b.date_to] += abs((s.get("dp") or {}).get("selisih") or 0)
+            per_day[b.date_to] += abs((s.get("wd") or {}).get("selisih") or 0)
+    saran = _saran_tanggal(toko)
+    return {
+        "selisih_terbuka": selisih_total,
+        "ekor_terbuka": ekor,
+        "buckets_agg": buckets,
+        "selisih_trend": [per_day[d] for d in days],
+        "saran_tanggal": saran,
+        "hari_tertunda": max((today - saran).days + 1, 0) if saran else 0,
+    }
+
+
 @login_required
 def dashboard(request):
     active = _active_toko(request)
@@ -99,6 +136,7 @@ def dashboard(request):
         "by_source": by_source,
         "uploads": uploads.select_related("source_type").order_by("-id")[:8],
         "runs": runs.order_by("-id")[:8],
+        "health": _dashboard_health(active),
     }
     return render(request, "web/dashboard.html", ctx)
 

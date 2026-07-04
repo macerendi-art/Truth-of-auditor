@@ -31,3 +31,18 @@ _REASON_LABELS = {
 def reason_label(code):
     """Label ramah untuk reason_code (fallback: kode apa adanya)."""
     return _REASON_LABELS.get(code, code)
+
+
+@register.filter
+def sparkline_points(values, width=120):
+    """List angka → string points polyline SVG (viewBox 0 0 {width} 32)."""
+    values = list(values or [])
+    if not values:
+        return ""
+    h, pad = 32, 2
+    vmax = max(values) or 1
+    step = width / max(len(values) - 1, 1)
+    return " ".join(
+        f"{i * step:.1f},{h - pad - (v / vmax) * (h - 2 * pad):.1f}"
+        for i, v in enumerate(values)
+    )
