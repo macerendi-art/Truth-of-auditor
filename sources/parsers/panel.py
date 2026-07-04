@@ -9,6 +9,7 @@ from .base import (
     BaseParser,
     extract_ref,
     first_part,
+    normalize_dest,
     parse_decimal,
     parse_dt,
     read_xlsx_rows,
@@ -16,6 +17,17 @@ from .base import (
 )
 
 SCALE = Decimal(1000)  # 1 kredit = Rp1.000
+
+
+def extract_panel_dest(player_bank):
+    """Nomor tujuan Panel dari kolom 'Player Bank' (format '<channel>|<nama>|<nomor>').
+
+    Ambil segmen ke-3 (split '|'), lalu normalisasi sama dgn sisi bank. Terisi ~100%
+    di data (DANA/GOPAY = HP, bank = norek). Segmen kurang / nomor pendek -> ''."""
+    parts = str(player_bank or "").split("|")
+    if len(parts) < 3:
+        return ""
+    return normalize_dest(parts[2])
 
 
 class PanelParser(BaseParser):
@@ -66,6 +78,7 @@ class PanelParser(BaseParser):
                 "username": str(r.get("User Name", "") or "").strip(),
                 "reference": extract_ref(remarks) or str(r.get("Reference", "") or "").strip(),
                 "counterparty": str(r.get("Full Name", "") or "").strip(),
+                "dest_account": extract_panel_dest(r.get("Player Bank")),
                 "description": remarks,
                 "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
             }

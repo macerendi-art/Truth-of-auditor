@@ -130,6 +130,10 @@ class Transaction(TimeStampedModel):
     counterparty = models.CharField(
         max_length=200, blank=True, help_text="nama pengirim/penerima di bank"
     )
+    # Nomor tujuan ternormalisasi (HP e-wallet / norek) untuk matching WD — kunci
+    # kuat analog TXN ID gateway. Diisi dari Panel (Player Bank segmen ke-3) & mutasi
+    # bank (deskripsi transfer keluar / topup e-wallet). Kosong bila tak ada nomor.
+    dest_account = models.CharField(max_length=32, blank=True, default="", db_index=True)
 
     description = models.TextField(blank=True)
     raw = models.JSONField(default=dict, help_text="baris asli (telusur balik)")

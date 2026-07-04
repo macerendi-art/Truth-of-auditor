@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import pdfplumber
 
-from .banks import extract_bca_name, is_bca_fee
+from .banks import extract_bca_dest, extract_bca_name, is_bca_fee
 from .base import BaseParser, parse_decimal, parse_dt, row_hash
 
 DATE_RE = re.compile(r"^(\d{2}/\d{2}/\d{4})\s+(.*)$")
@@ -78,6 +78,7 @@ class BCAPDFParser(BaseParser):
                 "username": "",
                 "reference": "",
                 "counterparty": _clean_name(middle, t["cont"]),
+                "dest_account": extract_bca_dest(desc),
                 "description": desc,
                 "raw": {"date": t["date"], "line": t["rest"], "cont": " ".join(t["cont"])},
             }

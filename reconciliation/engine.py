@@ -269,6 +269,10 @@ class _MoneyMatcher:
                 continue
 
             # ===== Pass 2: bank FUZZY (hanya panel yang belum kena gateway) =====
+            # Nomor tujuan (dest_account) = KUNCI KUAT WD, analog TXN ID gateway: kalau
+            # panel & bank sama-sama punya nomor tujuan dan cocok (sudah ternormalisasi
+            # di parser → cukup bandingkan eksak), skor 100 & tandai dest — menang atas
+            # kecocokan nama. Kalau nomor tak ada / beda → jatuh ke skor nama biasa.
             scored = []
             for b in bank_by_amt.get(int(abs(p.money_delta)), []):
                 if b.id in used:
@@ -277,36 +281,48 @@ class _MoneyMatcher:
                     continue  # arah uang harus sama
                 if not date_ok(p.occurred_at, b.occurred_at, tol):
                     continue
-                if p.username and b.username:
+                is_dest = bool(p.dest_account and b.dest_account and p.dest_account == b.dest_account)
+                if is_dest:
+                    s = 100.0
+                elif p.username and b.username:
                     s = 100.0 if p.username.lower() == b.username.lower() else 40.0
                     if p.counterparty and b.counterparty:
                         s = max(s, _name_score(p.counterparty, b.counterparty))
                 else:
                     s = _name_score(p.counterparty, b.counterparty)
-                scored.append((s, b))
+                scored.append((s, b, is_dest))
             if scored:
-                best_s = max(s for s, _ in scored)
-                best = next(b for s, b in scored if s == best_s)
+                best_s = max(s for s, _, _ in scored)
+                # Pada skor seri, kandidat dest-match diprioritaskan (kunci kuat menang
+                # atas kecocokan nama yang kebetulan sama-sama 100).
+                best, best_is_dest = next(
+                    ((b, d) for s, b, d in scored if s == best_s and d),
+                    next((b, d) for s, b, d in scored if s == best_s),
+                )
             else:
-                best, best_s = None, -1
+                best, best_s, best_is_dest = None, -1, False
             # Ambigu SEJATI: >=2 kandidat SERI di skor tertinggi DAN lolos ambang DAN
             # ber-IDENTITAS BERBEDA → tinjau, JANGAN konsumsi (auditor pilih). Deposit
-            # berulang oleh user SAMA BUKAN ambigu → pasangkan greedy 1-1.
-            tied = [b for s, b in scored if s == best_s]
+            # berulang oleh user SAMA BUKAN ambigu → pasangkan greedy 1-1. Untuk baris
+            # dest-match, identitas = NOMOR TUJUAN (nomor sama = identitas sama, walau
+            # nama kosong) → jangan dianggap ambigu.
+            tied = [(b, d) for s, b, d in scored if s == best_s]
             tied_idents = {
-                (b.username or "").strip().lower() or (b.counterparty or "").strip().lower()
-                for b in tied
+                b.dest_account if d
+                else ((b.username or "").strip().lower() or (b.counterparty or "").strip().lower())
+                for b, d in tied
             }
             ambiguous = len(tied) >= 2 and len(tied_idents) >= 2
+            match_reason = "bank_dest" if best_is_dest else "amount+date+name"
             if best is not None and best_s >= tol.fuzzy_threshold and ambiguous:
-                names = ", ".join(f"#{b.id} {b.counterparty or b.username or '-'}" for b in tied)
+                names = ", ".join(f"#{b.id} {b.counterparty or b.username or '-'}" for b, _ in tied)
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=None,
                                        score=best_s, reason_code="ambiguous_multi",
                                        reason_detail=f"{len(tied)} kandidat seri (skor {best_s:.0f}): {names}"))
             elif best is not None and best_s >= tol.fuzzy_threshold:
                 used.add(best.id)
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.COCOK, left=p, right=best,
-                                       score=best_s, reason_code="amount+date+name"))
+                                       score=best_s, reason_code=match_reason))
             elif best is not None:
                 used.add(best.id)
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=best,

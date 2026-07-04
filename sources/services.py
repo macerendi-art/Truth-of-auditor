@@ -115,6 +115,7 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
                         username=row["username"],
                         reference=row["reference"],
                         counterparty=row["counterparty"],
+                        dest_account=row.get("dest_account", ""),
                         description=row["description"],
                         raw=row["raw"],
                         row_hash=rh,

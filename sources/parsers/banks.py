@@ -12,6 +12,7 @@ import openpyxl
 
 from .base import (
     BaseParser,
+    normalize_dest,
     parse_decimal,
     parse_dt,
     read_csv_raw,
@@ -73,6 +74,50 @@ def extract_bca_name(text):
     if not name and trfdn:  # fallback: nama dari baris lanjutan TRFDN
         name = trfdn.group(1).strip(" -.,:/")
     return re.sub(r"\s+", " ", name).strip()
+
+
+# --- Ekstraksi nomor tujuan BCA (dipakai CSV & PDF) — HANYA topup e-wallet ---
+# Terbukti di data: HP tujuan muncul setelah pola '- - <hp>' ('.../DANA - - 083..').
+BCA_DEST_DASH_RE = re.compile(r"-\s+-\s+0?(\d{9,13})")
+# Fallback: HP di ekor tanpa '- -' ('GOPAY TOPUP ... 085..'), tapi HANYA pada baris
+# topup e-wallet agar tak menangkap nomor referensi transfer bank ('TRF 5316.. NAMA').
+BCA_DEST_TAIL_RE = re.compile(r"0?(\d{9,13})(?:\s+TRSF|\s*$)")
+BCA_EWALLET_RE = re.compile(r"\b(DANA|GOPAY|OVO|SHOPEEPAY|LINKAJA)\b", re.IGNORECASE)
+
+
+def extract_bca_dest(text):
+    """Nomor tujuan (HP e-wallet) dari keterangan BCA -> ternormalisasi, atau ''.
+
+    Transfer bank-ke-bank ('TRANSFER KE 535 <NAMA> BI-FAST DB') hanya mencatat NAMA,
+    tak ada nomor -> ''. Nomor hanya diambil dari topup e-wallet (DANA/GOPAY/dst)."""
+    s = re.sub(r"\s+", " ", str(text or "")).strip()
+    m = BCA_DEST_DASH_RE.search(s)
+    if m:
+        return normalize_dest(m.group(1))
+    if BCA_EWALLET_RE.search(s):  # fallback hanya utk baris topup e-wallet
+        m = BCA_DEST_TAIL_RE.search(s)
+        if m:
+            return normalize_dest(m.group(1))
+    return ""
+
+
+# --- Ekstraksi nomor tujuan BRI ---
+# Transfer keluar e-wallet 'BFST<nomor>' & virtual account 'BRIVA<va>'. Baris internal
+# 'NBMB ... TO <NAMA> ESB:...' hanya punya NAMA (ekor angka = referensi ESB) -> ''.
+BRI_DEST_BFST_RE = re.compile(r"BFST(\d{9,})")
+BRI_DEST_BRIVA_RE = re.compile(r"BRIVA\s?(\d{11,})")
+
+
+def extract_bri_dest(text):
+    """Nomor tujuan BRI dari deskripsi (BFST/BRIVA) -> ternormalisasi, atau ''."""
+    s = str(text or "")
+    m = BRI_DEST_BFST_RE.search(s)
+    if m:
+        return normalize_dest(m.group(1))
+    m = BRI_DEST_BRIVA_RE.search(s)
+    if m:
+        return normalize_dest(m.group(1))
+    return ""
 
 
 # --- Mandiri ---
@@ -158,6 +203,7 @@ class BRIParser(BaseParser):
                 "username": "",
                 "reference": seq,
                 "counterparty": counterparty,
+                "dest_account": extract_bri_dest(desc),
                 "description": desc,
                 "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
             }
@@ -209,6 +255,7 @@ class BCACSVParser(BaseParser):
                 "username": "",
                 "reference": "",
                 "counterparty": extract_bca_name(desc),
+                "dest_account": extract_bca_dest(desc),
                 "description": desc,
                 "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
             }
