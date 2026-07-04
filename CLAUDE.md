@@ -17,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The virtualenv is at `.venv`. Activate it first: `source .venv/bin/activate`.
 
 ```bash
-python manage.py test                         # run all tests (~368)
+python manage.py test                         # run all tests (~428)
 python manage.py test web.tests_reconcile     # one module
 python manage.py test web.tests_reconcile.SomeTestCase.test_x   # one test
 python manage.py runserver                     # dev server (sqlite, DEBUG=True)
@@ -76,6 +76,11 @@ All money is normalized to **rupiah** on the canonical `Transaction`. Sign and s
 - RBAC is scoped **per Toko** (`web/access.py tokos_for(user)`): admins/supervisors see all active Tokos; auditors only `allowed_tokos`. Every object lookup in views must filter `toko__in=tokos_for(request.user)` (or the active toko for admin deletes). Active toko lives in the session (`active_toko_id`), injected by the `web.context_processors.toko` context processor. Custom user model `accounts.User` (roles admin/supervisor/auditor; no public signup).
 - Batch numbers shown to users are **per-toko positional** (count of `id <= pk` for that toko), not pks.
 - Views live in `web/views.py` (upload/reconcile/rematch flow) and `web/admin_views.py` (Toko/user management, deletes).
+- **UI = design system `web/static/web/css/app.css`** (token 3 tingkat via `@layer`, palet coral/navy — spec di `docs/superpowers/specs/2026-07-05-ui-makeover-design.md`). Semua aset vendored (htmx 2.0.4, GSAP, sprite Lucide via `scripts/build_icon_sprite.py`) — TANPA CDN/origin eksternal. Modal pakai `<dialog class="modal">` native. Tabel hasil run_detail di-swap parsial htmx: fragmen `_run_table.html` (`#result-table`), view mengembalikan fragmen saja saat header `HX-Request`.
+- **Guard integritas (F1)**: upload yang transaksinya direferensi MatchResult (left/right) ATAU `consumed_by_batch` TIDAK bisa dihapus (`_locking_batches` di `admin_views.py`) — hapus batch-nya dulu. Riwayat upload dianotasi `locked` (`_uploads_for`) → tombol digembok. Batch/run yang summary-nya berisi tapi MatchResult-nya 0 (cangkang pasca-hapus bukti di data lama) dapat banner merah `rusak`.
+- **Riwayat batch day-centric**: identitas batch = tanggal DATA (`_window_label`, bulan Indonesia), bukan created_at. Chip status per baris (`_status_batches`): ✓ final / ⏳ n ekor / ⚠ n selisih real / ⚑ tinjau / bukti dihapus. Heuristik ekor = `_pending_t1` (no_money + malam ≥ jam `_JAM_EKOR` di date_to window); banner batch_detail memuat RUPIAH ekor per arah + sisa di luar ekor.
+- **Guard urutan**: form reconcile membawa `data-saran`; pilih date_from > saran → modal konfirmasi (salah urut = batch baru bisa mengonsumsi uang hari sebelumnya, permanen). Guard tanggal-kosong tetap prioritas.
+- **Review manual menyinkronkan summary**: `review`/`review_bulk` memanggil `_refresh_bucket_summaries(run)` — hitungan bucket `run.summary` & `batch.summary["buckets"]` di-recompute dari DB (kunci lain tidak disentuh). Stat kartu tidak boleh menyimpang dari tabel.
 
 ## Deployment
 
