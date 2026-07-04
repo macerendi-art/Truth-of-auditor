@@ -396,3 +396,93 @@ class GatewayTicketMatchTests(TestCase):
         self._tx(self.gw, "depo", "88000", "g2", ticket_no="UUIDY", status="UNPAID", username="z")
         b = self._run()
         self.assertEqual(b.summary["dp"]["money_gross"], 50000.0)
+
+
+class WdDestKeyTests(TestCase):
+    """WD dicocokkan via NOMOR TUJUAN (HP e-wallet / norek) sebagai kunci kuat —
+    analog TXN ID gateway. Nama boleh kosong/lemah: kalau dest cocok -> COCOK
+    (reason bank_dest). Dest beda -> tetap weak_name. Nomor sama utk 2 player = tetap
+    dua-duanya COCOK (identitas pasti, bukan ambigu)."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.tol, _ = ToleranceProfile.objects.get_or_create(name="Default")
+        self.tol.date_window_days = 1
+        self.tol.fuzzy_threshold = 85
+        self.tol.save()
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        self.up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+
+    def _tx(self, st, jenis, money, rh, day=27, **kw):
+        return Transaction.objects.create(
+            upload=self.up, source_type=st, toko=self.lbs, jenis=jenis,
+            amount=Decimal(abs(int(money))), money_delta=Decimal(money),
+            occurred_at=datetime(2026, 6, day, 21, 0), row_hash=rh, **kw,
+        )
+
+    def _pb(self, batch):
+        return batch.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+
+    def _run(self):
+        return run_batch(self.lbs, self.tol)
+
+    def test_wd_dest_match_no_name_cocok(self):
+        # (a) Panel WD + bank WD dest sama, NAMA KOSONG kedua sisi -> COCOK bank_dest.
+        self._tx(self.panel, "wd", "-50000", "p1", dest_account="81917710481", counterparty="", username="")
+        self._tx(self.bank, "wd", "-50000", "kb", dest_account="81917710481", counterparty="", username="")
+        pb = self._pb(self._run())
+        r = pb.results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+        self.assertEqual(r.reason_code, "bank_dest")
+        self.assertEqual(r.score, 100)
+
+    def test_wd_dest_beda_tetap_weak_name(self):
+        # (b) dest beda + nama tak cocok -> tetap weak_name (tak diselamatkan dest).
+        self._tx(self.panel, "wd", "-50000", "p1", dest_account="81917710481", counterparty="BUDI")
+        self._tx(self.bank, "wd", "-50000", "kb", dest_account="99900011122", counterparty="XYZ RANDOM")
+        pb = self._pb(self._run())
+        r = pb.results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "perlu_tinjau")
+        self.assertEqual(r.reason_code, "weak_name")
+
+    def test_wd_dest_match_menang_atas_nama(self):
+        # (c-var) dest ternormalisasi cocok walau panel simpan '0' depan & bank buang.
+        self._tx(self.panel, "wd", "-50000", "p1", dest_account="81917710481", counterparty="A")
+        self._tx(self.bank, "wd", "-50000", "kb", dest_account="81917710481", counterparty="Z")
+        pb = self._pb(self._run())
+        r = pb.results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+        self.assertEqual(r.reason_code, "bank_dest")
+
+    def test_wd_dua_player_dest_sama_dua_cocok(self):
+        # (f) dua Panel WD player beda, nominal sama, dua bank dest SAMA nomor ->
+        # dua-duanya COCOK bank_dest (nomor sama = identitas sama, BUKAN ambigu).
+        self._tx(self.panel, "wd", "-50000", "p1", dest_account="81917710481", counterparty="", username="ariii25")
+        self._tx(self.panel, "wd", "-50000", "p2", dest_account="81917710481", counterparty="", username="jarottt25")
+        self._tx(self.bank, "wd", "-50000", "kb1", dest_account="81917710481", counterparty="")
+        self._tx(self.bank, "wd", "-50000", "kb2", dest_account="81917710481", counterparty="")
+        pb = self._pb(self._run())
+        self.assertEqual(pb.summary["cocok"], 2)
+        self.assertEqual(pb.summary["perlu_tinjau"], 0)
+        for r in pb.results.filter(left__isnull=False):
+            self.assertEqual(r.reason_code, "bank_dest")
+
+    def test_dp_name_match_still_amount_date_name(self):
+        # Tanpa dest (atau dest tak dipakai): DP nama cocok tetap reason lama.
+        self._tx(self.panel, "depo", "50000", "p1", username="budi")
+        self._tx(self.bank, "depo", "50000", "kb", username="budi")
+        pb = self._pb(self._run())
+        r = pb.results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+        self.assertEqual(r.reason_code, "amount+date+name")
+
+    def test_wd_dest_only_one_side_falls_back_to_name(self):
+        # Panel punya dest, bank tak punya dest (transfer nama saja) tapi NAMA cocok
+        # -> tetap COCOK lewat jalur nama (reason amount+date+name), bukan bank_dest.
+        self._tx(self.panel, "wd", "-50000", "p1", dest_account="81917710481", counterparty="BUDI SANTOSO")
+        self._tx(self.bank, "wd", "-50000", "kb", dest_account="", counterparty="BUDI SANTOSO")
+        pb = self._pb(self._run())
+        r = pb.results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+        self.assertEqual(r.reason_code, "amount+date+name")

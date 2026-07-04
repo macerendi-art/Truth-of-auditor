@@ -30,6 +30,23 @@ def clean_name(text):
     return re.sub(r"\s+", " ", s).strip()
 
 
+def normalize_dest(value):
+    """Normalisasi nomor tujuan (HP e-wallet / norek) untuk kunci matching WD.
+
+    Terbukti di data nyata: ambil digit saja -> buang kode negara '62' di depan
+    (bila menyisakan >=9 digit) -> buang '0' di depan -> valid jika >=9 digit,
+    selain itu '' (nomor terlalu pendek/kosong tak dipakai sebagai kunci).
+
+    Contoh: '083822153879' -> '83822153879'; '6282279003062' -> '82279003062';
+    '82279003062' -> '82279003062' (leading-zero yg hilang di CSV bank tetap sama).
+    """
+    digits = re.sub(r"\D", "", str(value or ""))
+    if digits.startswith("62") and len(digits) - 2 >= 9:
+        digits = digits[2:]
+    digits = digits.lstrip("0")
+    return digits if len(digits) >= 9 else ""
+
+
 def read_xlsx_rows(path, header_row=1, sheet=None):
     """Baca xlsx -> (headers, list_of_dict). header_row 1-based."""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
