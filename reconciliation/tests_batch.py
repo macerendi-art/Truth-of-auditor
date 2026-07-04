@@ -486,3 +486,38 @@ class WdDestKeyTests(TestCase):
         r = pb.results.get(left__isnull=False)
         self.assertEqual(r.bucket, "cocok")
         self.assertEqual(r.reason_code, "amount+date+name")
+
+
+class StringDateTests(TestCase):
+    """Regresi: web POST /reconcile/ mengirim tanggal sebagai STRING 'YYYY-MM-DD'
+    (bukan objek date) — _widen_dto pernah crash 'str + timedelta'. run_batch &
+    run_match wajib menerima keduanya."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.tol, _ = ToleranceProfile.objects.get_or_create(name="Default")
+        self.tol.date_window_days = 1
+        self.tol.save()
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+        for st, jenis, money, rh, day in [
+            (self.panel, "depo", "50000", "p26", 26),
+            (self.bank, "depo", "50000", "k27", 27),  # T+1: butuh _widen_dto jalan
+        ]:
+            Transaction.objects.create(
+                upload=up, source_type=st, toko=self.lbs, jenis=jenis,
+                amount=Decimal("50000"), money_delta=Decimal(money),
+                occurred_at=datetime(2026, 6, day, 21, 0), row_hash=rh, username="budi",
+            )
+
+    def test_run_batch_terima_tanggal_string(self):
+        batch = run_batch(self.lbs, self.tol, date_from="2026-06-26", date_to="2026-06-26")
+        pb = batch.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+        self.assertEqual(pb.summary["cocok"], 1)
+        # window tersimpan sebagai date beneran di batch
+        self.assertEqual(batch.date_from, date(2026, 6, 26))
+
+    def test_run_batch_tanggal_string_tak_valid_error_jelas(self):
+        with self.assertRaises(ValueError):
+            run_batch(self.lbs, self.tol, date_from="26/06/2026", date_to="26/06/2026")
