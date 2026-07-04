@@ -88,6 +88,22 @@ Pola sehat: mayoritas "selisih" WD hari-H hanyalah settlement yang uangnya baru 
 
 ---
 
+## Pembaruan 2026-07-05 malam — Matcher v2 + Paket B TERPASANG
+
+Semua rekomendasi P0 + matcher v2 diimplementasikan (commit `3bf3267`, `a079ad3`, `a2210e8`) dan divalidasi trial ulang + audit independen:
+
+| Metrik (3 hari) | Sebelum | Sesudah |
+|---|---|---|
+| Perlu tinjau per hari | 1.141 / 861 / 894 | **182 / 107 / 108 (−88%)** |
+| Bukti identitas pada cocok | 97% (sisanya fuzzy/salah sanding) | **100% berbukti keras** (ticket 19.855 · nomor HP/VA 1.687 · nama≥85 1.222) |
+| Match terlewat (audit independen) | 8 terbukti + salah sanding ratusan | **0** |
+| Uang tanpa pasangan | 9.269 baris tak terlihat | terklasifikasi A/B/C/D + halaman `/batch/<id>/uang/` + export |
+| Uang lintas-hari terkunci | 49/35/42 per hari | 0 (carry-over sisi uang) |
+
+Kunci kemenangan: (1) **ticket-join gateway** (100% baris QR/NXPay ber-ticket panel), (2) **assignment global identitas-dulu** (anti-curi kandidat), (3) **identitas nomor HP/VA** — mutasi `FTFVA/DANA`, `GOPAY TOPUP` tak membawa nama tapi membawa nomor HP pemain yang juga ada di `raw["Player Bank"]` panel (riset format mutasi: transfer e-wallet tampil atas nama korporat agregator — PT Espay Debit/DANA, PT Dompet Anak Bangsa/GoPay), (4) prioritas rekening tujuan `Bank Title`, (5) deteksi fee (`amount_fee`, 146 baris) & uang H-1.
+
+Catatan pembacaan angka: selisih live WD 27/06 kini 16,9 jt (sebelumnya "4,9 jt") — angka lama itu SEMU karena pasangan-asing ikut dihitung matched; angka baru dapat dipertanggungjawabkan per baris. Selisih yang tersisa = kredit yang uangnya sungguh belum tiba + daftar D untuk investigasi.
+
 ## Lampiran — Catatan Operasional (insiden 4 Juli 2026)
 
 - Produksi 500 total: **volume Postgres 500MB penuh** (WAL run besar; default `max_wal_size=1GB` mustahil untuk volume 500MB). Dipulihkan tanpa kehilangan data (pg_wal dipindah sementara ke disk ephemeral, recovery selesai, `max_wal_size=96MB` dipasang permanen). Backup pra-pemulihan: `~/Truth-of-auditor-backups/pgdata-backup-20260704.tgz`.
