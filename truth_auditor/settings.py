@@ -171,6 +171,20 @@ if _railway_host:
     CSRF_TRUSTED_ORIGINS.append(f'https://{_railway_host}')
 CSRF_TRUSTED_ORIGINS += [o.strip() for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()]
 
+# Traceback error 500 harus muncul di log Railway (default Django dengan
+# DEBUG=False hanya mengirim ke email ADMINS — tidak pernah terlihat di log).
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler'},
+    },
+    'root': {'handlers': ['console'], 'level': 'WARNING'},
+    'loggers': {
+        'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+    },
+}
+
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True').lower() == 'true'
