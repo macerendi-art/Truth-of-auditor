@@ -542,14 +542,15 @@ def reconcile(request):
 
     df = request.GET.get("date_from") or None
     dt = request.GET.get("date_to") or None
-    # Saran tanggal: tanpa param eksplisit, prefill hari berikutnya yang belum
-    # direkonsiliasi — cegah footgun "tanggal kosong = telan semua data".
+    # Saran tanggal: hari berikutnya yang belum direkonsiliasi. Tanpa param
+    # eksplisit → prefill (cegah footgun "tanggal kosong = telan semua data");
+    # selalu diteruskan sebagai data-saran utk guard urutan (loncat tanggal =
+    # batch baru bisa mengonsumsi uang hari sebelumnya → salah atribusi permanen).
+    saran = _saran_tanggal(active)
     tanggal_disarankan = False
-    if df is None and dt is None:
-        saran = _saran_tanggal(active)
-        if saran:
-            df = dt = saran.isoformat()
-            tanggal_disarankan = True
+    if df is None and dt is None and saran:
+        df = dt = saran.isoformat()
+        tanggal_disarankan = True
     bank = request.GET.get("bank", "")
     if bank not in ("bank", "gateway"):
         bank = ""  # nilai tak dikenal → perlakukan sebagai "semua sumber"
@@ -579,6 +580,7 @@ def reconcile(request):
         "bank": bank,
         "date_from": df or "", "date_to": dt or "",
         "tanggal_disarankan": tanggal_disarankan,
+        "saran_iso": saran.isoformat() if saran else "",
     }
     return render(request, "web/reconcile.html", ctx)
 

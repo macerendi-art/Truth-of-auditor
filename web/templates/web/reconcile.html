@@ -26,7 +26,7 @@
 
   <div class="card reveal">
     <h3 style="margin:0 0 12px">Jalankan</h3>
-    <form method="post" id="jalankan-form">
+    <form method="post" id="jalankan-form" data-saran="{{ saran_iso }}">
       {% csrf_token %}
       <div class="field"><label>Profil Toleransi</label>
         <select name="tolerance" class="f">{% for t in tolerances %}<option value="{{ t.name }}">{{ t.name }} (±{{ t.date_window_days }} hari)</option>{% endfor %}</select></div>
@@ -43,27 +43,34 @@
   </div>
 </div>
 <script>
-/* Tanggal kosong = rekonsiliasi SEMUA data aktif jadi satu batch — minta
-   konfirmasi lewat modal data-confirm (atribut di-toggle dinamis) DAN
-   tombol berubah merah + label peringatan sebelum modal muncul. */
+/* Dua guard di form yang sama, dua footgun berbeda (modal data-confirm
+   di-toggle dinamis, tombol ikut berubah):
+   1. Tanggal kosong = rekonsiliasi SEMUA data aktif jadi satu batch.
+   2. Loncat tanggal (mulai > saran) = hari sebelumnya belum direkonsiliasi;
+      batch baru bisa memakan uang hari itu → salah atribusi PERMANEN
+      (re-match tidak pernah mencuri balik dari batch lain). */
 (function(){
   var f=document.getElementById('jalankan-form');
   if(!f) return;
   var df=f.querySelector('[name=date_from]'), dt=f.querySelector('[name=date_to]'),
       btn=document.getElementById('jalankan-btn'),
       recap=document.getElementById('recap'),
+      saran=f.getAttribute('data-saran')||'',
       asli=btn.textContent;
   function sync(){
-    var kosong=!df.value && !dt.value;
+    var kosong=!df.value && !dt.value,
+        loncat=!kosong && saran && df.value && df.value > saran;  // ISO string: banding leksikal aman
     if(kosong){
       f.setAttribute('data-confirm','Tanggal kosong = rekonsiliasi SEMUA data aktif (semua tanggal digabung jadi satu batch). Lanjutkan?');
+    }else if(loncat){
+      f.setAttribute('data-confirm','Tanggal '+saran+' belum direkonsiliasi. Menjalankan '+df.value+' duluan bisa salah-atribusi uang hari sebelumnya (permanen). Jalankan '+saran+' dulu — atau tetap lanjut?');
     }else{
       f.removeAttribute('data-confirm');
       delete f.dataset.confirmed;
     }
-    btn.classList.toggle('danger', kosong);
-    btn.classList.toggle('primary', !kosong);
-    btn.textContent = kosong ? '⚠ Jalankan SEMUA data' : asli;
+    btn.classList.toggle('danger', kosong||loncat);
+    btn.classList.toggle('primary', !(kosong||loncat));
+    btn.textContent = kosong ? '⚠ Jalankan SEMUA data' : (loncat ? '⚠ Loncati '+saran : asli);
     // Rekap live: pernyataan niat sebelum tombol ditekan.
     var n=document.querySelectorAll('input[name^=inc_]:checked').length,
         tgl = kosong ? 'SEMUA tanggal' : (df.value===dt.value ? df.value : df.value+' → '+dt.value);
