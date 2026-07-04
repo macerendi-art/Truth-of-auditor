@@ -617,12 +617,27 @@ def batch_detail(request, pk):
         "tidak_cocok": raw_bk.get("tidak_cocok") or 0,
     }
     bk["total"] = bk["cocok"] + bk["perlu_tinjau"] + bk["tidak_cocok"]
-    pending_t1 = 0
+    # Ekor T+1 dalam RUPIAH per arah (F5) — pertanyaan pagi auditor bukan
+    # "berapa baris" tapi "berapa rupiah yang tinggal nunggu file besok, berapa
+    # yang beneran harus dikejar". sisa = selisih summary − rupiah ekor.
+    pending_t1 = None
     if batch.date_to:
-        pending_t1 = MatchResult.objects.filter(
-            run__batch=batch, bucket=MatchResult.Bucket.TIDAK, reason_code="no_money",
-            left__occurred_at__date=batch.date_to, left__occurred_at__hour__gte=_JAM_EKOR,
-        ).count()
+        agg = {
+            row["left__jenis"]: row
+            for row in MatchResult.objects.filter(
+                run__batch=batch, bucket=MatchResult.Bucket.TIDAK, reason_code="no_money",
+                left__occurred_at__date=batch.date_to, left__occurred_at__hour__gte=_JAM_EKOR,
+            ).values("left__jenis").annotate(n=Count("id"), tot=Sum("left__amount"))
+        }
+        n = sum(row["n"] for row in agg.values())
+        if n:
+            dp_amt = float(agg.get("dp", {}).get("tot") or 0)
+            wd_amt = float(agg.get("wd", {}).get("tot") or 0)
+            pending_t1 = {
+                "n": n, "dp": dp_amt, "wd": wd_amt,
+                "dp_sisa": max(((s.get("dp") or {}).get("selisih") or 0) - dp_amt, 0),
+                "wd_sisa": max(((s.get("wd") or {}).get("selisih") or 0) - wd_amt, 0),
+            }
     return render(request, "web/batch_detail.html", {
         "batch": batch, "batch_no": batch_no, "s": s, "bk": bk, "runs": batch.runs.all(),
         "healing": request.session.pop("healing_report", None),

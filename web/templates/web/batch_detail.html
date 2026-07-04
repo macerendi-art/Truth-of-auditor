@@ -39,11 +39,17 @@
 </div>
 {% endif %}
 
-{% if pending_t1 %}
+{% if pending_t1.n %}
 {# Ekor T+1: bedakan "nunggu file besok" dari selisih nyata — anti panik pagi. #}
 <div class="msg warning reveal" style="margin-bottom:16px">
-  ⏳ {{ pending_t1 }} baris tidak cocok adalah transaksi malam di hari terakhir window —
-  kemungkinan <b>menunggu mutasi H+1</b>, bukan selisih. Upload file besoknya, auto re-match akan menutupnya.
+  <div>⏳ {{ pending_t1.n }} baris tidak cocok adalah transaksi malam di hari terakhir window —
+  kemungkinan <b>menunggu mutasi H+1</b>, bukan selisih. Upload file besoknya, auto re-match akan menutupnya.</div>
+  <div class="num" style="margin-top:6px">
+    Rupiah ekor: <b>DP {{ pending_t1.dp|floatformat:0|intcomma }}</b> · <b>WD {{ pending_t1.wd|floatformat:0|intcomma }}</b>
+    <span class="faint">—</span> sisa selisih <b>di luar ekor</b> (ini yang perlu diperiksa):
+    <b style="color:var(--bad)">DP {{ pending_t1.dp_sisa|floatformat:0|intcomma }}</b> ·
+    <b style="color:var(--bad)">WD {{ pending_t1.wd_sisa|floatformat:0|intcomma }}</b>
+  </div>
 </div>
 {% endif %}
 
