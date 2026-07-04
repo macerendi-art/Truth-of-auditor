@@ -78,7 +78,8 @@
     {# Form massal berdiri sendiri; checkbox baris menautkan diri via atribut form="bulkform" #}
     {# supaya tak ada <form> bersarang di dalam tabel. #}
     <form id="bulkform" method="post" action="{% url 'bulk_delete_uploads' %}" style="margin:0"
-          onsubmit="return confirm('Hapus ' + document.querySelectorAll('.upsel:checked').length + ' file terpilih? Semua baris transaksinya ikut terhapus. Tidak bisa dibatalkan.')">
+          data-confirm="Hapus {n} file terpilih? Semua baris transaksinya ikut terhapus. Tidak bisa dibatalkan."
+          data-confirm-count=".upsel:checked">
       {% csrf_token %}
       <button id="bulkbtn" class="btn sm ghost" type="submit" style="color:var(--bad)" disabled>Hapus terpilih (0)</button>
     </form>
@@ -103,7 +104,7 @@
         {% if is_admin_user %}
         <td class="r">
           <form method="post" action="{% url 'delete_upload' u.pk %}" style="display:inline"
-                onsubmit="return confirm('Hapus {{ u.original_name|default:u.pk }}? {{ u.rows_parsed }} baris transaksi ikut terhapus. Tidak bisa dibatalkan.')">
+                data-confirm="Hapus {{ u.original_name|default:u.pk }}? {{ u.rows_parsed }} baris transaksi ikut terhapus. Tidak bisa dibatalkan.">
             {% csrf_token %}
             <button class="btn sm ghost" type="submit" style="color:var(--bad)">Hapus</button>
           </form>
@@ -120,19 +121,33 @@
 {% if is_admin_user %}
 <script>
 (function(){
-  var all=document.getElementById('upall'),
-      btn=document.getElementById('bulkbtn'),
-      sel=function(){return [].slice.call(document.querySelectorAll('.upsel'));};
-  if(!btn)return;
+  // Binding via delegasi di document (bukan listener per-checkbox saat parse).
+  // Kebal terhadap timing/urutan eksekusi & penggantian DOM: selama #bulkbtn
+  // ada saat event terjadi, hitungan "Hapus terpilih (n)" selalu ter-update.
+  function sel(){ return [].slice.call(document.querySelectorAll('.upsel')); }
   function sync(){
-    var n=sel().filter(function(c){return c.checked;}).length;
+    var btn=document.getElementById('bulkbtn');
+    if(!btn) return;
+    var all=document.getElementById('upall'),
+        boxes=sel(),
+        n=boxes.filter(function(c){return c.checked;}).length;
     btn.textContent='Hapus terpilih ('+n+')';
     btn.disabled=(n===0);
-    if(all)all.checked=(n>0 && n===sel().length);
+    if(all) all.checked=(boxes.length>0 && n===boxes.length);
   }
-  sel().forEach(function(c){c.addEventListener('change',sync);});
-  if(all)all.addEventListener('change',function(){sel().forEach(function(c){c.checked=all.checked;});sync();});
-  sync();
+  document.addEventListener('change', function(e){
+    var t=e.target;
+    if(!t || !t.matches) return;
+    if(t.matches('#upall')){
+      var checked=t.checked;
+      sel().forEach(function(c){ c.checked=checked; });
+      sync();
+    } else if(t.matches('.upsel')){
+      sync();
+    }
+  });
+  function init(){ sync(); }
+  if(document.readyState!=='loading') init(); else document.addEventListener('DOMContentLoaded', init);
 })();
 </script>
 {% endif %}

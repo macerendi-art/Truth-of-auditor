@@ -153,6 +153,9 @@ table.flush{border:none} table.flush thead th{background:none}
 /* ---- POPUP PENGINGAT TOKO ---- */
 .reminder-overlay{position:fixed;inset:0;background:rgba(12,19,34,.6);backdrop-filter:blur(4px);z-index:100;
   display:flex;align-items:center;justify-content:center;padding:20px}
+/* .reminder-overlay memakai display:flex, yang menimpa [hidden] bawaan browser.
+   Tanpa ini, overlay modal yg "tersembunyi" tetap menutupi layar & menyerap klik. */
+.reminder-overlay[hidden]{display:none}
 .reminder-card{background:var(--panel);border-radius:16px;box-shadow:var(--shadow-lg);max-width:460px;width:100%;padding:26px;
   animation:reminder-in .22s ease-out}
 @media(prefers-reduced-motion: reduce){.reminder-card{animation:none}}
@@ -299,6 +302,77 @@ table.flush{border:none} table.flush thead th{background:none}
 })();
 </script>
 {% endif %}
+{# ── Modal konfirmasi reusable ──────────────────────────────────────
+   Ganti confirm() native yang rapuh: sekali user mencentang "jangan
+   tampilkan dialog lagi" di browser, confirm() langsung return false
+   tanpa tampil, sehingga form destruktif tak pernah submit.
+   Pemakaian: <form ... data-confirm="Pesan konfirmasi">. Bila pesan
+   memuat {n}, isi data-confirm-count="<selector>" — {n} diganti jumlah
+   elemen yang cocok saat modal dibuka (dipakai form hapus massal). #}
+<div class="reminder-overlay" id="confirm-modal" hidden>
+  <div class="reminder-card" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title" style="max-width:420px">
+    <span class="ic" style="background:var(--bad);box-shadow:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></span>
+    <div class="kicker">Konfirmasi</div>
+    <h2 id="confirm-modal-title">Yakin lanjutkan?</h2>
+    <p class="desc" id="confirm-modal-msg" style="margin-bottom:22px"></p>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button type="button" class="btn ghost" id="confirm-modal-cancel">Batal</button>
+      <button type="button" class="btn" id="confirm-modal-ok" style="background:var(--bad);border-color:var(--bad);color:#fff">Lanjutkan</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var overlay=document.getElementById('confirm-modal'),
+      msgEl=document.getElementById('confirm-modal-msg'),
+      okBtn=document.getElementById('confirm-modal-ok'),
+      cancelBtn=document.getElementById('confirm-modal-cancel'),
+      pending=null; // <form> yang sedang menunggu konfirmasi
+  if(!overlay)return;
+
+  function buildMsg(form){
+    var msg=form.getAttribute('data-confirm')||'Yakin lanjutkan?',
+        csel=form.getAttribute('data-confirm-count');
+    if(csel && msg.indexOf('{n}')!==-1){
+      var n=document.querySelectorAll(csel).length;
+      msg=msg.replace(/\{n\}/g, n);
+    }
+    return msg;
+  }
+  function open(form){
+    pending=form;
+    msgEl.textContent=buildMsg(form);
+    overlay.hidden=false;
+    okBtn.focus();
+  }
+  function close(){ overlay.hidden=true; pending=null; }
+
+  // Intersep submit SEMUA form[data-confirm] lewat delegasi di document —
+  // kebal terhadap form yang ditambah/diganti belakangan.
+  document.addEventListener('submit', function(e){
+    var form=e.target;
+    if(!form || !form.hasAttribute || !form.hasAttribute('data-confirm')) return;
+    if(form.dataset.confirmed==='1'){ return; } // sudah dikonfirmasi → biarkan lewat
+    e.preventDefault();
+    open(form);
+  }, true);
+
+  okBtn.addEventListener('click', function(){
+    if(!pending) return;
+    var form=pending;
+    close();
+    form.dataset.confirmed='1';
+    // form.submit() tak memicu event 'submit', jadi handler di atas tak
+    // mengintersepnya lagi — form asli terkirim sungguhan.
+    form.submit();
+  });
+
+  function cancel(){ close(); }
+  cancelBtn.addEventListener('click', cancel);
+  overlay.addEventListener('click', function(e){ if(e.target===overlay) cancel(); });
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape' && !overlay.hidden) cancel(); });
+})();
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -44,7 +44,7 @@
     </div>
     <div class="card reveal" style="margin-top:16px">
       <h3>Status Akun</h3>
-      <form method="post" onsubmit="return confirm('{% if target.is_active %}Nonaktifkan{% else %}Aktifkan{% endif %} {{ target.username }}?')">
+      <form method="post" data-confirm="{% if target.is_active %}Nonaktifkan{% else %}Aktifkan{% endif %} {{ target.username }}?">
         {% csrf_token %}
         <input type="hidden" name="action" value="toggle">
         <button class="btn" type="submit">{% if target.is_active %}Nonaktifkan Akun{% else %}Aktifkan Akun{% endif %}</button>
@@ -55,7 +55,7 @@
       <h3>Hapus Akun</h3>
       <p class="faint" style="margin-top:0">Menghapus akun secara permanen. Data (upload, batch) tetap ada tetapi tanpa atribusi.</p>
       <form method="post" action="{% url 'delete_user' target.pk %}"
-            onsubmit="return confirm('Hapus PERMANEN pengguna {{ target.username }}? Akun ini tidak bisa dikembalikan.')">
+            data-confirm="Hapus PERMANEN pengguna {{ target.username }}? Akun ini tidak bisa dikembalikan.">
         {% csrf_token %}
         <button class="btn" type="submit" style="color:#dc2828">Hapus Permanen</button>
       </form>
