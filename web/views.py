@@ -610,6 +610,9 @@ def run_detail(request, pk):
         "batch": batch, "batch_no": batch_no,
         "channels": channels, "channel": channel,
     }
+    # Request htmx (filter tab / pager) → cukup fragmen tabel, tanpa shell.
+    if request.headers.get("HX-Request"):
+        return render(request, "web/_run_table.html", ctx)
     return render(request, "web/run_detail.html", ctx)
 
 
