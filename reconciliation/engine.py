@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from django.db import transaction as db_tx
 from django.db.models import Q, Sum
+from django.utils.dateparse import parse_date
 from rapidfuzz import fuzz
 
 from sources.parsers.base import clean_name
@@ -83,6 +84,18 @@ def _date_filter(qs, dfrom, dto):
     return qs
 
 
+def _as_date(v):
+    """Koersi tanggal di titik masuk engine: web POST & CLI mengirim STRING
+    'YYYY-MM-DD', tes/internal mengirim objek date, None = tanpa batas. Tanpa ini
+    _widen_dto crash 'str + timedelta' saat reconcile harian dari web."""
+    if v is None or hasattr(v, "toordinal"):  # date/datetime lolos apa adanya
+        return v
+    d = parse_date(str(v).strip())
+    if d is None:
+        raise ValueError(f"Format tanggal tidak dikenal: {v!r} (pakai YYYY-MM-DD)")
+    return d
+
+
 def _widen_dto(dto, tol):
     """Batas atas window sisi UANG diperlebar sebesar date_window_days: bank settle
     T+n (mis. Panel malam tgl 26 → mutasi bank baru masuk statement tgl 27) tetap
@@ -104,6 +117,7 @@ def _active(qs):
 
 
 def check_completeness(toko, date_from=None, date_to=None, tol=None):
+    date_from, date_to = _as_date(date_from), _as_date(date_to)
     base = _active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko))
     qs = _date_filter(base, date_from, date_to)
     # Sisi UANG dicek di window settlement (dto diperlebar) supaya bank T+1 terdeteksi
@@ -359,6 +373,7 @@ MATCHERS = {
 
 
 def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None, toko=None, batch=None, include=None):
+    date_from, date_to = _as_date(date_from), _as_date(date_to)
     tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
     matcher = MATCHERS[relation]()
     run = MatchRun.objects.create(
@@ -516,6 +531,7 @@ def _consume_scope(toko, date_from, date_to, include):
 
 
 def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, include=None):
+    date_from, date_to = _as_date(date_from), _as_date(date_to)
     tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
     comp = check_completeness(toko, date_from, date_to, tol=tolerance)
     batch = ReconBatch.objects.create(
