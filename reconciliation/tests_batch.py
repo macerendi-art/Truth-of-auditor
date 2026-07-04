@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.test import TestCase
@@ -154,3 +154,85 @@ class RunBatchTests(TestCase):
             self._tx(self.bracket, "depo", "10000", "10000", f"H{i}", f"hb{i}")
         batch = run_batch(self.lbs, self.tol)
         self.assertEqual(batch.summary["warnings"], [])
+
+
+class T1SettlementTests(TestCase):
+    """Bank settle T+1: Panel malam tgl 26, mutasi bank baru masuk statement tgl 27.
+    Reconcile HARIAN (from=to=26) harus tetap lihat & cocokkan bank-27, atribusi ke 26,
+    dan konsumsi bank-27 supaya tak double-match. Kandidat ganda → perlu ditinjau."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.tol, _ = ToleranceProfile.objects.get_or_create(name="Default")
+        self.tol.date_window_days = 1
+        self.tol.fuzzy_threshold = 85
+        self.tol.save()
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        self.up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+
+    def _tx(self, st, jenis, money, rh, day, **kw):
+        return Transaction.objects.create(
+            upload=self.up, source_type=st, toko=self.lbs, jenis=jenis,
+            amount=Decimal(abs(int(money))), money_delta=Decimal(money),
+            occurred_at=datetime(2026, 6, day, 21, 0), row_hash=rh, **kw,
+        )
+
+    def _day26(self):
+        return run_batch(self.lbs, self.tol, date_from=date(2026, 6, 26), date_to=date(2026, 6, 26))
+
+    def test_t1_single_day_reconcile_runs_panel_bank(self):
+        # Panel-26 ada, bank baru muncul di mutasi tgl 27; reconcile harian tgl 26
+        # tetap harus MENJALANKAN relasi panel_bank (bukan skip karena bank "tak ada").
+        self._tx(self.panel, "depo", "50000", "p26", 26, username="budi")
+        self._tx(self.bank, "depo", "50000", "k27", 27, username="budi")
+        batch = self._day26()
+        self.assertNotIn("panel_bank", batch.summary["skipped"])
+
+    def test_t1_selisih_zero_and_bank_consumed(self):
+        self._tx(self.panel, "depo", "50000", "p26", 26, username="budi")
+        bank = self._tx(self.bank, "depo", "50000", "k27", 27, username="budi")
+        batch = self._day26()
+        pb = batch.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+        self.assertEqual(pb.summary["cocok"], 1)
+        self.assertEqual(batch.summary["dp"]["money_matched"], 50000.0)
+        self.assertEqual(batch.summary["dp"]["selisih"], 0.0)
+        bank.refresh_from_db()
+        self.assertEqual(bank.consumed_by_batch_id, batch.id)
+
+    def test_t1_ambiguous_two_candidates_review(self):
+        self._tx(self.panel, "depo", "50000", "p26", 26, username="budi")
+        b1 = self._tx(self.bank, "depo", "50000", "k27a", 27, username="budi")
+        b2 = self._tx(self.bank, "depo", "50000", "k27b", 27, username="budi")
+        batch = self._day26()
+        pb = batch.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+        self.assertEqual(pb.summary["cocok"], 0)
+        self.assertEqual(pb.summary["perlu_tinjau"], 1)
+        res = pb.results.get()
+        self.assertEqual(res.reason_code, "ambiguous_multi")
+        self.assertIsNone(res.right_id)
+        b1.refresh_from_db()
+        b2.refresh_from_db()
+        self.assertIsNone(b1.consumed_by_batch_id)
+        self.assertIsNone(b2.consumed_by_batch_id)
+        self.assertEqual(batch.summary["dp"]["money_matched"], 0.0)
+
+    def test_t1_single_best_candidate_matches(self):
+        # Dua bank beda nama: hanya satu cocok nama → bukan ambigu, tetap COCOK.
+        self._tx(self.panel, "depo", "50000", "p26", 26, username="budi")
+        self._tx(self.bank, "depo", "50000", "k27a", 27, username="budi")
+        self._tx(self.bank, "depo", "50000", "k27b", 27, username="siti")
+        batch = self._day26()
+        pb = batch.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+        self.assertEqual(pb.summary["cocok"], 1)
+        self.assertEqual(pb.summary["perlu_tinjau"], 0)
+
+    def test_t1_weak_name_still_review(self):
+        # Satu kandidat, nama lemah, tanpa username → tetap weak_name (bukan ambiguous_multi).
+        self._tx(self.panel, "depo", "50000", "p26", 26, counterparty="BUDI SANTOSO")
+        self._tx(self.bank, "depo", "50000", "k27", 27, counterparty="XYZ RANDOM")
+        batch = self._day26()
+        pb = batch.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+        res = pb.results.get()
+        self.assertEqual(res.reason_code, "weak_name")
+        self.assertEqual(pb.summary["perlu_tinjau"], 1)

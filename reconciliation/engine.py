@@ -4,6 +4,7 @@ Tiap relasi punya Matcher sendiri (pluggable lewat MATCHERS). Hasil = MatchResul
 dengan bucket cocok / tidak_cocok / perlu_tinjau + reason. Toleransi dari ToleranceProfile.
 """
 from collections import Counter
+from datetime import timedelta
 
 from django.db import transaction as db_tx
 from django.db.models import Q, Sum
@@ -64,6 +65,16 @@ def _date_filter(qs, dfrom, dto):
     return qs
 
 
+def _widen_dto(dto, tol):
+    """Batas atas window sisi UANG diperlebar sebesar date_window_days: bank settle
+    T+n (mis. Panel malam tgl 26 → mutasi bank baru masuk statement tgl 27) tetap
+    jadi kandidat pada reconcile harian. Reuse date_window_days — satu knob, konsisten
+    dengan gate date_ok. dto/tol None → tak diperlebar (perilaku lama)."""
+    if dto and tol is not None:
+        return dto + timedelta(days=tol.date_window_days)
+    return dto
+
+
 def _toko_filter(qs, toko):
     return qs.filter(toko=toko) if toko is not None else qs
 
@@ -74,19 +85,22 @@ def _active(qs):
     return qs.filter(consumed_by_batch__isnull=True)
 
 
-def check_completeness(toko, date_from=None, date_to=None):
-    qs = _active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko))
-    qs = _date_filter(qs, date_from, date_to)
+def check_completeness(toko, date_from=None, date_to=None, tol=None):
+    base = _active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko))
+    qs = _date_filter(base, date_from, date_to)
+    # Sisi UANG dicek di window settlement (dto diperlebar) supaya bank T+1 terdeteksi
+    # ada — kalau tidak, relasi PANEL_BANK ke-skip pada reconcile harian.
+    money_qs = _date_filter(base, date_from, _widen_dto(date_to, tol))
 
-    def has(**kw):
-        return qs.filter(**kw).exists()
+    def has(q, **kw):
+        return q.filter(**kw).exists()
 
     comp = {
-        "panel_dp": has(source_type__key="panel", jenis="depo"),
-        "panel_wd": has(source_type__key="panel", jenis="wd"),
-        "bracket": has(source_type__key="bracket"),
-        "bank": has(source_type__key="bank"),
-        "gateway": has(source_type__key="gateway"),
+        "panel_dp": has(qs, source_type__key="panel", jenis="depo"),
+        "panel_wd": has(qs, source_type__key="panel", jenis="wd"),
+        "bracket": has(qs, source_type__key="bracket"),
+        "bank": has(money_qs, source_type__key="bank"),
+        "gateway": has(money_qs, source_type__key="gateway"),
     }
     comp["panel"] = comp["panel_dp"] or comp["panel_wd"]
     comp["minimum_met"] = comp["panel"] and (comp["bank"] or comp["gateway"])
@@ -96,7 +110,8 @@ def check_completeness(toko, date_from=None, date_to=None):
 class PanelBracketMatcher:
     """Join via Ticket Number (kuat). Cek kecocokan nominal."""
 
-    def sides(self, dfrom, dto, toko=None, include=None):
+    def sides(self, dfrom, dto, toko=None, include=None, tol=None):
+        # Bracket join via ticket (tak ada lag settlement) → tol diabaikan.
         left = Transaction.objects.filter(source_type__key="panel", is_duplicate=False)
         # include: hilangkan sisi Panel yang tidak dicentang (depo/wd) bila diberikan.
         if include is not None:
@@ -149,7 +164,7 @@ class _MoneyMatcher:
 
     left_key = "panel"
 
-    def sides(self, dfrom, dto, toko=None, include=None):
+    def sides(self, dfrom, dto, toko=None, include=None, tol=None):
         left = Transaction.objects.filter(
             source_type__key=self.left_key, is_duplicate=False
         ).filter(jenis__in=["depo", "wd"])
@@ -161,14 +176,16 @@ class _MoneyMatcher:
                 left = left.exclude(jenis="wd")
         left = _date_filter(_active(_toko_filter(left, toko)), dfrom, dto)
 
-        # right: hanya sumber UANG yang dicentang (bank dan/atau gateway).
+        # right: hanya sumber UANG yang dicentang (bank dan/atau gateway). Window
+        # atas diperlebar (settlement T+n) supaya bank pending yang masuk hari
+        # berikutnya tetap jadi kandidat; jarak pair tetap digate date_ok.
         money_keys = _included_money_sources(include)
         right = _date_filter(
             _active(_toko_filter(
                 Transaction.objects.filter(source_type__key__in=money_keys, is_duplicate=False).exclude(jenis="admin"),
                 toko,
             )),
-            dfrom, dto,
+            dfrom, _widen_dto(dto, tol),
         )
         return list(left), list(right)
 
@@ -179,7 +196,7 @@ class _MoneyMatcher:
             bidx.setdefault(int(abs(b.money_delta)), []).append(b)
         used, out = set(), []
         for p in left:
-            best, best_s = None, -1
+            scored = []
             for b in bidx.get(int(abs(p.money_delta)), []):
                 if b.id in used:
                     continue
@@ -193,8 +210,21 @@ class _MoneyMatcher:
                         s = max(s, _name_score(p.counterparty, b.counterparty))
                 else:
                     s = _name_score(p.counterparty, b.counterparty)
-                if s > best_s:
-                    best, best_s = b, s
+                scored.append((s, b))
+            if scored:
+                best_s = max(s for s, _ in scored)
+                best = next(b for s, b in scored if s == best_s)
+            else:
+                best, best_s = None, -1
+            # Ambigu: >=2 kandidat SERI di skor tertinggi DAN lolos ambang → tinjau,
+            # JANGAN konsumsi (auditor pilih); auto-match salah satu bisa keliru.
+            tied = [b for s, b in scored if s == best_s]
+            if best is not None and best_s >= tol.fuzzy_threshold and len(tied) >= 2:
+                names = ", ".join(f"#{b.id} {b.counterparty or b.username or '-'}" for b in tied)
+                out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=None,
+                                       score=best_s, reason_code="ambiguous_multi",
+                                       reason_detail=f"{len(tied)} kandidat seri (skor {best_s:.0f}): {names}"))
+                continue
             if best is not None and best_s >= tol.fuzzy_threshold:
                 used.add(best.id)
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.COCOK, left=p, right=best,
@@ -233,7 +263,7 @@ def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None,
         relation=relation, tolerance=tolerance, date_from=date_from, date_to=date_to,
         created_by=user, batch=batch,
     )
-    left, right = matcher.sides(date_from, date_to, toko, include=include)
+    left, right = matcher.sides(date_from, date_to, toko, include=include, tol=tolerance)
     results = matcher.match(run, left, right)
     with db_tx.atomic():
         MatchResult.objects.bulk_create(results, batch_size=2000)
@@ -370,7 +400,7 @@ def _consume_scope(toko, date_from, date_to, include):
 
 def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, include=None):
     tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
-    comp = check_completeness(toko, date_from, date_to)
+    comp = check_completeness(toko, date_from, date_to, tol=tolerance)
     batch = ReconBatch.objects.create(
         toko=toko, tolerance=tolerance, date_from=date_from, date_to=date_to,
         created_by=user, completeness=comp,
@@ -397,4 +427,17 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
     # tercapai → transaksi tetap aktif (gagal = tidak dibersihkan). Hanya sumber
     # yang diikutkan yang dikunci; sumber tak dicentang tetap tersedia lain kali.
     _consume_scope(toko, date_from, date_to, include).update(consumed_by_batch=batch)
+    # Spillover T+n: baris UANG yang settle di luar [from,to] tapi BERPASANGAN ke
+    # Panel di batch ini juga dikunci — kalau tidak, batch besok match ulang.
+    # Orphan (tak match) TIDAK dikonsumsi → tetap tersedia untuk batch berikutnya.
+    spill = list(
+        MatchResult.objects.filter(
+            run__batch=batch,
+            right__isnull=False,
+            right__source_type__key__in=MONEY_SOURCES,
+            right__consumed_by_batch__isnull=True,
+        ).values_list("right_id", flat=True)
+    )
+    if spill:
+        Transaction.objects.filter(id__in=spill).update(consumed_by_batch=batch)
     return batch
