@@ -54,6 +54,10 @@ class ReconBatch(TimeStampedModel):
     date_to = models.DateField(null=True, blank=True)
     summary = models.JSONField(default=dict)
     completeness = models.JSONField(default=dict)
+    include = models.JSONField(
+        null=True, blank=True,
+        help_text="sumber yang diikutkan saat run (None = semua, legacy)",
+    )
     created_by = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True
     )
