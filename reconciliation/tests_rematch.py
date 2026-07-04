@@ -309,44 +309,93 @@ class RematchViewTests(TestCase):
         self.assertEqual(r.status_code, 404)
 
 
-class RematchHintTests(_Base):
-    """Banner saran di flash upload: setelah upload sumber uang, batch lama dengan
-    baris tidak_cocok yang window-nya overlap ditandai untuk Re-match."""
+class RematchCandidatesTests(_Base):
+    """Kandidat auto re-match setelah upload sumber uang: batch lama dengan baris
+    tidak_cocok yang window-nya overlap rentang tanggal transaksi baru, urut TERTUA
+    dulu (hari lebih awal dapat pilihan pertama)."""
 
-    def test_hint_mentions_overlapping_batch_with_tidak_cocok(self):
-        from web.views import _rematch_hint
+    def _money_up(self, days=(25,), amount="50000", prefix="k_new"):
+        money_up = Upload.objects.create(source_type=self.bank, toko=self.lbs)
+        for d in days:
+            Transaction.objects.create(
+                upload=money_up, source_type=self.bank, toko=self.lbs, jenis="depo",
+                amount=Decimal(amount), money_delta=Decimal(amount),
+                occurred_at=datetime(2026, 6, d, 21, 0), row_hash=f"{prefix}_{d}",
+            )
+        return money_up
+
+    def test_candidates_overlapping_batch_with_tidak_cocok(self):
+        from web.views import _rematch_candidates
 
         self._tx(self.panel, "depo", "50000", "p25", day=25, username="budi")
         batch = self._batch_25()  # ada ekor tidak_cocok
+        cands = _rematch_candidates(self.lbs, [self._money_up()])
+        self.assertEqual([b.pk for b, _no in cands], [batch.pk])
 
-        # Upload uang baru dgn transaksi tgl 25 (bank straggler) → overlap window batch.
-        money_up = Upload.objects.create(source_type=self.bank, toko=self.lbs)
-        Transaction.objects.create(
-            upload=money_up, source_type=self.bank, toko=self.lbs, jenis="depo",
-            amount=Decimal("50000"), money_delta=Decimal("50000"),
-            occurred_at=datetime(2026, 6, 25, 21, 0), row_hash="k_new",
-        )
-        hint = _rematch_hint(self.lbs, [money_up])
-        self.assertIn("Re-match", hint)
-        self.assertIn("Batch", hint)
+    def test_no_candidates_when_batch_has_no_tidak_cocok(self):
+        from web.views import _rematch_candidates
 
-    def test_no_hint_when_batch_has_no_tidak_cocok(self):
-        from web.views import _rematch_hint
-
-        # Batch tanpa tidak_cocok (panel cocok penuh) → tak ada saran.
         self._tx(self.panel, "depo", "50000", "p25", day=25, username="budi")
         self._tx(self.bank, "depo", "50000", "k25", day=25, username="budi")
         self._batch_25(noise=False)
+        self.assertEqual(_rematch_candidates(self.lbs, [self._money_up(amount="99000")]), [])
 
+    def test_no_candidates_for_empty_money_uploads(self):
+        from web.views import _rematch_candidates
+
+        self.assertEqual(_rematch_candidates(self.lbs, []), [])
+
+    def test_candidates_oldest_batch_first(self):
+        from web.views import _rematch_candidates
+
+        self._tx(self.panel, "depo", "50000", "p25", day=25, username="budi")
+        b25 = self._batch_25()
+        self._tx(self.panel, "depo", "70000", "p26", day=26, username="cici")
+        self._tx(self.bank, "depo", "17000", "noise26", day=26, username="zzz_noise2")
+        b26 = run_batch(self.lbs, self.tol, date_from=date(2026, 6, 26), date_to=date(2026, 6, 26))
+
+        cands = _rematch_candidates(self.lbs, [self._money_up(days=(25, 26))])
+        self.assertEqual([b.pk for b, _no in cands], [b25.pk, b26.pk])
+
+
+class AutoRematchTests(_Base):
+    """Auto re-match dijalankan langsung setelah upload sumber uang: batch kandidat
+    di-re-match tanpa klik; hanya batch dengan hasil yang dilaporkan (anti-noise)."""
+
+    def test_auto_rematch_pairs_and_reports(self):
+        from web.views import _auto_rematch
+
+        self._tx(self.panel, "depo", "50000", "p25", day=25, username="budi")
+        batch = self._batch_25()
+        money_up = Upload.objects.create(source_type=self.bank, toko=self.lbs)
+        bank = Transaction.objects.create(
+            upload=money_up, source_type=self.bank, toko=self.lbs, jenis="depo",
+            amount=Decimal("50000"), money_delta=Decimal("50000"),
+            occurred_at=datetime(2026, 6, 25, 21, 0), row_hash="k_new", username="budi",
+        )
+        msgs = _auto_rematch(self.lbs, [money_up])
+        self.assertEqual(len(msgs), 1)
+        level, txt = msgs[0]
+        self.assertEqual(level, "success")
+        self.assertIn("Re-match otomatis", txt)
+        self.assertIn("1 baris tertutup", txt)
+
+        res = self._pb(batch).results.get(left__isnull=False)
+        self.assertEqual(res.bucket, "cocok")
+        bank.refresh_from_db()
+        self.assertEqual(bank.consumed_by_batch_id, batch.id)
+
+    def test_auto_rematch_silent_when_nothing_paired(self):
+        from web.views import _auto_rematch
+
+        self._tx(self.panel, "depo", "50000", "p25", day=25, username="budi")
+        self._batch_25()
+        # Uang baru overlap tanggal TAPI nominal & identitas beda → kandidat ada,
+        # terpasang 0 → tanpa pesan (anti-noise).
         money_up = Upload.objects.create(source_type=self.bank, toko=self.lbs)
         Transaction.objects.create(
             upload=money_up, source_type=self.bank, toko=self.lbs, jenis="depo",
             amount=Decimal("99000"), money_delta=Decimal("99000"),
-            occurred_at=datetime(2026, 6, 25, 21, 0), row_hash="k_new",
+            occurred_at=datetime(2026, 6, 25, 21, 0), row_hash="k_new", username="lain",
         )
-        self.assertEqual(_rematch_hint(self.lbs, [money_up]), "")
-
-    def test_no_hint_for_empty_money_uploads(self):
-        from web.views import _rematch_hint
-
-        self.assertEqual(_rematch_hint(self.lbs, []), "")
+        self.assertEqual(_auto_rematch(self.lbs, [money_up]), [])
