@@ -4,6 +4,7 @@ Tiap relasi punya Matcher sendiri (pluggable lewat MATCHERS). Hasil = MatchResul
 dengan bucket cocok / tidak_cocok / perlu_tinjau + reason. Toleransi dari ToleranceProfile.
 """
 from collections import Counter
+from datetime import timedelta
 
 from django.db import transaction as db_tx
 from django.db.models import Q, Sum
@@ -15,6 +16,10 @@ from transactions.models import Transaction
 from .models import MatchResult, MatchRun, ReconBatch, ToleranceProfile
 
 MONEY_SOURCES = ["bank", "gateway"]
+
+# Detail baku hasil no_money — juga dipakai untuk MENGEMBALIKAN hasil yang
+# di-flip late settlement, jadi string ini harus tetap satu sumber kebenaran.
+NO_MONEY_DETAIL = "Tak ada padanan nominal+tanggal di Bank/Gateway"
 
 
 def _included_money_sources(include):
@@ -66,6 +71,14 @@ def _date_filter(qs, dfrom, dto):
 
 def _toko_filter(qs, toko):
     return qs.filter(toko=toko) if toko is not None else qs
+
+
+def _can_still_settle(d, recon_date, window):
+    """Baris kredit tanggal `d` masih bisa dapat uang pada run tanggal berikutnya
+    (>= recon_date+1): d + window >= recon_date + 1  ⟺  d > recon_date - window.
+    Catatan: window diambil dari toleransi run BERJALAN — ganti profil antar hari
+    (mis. Longgar → Ketat) membuat carry lama langsung dianggap kadaluarsa."""
+    return d is not None and d > recon_date - timedelta(days=window)
 
 
 def _active(qs):
@@ -207,7 +220,7 @@ class _MoneyMatcher:
             else:
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=p, right=None,
                                        score=0, reason_code="no_money",
-                                       reason_detail="Tak ada padanan nominal+tanggal di Bank/Gateway"))
+                                       reason_detail=NO_MONEY_DETAIL))
         return out
 
 
@@ -226,7 +239,12 @@ MATCHERS = {
 }
 
 
-def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None, toko=None, batch=None, include=None):
+def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None, toko=None, batch=None, include=None,
+              carried=None):
+    """`carried` = dict left_id → MatchResult no_money lama (carry-over harian).
+    Baris carried ikut pool relasi UANG agar bisa settle terlambat, tapi tidak
+    pernah membuat MatchResult baru di run ini; pasangan yang match dikembalikan
+    lewat atribut transien `run.late_pairs` untuk di-flip oleh run_batch."""
     tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
     matcher = MATCHERS[relation]()
     run = MatchRun.objects.create(
@@ -234,17 +252,36 @@ def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None,
         created_by=user, batch=batch,
     )
     left, right = matcher.sides(date_from, date_to, toko, include=include)
+    if carried and relation == MatchRun.Relation.PANEL_BRACKET:
+        # Kesempatan pairing bracket baris carried sudah lewat di batch asalnya —
+        # jangan menghasilkan no_bracket/no_panel dobel di batch baru.
+        left = [t for t in left if t.id not in carried]
+        right = [t for t in right if t.id not in carried]
     results = matcher.match(run, left, right)
+    late_pairs, keep = [], results
+    if carried and relation != MatchRun.Relation.PANEL_BRACKET:
+        keep = []
+        for r in results:
+            if r.left_id in carried:
+                if r.right_id is not None:  # settle terlambat → flip di batch asal
+                    late_pairs.append((carried[r.left_id], r))
+                # carried tanpa pasangan → drop (tidak_cocok sudah tercatat di asalnya)
+            else:
+                keep.append(r)
     with db_tx.atomic():
-        MatchResult.objects.bulk_create(results, batch_size=2000)
-    c = Counter(r.bucket for r in results)
+        MatchResult.objects.bulk_create(keep, batch_size=2000)
+    c = Counter(r.bucket for r in keep)
+    n_carried_left = sum(1 for t in left if t.id in carried) if carried else 0
     run.summary = {
-        "left": len(left), "right": len(right),
+        "left": len(left) - n_carried_left, "right": len(right),
         "cocok": c.get("cocok", 0),
         "perlu_tinjau": c.get("perlu_tinjau", 0),
         "tidak_cocok": c.get("tidak_cocok", 0),
     }
+    if carried:
+        run.summary["late_settled"] = len(late_pairs)
     run.save(update_fields=["summary"])
+    run.late_pairs = late_pairs
     return run
 
 
@@ -267,6 +304,126 @@ def _matched_money(runs):
             elif md < 0:
                 wd += -md
     return dp, wd
+
+
+def _carried_results(toko):
+    """left_id → MatchResult no_money LAMA (dari batch lain) milik baris kredit yang
+    masih AKTIF — carry-over "menunggu settlement" dari run harian sebelumnya.
+    Hanya relasi UANG (no_money); hasil no_bracket PANEL_BRACKET tidak ikut.
+    Run CLI tanpa batch diabaikan (tak ada batch asal untuk konsumsi/flip)."""
+    qs = (
+        MatchResult.objects.filter(
+            bucket=MatchResult.Bucket.TIDAK, reason_code="no_money",
+            left__isnull=False, left__toko=toko,
+            left__consumed_by_batch__isnull=True,
+            run__batch__isnull=False,
+            run__relation__in=[MatchRun.Relation.PANEL_BANK, MatchRun.Relation.BRACKET_BANK],
+        )
+        .select_related("left", "run", "run__batch")
+        .order_by("id")
+    )
+    return {r.left_id: r for r in qs}  # id terbesar menang (defensif bila ganda)
+
+
+def pending_settlement_count(toko):
+    """Jumlah baris kredit yang masih AKTIF menunggu settlement (untuk info UI)."""
+    return len(_carried_results(toko))
+
+
+def _apply_late_settlements(batch, late_pairs):
+    """Flip hasil no_money LAMA di batch asalnya: bucket ikut aturan skor normal
+    (cocok / perlu_tinjau weak_name), right diisi baris uang, reason asal disimpan
+    di reason_detail, ditandai resolved_by_batch=batch (untuk revert saat hapus)."""
+    resolved = []
+    for prior, new in late_pairs:
+        if prior.bucket != MatchResult.Bucket.TIDAK:
+            continue  # defensif: hasil sudah dioverride manual
+        prior.bucket = new.bucket
+        prior.right = new.right
+        prior.score = new.score
+        prior.reason_detail = (
+            f"Settle terlambat oleh run {batch.recon_date} — asal: {prior.reason_code}"
+            + (f"; {new.reason_detail}" if new.reason_detail else "")
+        )
+        prior.reason_code = "late_settlement"
+        prior.resolved_by_batch = batch
+        prior.save(update_fields=["bucket", "right", "score", "reason_code",
+                                  "reason_detail", "resolved_by_batch"])
+        resolved.append(prior)
+    return resolved
+
+
+def refresh_batch_summary(batch):
+    """Hitung ulang bagian TURUNAN summary batch dari MatchResult tersimpan:
+    bucket per run, money_matched/money/selisih, buckets total. Field potret saat
+    run (panel, money_gross, warnings, skipped) tidak disentuh. Idempoten — dipakai
+    saat hasil batch ini di-flip late settlement maupun di-revert."""
+    runs = list(batch.runs.all())
+    buckets = {"cocok": 0, "perlu_tinjau": 0, "tidak_cocok": 0}
+    for r in runs:
+        c = Counter(r.results.values_list("bucket", flat=True))
+        s = dict(r.summary or {})
+        for k in buckets:
+            s[k] = c.get(k, 0)
+            buckets[k] += s[k]
+        r.summary = s
+        r.save(update_fields=["summary"])
+    dp_m, wd_m = _matched_money(runs)
+    s = dict(batch.summary or {})
+    for flow, matched in (("dp", dp_m), ("wd", wd_m)):
+        f = dict(s.get(flow) or {})
+        f["money_matched"] = matched
+        f["money"] = matched  # key lama (backward-compat) = versi MATCHED
+        f["selisih"] = float(f.get("panel") or 0) - matched
+        s[flow] = f
+    s["buckets"] = buckets
+    batch.summary = s
+    batch.save(update_fields=["summary"])
+
+
+def _late_settlement_summary(resolved):
+    """Ringkasan settle terlambat per arah uang (DP/WD) dari hasil yang di-flip."""
+    out = {"dp": {"count": 0, "amount": 0.0}, "wd": {"count": 0, "amount": 0.0}}
+    for r in resolved:
+        md = float(r.right.money_delta)
+        flow = "dp" if md > 0 else "wd"
+        out[flow]["count"] += 1
+        out[flow]["amount"] += abs(md)
+    return out
+
+
+def revert_late_settlements(batch):
+    """Sebelum batch dihapus: batalkan semua efek carry-over yang dilakukan batch ini.
+    Flip dikembalikan ke tidak_cocok/no_money (baris kreditnya aktif lagi — kandidat
+    settlement berikutnya), baris kadaluarsa diaktifkan lagi, dan summary batch asal
+    dihitung ulang. Return jumlah flip yang dibatalkan.
+    Catatan: delete programatik (shell/queryset.delete) MELEWATI helper ini — jalur
+    resmi penghapusan adalah view hapus batch di web."""
+    results = list(
+        MatchResult.objects.filter(resolved_by_batch=batch).select_related("run", "run__batch")
+    )
+    homes = {}
+    for r in results:
+        r.bucket = MatchResult.Bucket.TIDAK
+        r.right = None
+        r.score = 0
+        r.reason_code = "no_money"
+        r.reason_detail = NO_MONEY_DETAIL
+        r.resolved_by_batch = None
+        r.save(update_fields=["bucket", "right", "score", "reason_code",
+                              "reason_detail", "resolved_by_batch"])
+        if r.left_id:
+            Transaction.objects.filter(pk=r.left_id).update(consumed_by_batch=None)
+        if r.run.batch_id:
+            homes[r.run.batch_id] = r.run.batch
+    # Baris kadaluarsa yang batch ini konsumsi ke batch asal → aktif lagi.
+    # Filter consumed_by_batch_id=home membuatnya no-op bila batch asal sudah dihapus.
+    for e in ((batch.summary or {}).get("late_settlement") or {}).get("expired", []):
+        Transaction.objects.filter(pk=e["tx"], consumed_by_batch_id=e["home"])\
+            .update(consumed_by_batch=None)
+    for home in homes.values():
+        refresh_batch_summary(home)
+    return len(results)
 
 
 def _bracket_overlap_warning(runs):
@@ -292,8 +449,12 @@ def _bracket_overlap_warning(runs):
     return None
 
 
-def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None):
+def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None, exclude_tx_ids=None):
     tx = _date_filter(_active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko)), date_from, date_to)
+    if exclude_tx_ids:
+        # Baris carry-over: nilainya sudah tercatat di total batch ASALnya —
+        # jangan menggelembungkan total batch ini.
+        tx = tx.exclude(id__in=exclude_tx_ids)
 
     def total(qs, field):
         return float(qs.aggregate(x=Sum(field))["x"] or 0)
@@ -368,12 +529,18 @@ def _consume_scope(toko, date_from, date_to, include):
     return qs.filter(cond)
 
 
-def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, include=None):
+@db_tx.atomic
+def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, include=None,
+              recon_date=None):
+    """Atomic: kegagalan di tengah run me-rollback SEMUANYA (termasuk baris batch),
+    sehingga tanggal harian tidak terblokir constraint unik oleh batch yatim."""
     tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
+    if recon_date and ReconBatch.objects.filter(toko=toko, recon_date=recon_date).exists():
+        raise ValueError(f"Sudah ada batch untuk {toko} tanggal {recon_date}.")
     comp = check_completeness(toko, date_from, date_to)
     batch = ReconBatch.objects.create(
         toko=toko, tolerance=tolerance, date_from=date_from, date_to=date_to,
-        created_by=user, completeness=comp,
+        created_by=user, completeness=comp, recon_date=recon_date,
     )
     relations, skipped = [], []
     # PANEL_BRACKET hanya jika bracket ADA dan dicentang.
@@ -387,14 +554,60 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
     else:
         skipped.append(MatchRun.Relation.PANEL_BANK.value)
 
+    carried = _carried_results(toko) if recon_date else {}
     runs = [
-        run_match(rel, tolerance, date_from, date_to, user=user, toko=toko, batch=batch, include=include)
+        run_match(rel, tolerance, date_from, date_to, user=user, toko=toko, batch=batch, include=include,
+                  carried=carried)
         for rel in relations
     ]
-    batch.summary = _aggregate_batch(toko, date_from, date_to, runs, skipped, include=include)
-    batch.save(update_fields=["summary"])
+    late_pairs = [pair for r in runs for pair in getattr(r, "late_pairs", [])]
+    resolved = _apply_late_settlements(batch, late_pairs)
+    summary = _aggregate_batch(toko, date_from, date_to, runs, skipped, include=include,
+                               exclude_tx_ids=set(carried))
+    if recon_date:
+        summary["late_settlement"] = _late_settlement_summary(resolved)
+    # Segarkan summary batch ASAL yang hasilnya di-flip (selisih mengecil).
+    for home in {r.run.batch for r in resolved}:
+        refresh_batch_summary(home)
     # KONSUMSI-SAAT-SUKSES: langkah TERAKHIR. Bila ada exception di atas, tidak
     # tercapai → transaksi tetap aktif (gagal = tidak dibersihkan). Hanya sumber
     # yang diikutkan yang dikunci; sumber tak dicentang tetap tersedia lain kali.
-    _consume_scope(toko, date_from, date_to, include).update(consumed_by_batch=batch)
+    if recon_date:
+        # Rekonsiliasi harian: baris kredit no_money yang masih dalam window
+        # TIDAK dikonsumsi ("menunggu settlement") — mutasinya mungkin baru
+        # muncul di file hari berikutnya.
+        window = tolerance.date_window_days
+        resolved_ids = {r.left_id for r in resolved}
+        by_home, expired = {}, []
+        # 1) Carried yang settle → konsumsi ke batch ASALnya (baris milik hari itu).
+        for r in resolved:
+            by_home.setdefault(r.run.batch_id, []).append(r.left_id)
+        # 2) Carried tak settle & sudah lewat window → kadaluarsa: konsumsi diam-diam
+        #    ke batch asal (tidak_cocok-nya sudah tercatat di sana). Jejak {tx, home}
+        #    disimpan agar bisa dipulihkan bila batch ini dihapus.
+        for left_id, prior in carried.items():
+            if left_id in resolved_ids:
+                continue
+            d = prior.left.occurred_at.date() if prior.left.occurred_at else None
+            if not _can_still_settle(d, recon_date, window):
+                by_home.setdefault(prior.run.batch_id, []).append(left_id)
+                expired.append({"tx": left_id, "home": prior.run.batch_id})
+        for home_id, ids in by_home.items():
+            Transaction.objects.filter(id__in=ids).update(consumed_by_batch_id=home_id)
+        summary["late_settlement"]["expired"] = expired
+        # 3) Yang masih menunggu settlement tetap AKTIF: carried dalam window yang
+        #    belum settle + no_money BARU batch ini yang dalam window.
+        new_carry = MatchResult.objects.filter(
+            run__batch=batch, bucket=MatchResult.Bucket.TIDAK, reason_code="no_money",
+            left__isnull=False,
+            left__occurred_at__date__gt=recon_date - timedelta(days=window),
+        ).values_list("left_id", flat=True)
+        expired_ids = {e["tx"] for e in expired}
+        still_waiting = (set(carried) - resolved_ids - expired_ids) | set(new_carry)
+        _consume_scope(toko, date_from, date_to, include)\
+            .exclude(id__in=still_waiting).update(consumed_by_batch=batch)
+    else:
+        _consume_scope(toko, date_from, date_to, include).update(consumed_by_batch=batch)
+    batch.summary = summary
+    batch.save(update_fields=["summary"])
     return batch

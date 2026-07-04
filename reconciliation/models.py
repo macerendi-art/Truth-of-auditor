@@ -50,6 +50,10 @@ class ReconBatch(TimeStampedModel):
 
     toko = models.ForeignKey("sources.Toko", on_delete=models.PROTECT, null=True, blank=True)
     tolerance = models.ForeignKey(ToleranceProfile, on_delete=models.PROTECT)
+    recon_date = models.DateField(
+        null=True, blank=True, db_index=True,
+        help_text="Tanggal rekonsiliasi harian — satu batch per (toko, tanggal)",
+    )
     date_from = models.DateField(null=True, blank=True)
     date_to = models.DateField(null=True, blank=True)
     summary = models.JSONField(default=dict)
@@ -57,6 +61,15 @@ class ReconBatch(TimeStampedModel):
     created_by = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True
     )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["toko", "recon_date"],
+                condition=models.Q(recon_date__isnull=False),
+                name="uniq_reconbatch_toko_recon_date",
+            )
+        ]
 
     def __str__(self):
         return f"Batch #{self.pk}"
@@ -87,6 +100,11 @@ class MatchResult(TimeStampedModel):
     score = models.FloatField(default=0)
     reason_code = models.CharField(max_length=50, blank=True)
     reason_detail = models.TextField(blank=True)
+    resolved_by_batch = models.ForeignKey(
+        "ReconBatch", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="resolved_results",
+        help_text="Batch yang men-settle hasil tidak_cocok/no_money ini terlambat",
+    )
 
     def __str__(self):
         return f"{self.bucket} ({self.reason_code})"

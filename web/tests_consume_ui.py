@@ -51,7 +51,7 @@ class ReconcileCheckboxTests(_LoggedIn):
         self._tx(self.bank, "depo", "50000", "50000", "", "k1")
         # Kirim hanya panel_dp dicentang (bank tidak).
         self.client.post(reverse("reconcile"), {
-            "tolerance": "Default", "inc_panel_dp": "on",
+            "tolerance": "Default", "recon_date": "2026-06-27", "inc_panel_dp": "on",
         })
         bank_tx = Transaction.objects.get(row_hash="k1")
         self.assertIsNone(bank_tx.consumed_by_batch)
@@ -62,7 +62,7 @@ class ReconcileCheckboxTests(_LoggedIn):
         self._tx(self.panel, "depo", "50000", "50000", "D1", "p1", username="budi")
         self._tx(self.bank, "depo", "50000", "50000", "", "k1", username="budi")
         self.client.post(reverse("reconcile"), {
-            "tolerance": "Default",
+            "tolerance": "Default", "recon_date": "2026-06-27",
             "inc_panel_dp": "on", "inc_panel_wd": "on",
             "inc_bracket": "on", "inc_bank": "on", "inc_gateway": "on",
         })

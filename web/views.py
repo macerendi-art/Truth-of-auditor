@@ -1,3 +1,5 @@
+from datetime import date as date_cls
+
 from django.contrib import messages
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
@@ -7,10 +9,17 @@ from django.db.models import Count, Q, Sum
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.html import format_html
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from reconciliation.engine import MATCHERS, check_completeness, run_batch, run_match
+from reconciliation.engine import (
+    MATCHERS,
+    check_completeness,
+    pending_settlement_count,
+    run_batch,
+    run_match,
+)
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
 from sources.detect import detect_source
 from sources.management.commands.ingest import detect_flow
@@ -242,6 +251,24 @@ def reconcile(request):
         return render(request, "web/no_toko.html")
     if request.method == "POST":
         tol = get_object_or_404(ToleranceProfile, name=request.POST.get("tolerance", "Default"))
+        # Rekonsiliasi harian: satu run = satu tanggal. Tanggal wajib diisi.
+        try:
+            recon_date = date_cls.fromisoformat((request.POST.get("recon_date") or "").strip())
+        except ValueError:
+            recon_date = None
+        if recon_date is None:
+            messages.error(request, "Tanggal rekonsiliasi wajib diisi.")
+            return redirect("reconcile")
+        existing = ReconBatch.objects.filter(toko=active, recon_date=recon_date).first()
+        if existing:
+            no = ReconBatch.objects.filter(toko=active, id__lte=existing.id).count()
+            messages.error(request, format_html(
+                'Rekonsiliasi {} tanggal {} sudah ada: <a href="{}">Batch #{}</a>. '
+                "Hapus batch itu dulu (tombol Hapus Laporan) bila ingin mengulang tanggal ini.",
+                active.name, recon_date.strftime("%d/%m/%Y"),
+                reverse("batch_detail", args=[existing.pk]), no,
+            ))
+            return redirect("reconcile")
         # Checkbox inc_* per baris kelengkapan = sumber yang DIIKUTKAN. Tidak ada
         # → tidak dicentang → tidak dicocokkan & tidak dikonsumsi.
         include = {
@@ -251,13 +278,18 @@ def reconcile(request):
             "bank": "inc_bank" in request.POST,
             "gateway": "inc_gateway" in request.POST,
         }
-        batch = run_batch(
-            active, tol,
-            request.POST.get("date_from") or None,
-            request.POST.get("date_to") or None,
-            user=request.user,
-            include=include,
-        )
+        try:
+            batch = run_batch(
+                active, tol,
+                request.POST.get("date_from") or None,
+                request.POST.get("date_to") or None,
+                user=request.user,
+                include=include,
+                recon_date=recon_date,
+            )
+        except ValueError as e:  # backstop guard engine (race dua tab)
+            messages.error(request, str(e))
+            return redirect("reconcile")
         no = ReconBatch.objects.filter(toko=active).count()
         messages.success(request, f"Rekonsiliasi selesai (Batch #{no}).")
         return redirect("batch_detail", pk=batch.pk)
@@ -283,6 +315,8 @@ def reconcile(request):
         "batches": batches,
         "bank": bank,
         "date_from": df or "", "date_to": dt or "",
+        "recon_date": date_cls.today().isoformat(),
+        "pending_settlement": pending_settlement_count(active),
     }
     return render(request, "web/reconcile.html", ctx)
 
@@ -291,8 +325,23 @@ def reconcile(request):
 def batch_detail(request, pk):
     batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
     batch_no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
+    # Settle terlambat dua arah — dari queryset LIVE (bukan summary JSON) supaya
+    # otomatis kosong bila batch pasangannya sudah dihapus.
+    resolved_here = list(
+        MatchResult.objects.filter(resolved_by_batch=batch)
+        .select_related("left", "right", "run__batch")
+    )
+    for r in resolved_here:  # nomor batch asal (konvensi nomor per-toko)
+        r.home_no = ReconBatch.objects.filter(
+            toko=batch.toko, id__lte=r.run.batch_id
+        ).count()
+    settled_elsewhere = list(
+        MatchResult.objects.filter(run__batch=batch, resolved_by_batch__isnull=False)
+        .select_related("resolved_by_batch", "left", "right")
+    )
     return render(request, "web/batch_detail.html", {
         "batch": batch, "batch_no": batch_no, "s": batch.summary or {}, "runs": batch.runs.all(),
+        "resolved_here": resolved_here, "settled_elsewhere": settled_elsewhere,
     })
 
 
@@ -331,6 +380,10 @@ def review(request, pk):
     }
     if action not in buckets:
         return HttpResponseBadRequest("Aksi tidak dikenal.")
+    # Catatan: override pada hasil no_money yang barisnya masih AKTIF (menunggu
+    # settlement) mengeluarkannya dari carry-over — baris itu akan diperlakukan
+    # sebagai baris baru di run berikutnya. Follow-up kecil bila jadi masalah:
+    # konsumsi baris ke batch asalnya saat di-override.
     r.bucket = buckets[action]
     r.reason_code = "manual_override"
     r.save(update_fields=["bucket", "reason_code"])

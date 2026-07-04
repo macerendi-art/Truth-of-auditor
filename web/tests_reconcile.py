@@ -41,7 +41,8 @@ class ReconcileViewTests(TestCase):
         self.assertTrue(r.context["completeness"]["minimum_met"])
 
     def test_post_runs_batch_and_redirects(self):
-        r = self.client.post(reverse("reconcile"), {"tolerance": "Default"})
+        r = self.client.post(reverse("reconcile"),
+                             {"tolerance": "Default", "recon_date": "2026-06-27"})
         self.assertEqual(r.status_code, 302)
         batch = ReconBatch.objects.latest("id")
         self.assertEqual(r.url, reverse("batch_detail", args=[batch.pk]))

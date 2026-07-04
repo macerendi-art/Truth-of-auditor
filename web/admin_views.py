@@ -5,6 +5,7 @@ from django.db import transaction
 from django.db.models import Count
 from django.shortcuts import get_object_or_404, redirect, render
 
+from reconciliation.engine import revert_late_settlements
 from reconciliation.models import ReconBatch
 from sources.models import Toko, Upload
 from transactions.models import Transaction
@@ -154,8 +155,15 @@ def delete_batch(request, pk):
     if request.method == "POST":
         no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
         n_runs = batch.runs.count()
-        batch.delete()
-        messages.success(request, f"Batch #{no} dihapus — {n_runs} run ikut terhapus. Transaksi tetap utuh.")
+        with transaction.atomic():
+            # Batalkan dulu settle terlambat yang dilakukan batch ini di batch lain,
+            # baru hapus — baris kredit terkait kembali "menunggu settlement".
+            n_reverted = revert_late_settlements(batch)
+            batch.delete()
+        msg = f"Batch #{no} dihapus — {n_runs} run ikut terhapus. Transaksi tetap utuh."
+        if n_reverted:
+            msg += f" {n_reverted} settle terlambat dikembalikan ke tidak cocok."
+        messages.success(request, msg)
     return redirect("reconcile")
 
 

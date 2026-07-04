@@ -5,7 +5,11 @@ from reconciliation.models import MatchRun, ToleranceProfile
 
 
 class Command(BaseCommand):
-    help = "Jalankan pencocokan untuk satu relasi (panel_bracket / panel_bank)."
+    help = (
+        "Jalankan pencocokan untuk satu relasi (panel_bracket / panel_bank). "
+        "Carry-over & late settlement hanya berlaku pada batch harian dari web "
+        "(run_batch dengan recon_date), bukan perintah ini."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument("relation", choices=[r.value for r in MatchRun.Relation])

@@ -6,7 +6,7 @@
 <div class="page-head reveal" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
   <div>
     <h1>Batch #{{ batch_no }} — {{ batch.toko.name }}</h1>
-    <p>{{ batch.created_at|date:"d/m/Y H:i" }} · Toleransi {{ batch.tolerance.name }}</p>
+    <p>{{ batch.created_at|date:"d/m/Y H:i" }} · Toleransi {{ batch.tolerance.name }}{% if batch.recon_date %} · Tanggal {{ batch.recon_date|date:"d/m/Y" }}{% endif %}</p>
   </div>
   {% if is_admin_user %}
   <form method="post" action="{% url 'delete_batch' batch.pk %}"
@@ -48,6 +48,43 @@
   </div>
   {% endwith %}
 </div>
+
+{% if resolved_here %}
+<div class="card reveal" style="padding:0;overflow:hidden">
+  <div style="padding:18px 20px 6px">
+    <h3 style="margin:0 0 4px">Settlement tertunda dari tanggal sebelumnya</h3>
+    <p class="faint" style="margin:0 0 8px;font-size:.86rem">
+      {% with ls=s.late_settlement %}
+      DP: {{ ls.dp.count|default:0 }} transaksi / Rp {{ ls.dp.amount|default:0|floatformat:0|intcomma }} ·
+      WD: {{ ls.wd.count|default:0 }} transaksi / Rp {{ ls.wd.amount|default:0|floatformat:0|intcomma }}
+      {% endwith %}
+      — angkanya milik batch asal, tidak menambah total batch ini.
+    </p>
+  </div>
+  <div class="twrap" style="border:none">
+  <table>
+    <thead><tr><th>Ticket</th><th>Username</th><th class="num">Nominal</th><th>Status</th><th>Batch asal</th></tr></thead>
+    <tbody>
+    {% for r in resolved_here %}
+      <tr>
+        <td class="mono">{{ r.left.ticket_no|default:"—" }}</td>
+        <td>{{ r.left.username|default:r.left.counterparty|default:"—" }}</td>
+        <td class="num">{{ r.right.money_delta|floatformat:0|intcomma }}</td>
+        <td>{% if r.bucket == "cocok" %}<span class="badge ok">cocok (late)</span>{% else %}<span class="badge warn">perlu tinjau (late)</span>{% endif %}</td>
+        <td><a class="grad-text" style="font-weight:600" href="{% url 'batch_detail' r.run.batch_id %}">#{{ r.home_no }}</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% if settled_elsewhere %}
+<div class="msg success reveal" style="margin-bottom:16px">
+  ✓ {{ settled_elsewhere|length }} hasil batch ini di-settle terlambat oleh batch lain — Selisih di atas sudah diperbarui.
+</div>
+{% endif %}
 
 <div class="card reveal">
   <h3 style="margin:0 0 12px">Ringkasan Bucket</h3>
