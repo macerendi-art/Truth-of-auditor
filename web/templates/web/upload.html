@@ -11,33 +11,84 @@
   <form method="post" enctype="multipart/form-data" id="upform">
     {% csrf_token %}
     <input type="hidden" name="action" value="analyze">
-    <label class="dz" for="fileInput">
+    <label class="dz" for="fileInput" id="dropzone">
       <div class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></div>
-      <div style="font-weight:600">Lepas file di sini atau klik untuk pilih</div>
-      <div class="faint" style="font-size:13px;margin-top:4px">xlsx · csv · pdf · zip — bisa banyak sekaligus, zip diekstrak otomatis</div>
+      <div style="font-weight:600">Lepas file atau folder di sini, atau klik untuk pilih</div>
+      <div class="faint" style="font-size:13px;margin-top:4px">xlsx · csv · pdf · zip — pilihan menumpuk, zip diekstrak otomatis</div>
       <div id="flist" class="faint" style="font-size:13px;margin-top:8px"></div>
       <input id="fileInput" type="file" name="files" multiple accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF,.zip,.ZIP" style="display:none">
     </label>
-    <input id="folderInput" type="file" name="files" multiple webkitdirectory style="display:none">
+    <input id="folderInput" type="file" multiple webkitdirectory style="display:none">
     <div style="display:flex;gap:10px;align-items:center;margin-top:16px">
       <button class="btn primary" type="submit">Analisa File →</button>
       <label class="btn ghost" for="folderInput" style="cursor:pointer;margin:0">📁 Pilih Folder</label>
+      <button class="btn ghost" type="button" id="fclear" hidden>✕ Bersihkan pilihan</button>
     </div>
   </form>
 </div>
+<style>.dz.dz-over{border-color:var(--ink,#1a1a1a);background:rgba(0,0,0,.04)}</style>
 <script>
 (function(){
-  var i=document.getElementById('fileInput'),d=document.getElementById('folderInput'),
-      l=document.getElementById('flist');
-  function tampil(inp,lain){
-    if(!inp.files.length){return;}
-    if(lain){lain.value='';} // satu sumber saja per analisa — hindari dobel
-    var n=inp.files.length;
-    l.textContent = n<=6 ? [].map.call(inp.files,function(f){return f.name;}).join(' · ')
-                         : n+' file dipilih';
+  var i=document.getElementById('fileInput'), d=document.getElementById('folderInput'),
+      l=document.getElementById('flist'), dz=document.getElementById('dropzone'),
+      clearBtn=document.getElementById('fclear');
+  if(!i||!dz) return;
+  // Akumulator: pilihan MENUMPUK lintas dialog/drop — tidak di-reset tiap tambah.
+  var store=new DataTransfer();
+
+  function sudahAda(f){
+    for(var k=0;k<store.files.length;k++){var g=store.files[k];
+      if(g.name===f.name && g.size===f.size) return true;}
+    return false;
   }
-  if(i)i.addEventListener('change',function(){tampil(i,d);});
-  if(d)d.addEventListener('change',function(){tampil(d,i);});
+  function render(){
+    i.files=store.files; // input inilah yang tersubmit
+    var n=store.files.length;
+    clearBtn.hidden=!n;
+    l.textContent=!n?'':(n<=6?[].map.call(store.files,function(f){return f.name;}).join(' · ')
+                             :n+' file dipilih');
+  }
+  function tambah(files){
+    [].forEach.call(files,function(f){ if(!sudahAda(f)) store.items.add(f); });
+    render();
+  }
+
+  i.addEventListener('change',function(){ tambah(i.files); });
+  d.addEventListener('change',function(){ tambah(d.files); d.value=''; });
+  clearBtn.addEventListener('click',function(){ store=new DataTransfer(); render(); });
+
+  // Drag & drop — termasuk FOLDER (traversal webkitGetAsEntry, batch readEntries).
+  ['dragover','dragenter'].forEach(function(ev){
+    dz.addEventListener(ev,function(e){ e.preventDefault(); dz.classList.add('dz-over'); });
+  });
+  ['dragleave','drop'].forEach(function(ev){
+    dz.addEventListener(ev,function(e){ e.preventDefault(); dz.classList.remove('dz-over'); });
+  });
+  function bacaEntry(entry,done){
+    if(entry.isFile){
+      entry.file(function(f){ if(!sudahAda(f)) store.items.add(f); done(); },done);
+    }else if(entry.isDirectory){
+      var rd=entry.createReader();
+      (function baca(){
+        rd.readEntries(function(es){
+          if(!es.length){ done(); return; }
+          var sisa=es.length;
+          es.forEach(function(en){ bacaEntry(en,function(){ if(--sisa===0) baca(); }); });
+        },done);
+      })();
+    }else done();
+  }
+  dz.addEventListener('drop',function(e){
+    var items=e.dataTransfer.items, entries=[];
+    if(items&&items.length&&items[0].webkitGetAsEntry){
+      for(var k=0;k<items.length;k++){ // getAsEntry WAJIB sinkron di handler
+        var en=items[k].webkitGetAsEntry(); if(en) entries.push(en);
+      }
+    }
+    if(!entries.length){ tambah(e.dataTransfer.files); return; }
+    var left=entries.length;
+    entries.forEach(function(en){ bacaEntry(en,function(){ if(--left===0) render(); }); });
+  });
 })();
 </script>
 
