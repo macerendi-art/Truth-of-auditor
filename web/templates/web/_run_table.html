@@ -1,9 +1,30 @@
-{# Fragmen tabel hasil + pager — target swap htmx filter bucket/channel & pager.
-   Dirender sendirian saat header HX-Request; disertakan run_detail.html saat
-   render halaman penuh. #}
+{% comment %}
+Fragmen filter + tabel hasil + pager — target swap htmx (outerHTML #result-table).
+Dirender sendirian saat header HX-Request; disertakan run_detail.html saat render
+halaman penuh. Tab ikut di dalam fragmen supaya state aktifnya ikut ter-update
+saat swap. JANGAN taruh markup apa pun di luar #result-table — teks di luar div
+ikut disisipkan tiap swap.
+{% endcomment %}
 <div id="result-table">
+  <div class="tabs reveal" style="margin-top:24px" hx-indicator="#result-table">
+    <a href="?{% if channel %}channel={{ channel|urlencode }}{% endif %}" hx-get="?{% if channel %}channel={{ channel|urlencode }}{% endif %}" hx-target="#result-table" hx-swap="outerHTML" hx-push-url="true" class="{% if not bucket %}active{% endif %}">Semua</a>
+    <a href="?bucket=cocok{% if channel %}&channel={{ channel|urlencode }}{% endif %}" hx-get="?bucket=cocok{% if channel %}&channel={{ channel|urlencode }}{% endif %}" hx-target="#result-table" hx-swap="outerHTML" hx-push-url="true" class="{% if bucket == 'cocok' %}active{% endif %}">Cocok</a>
+    <a href="?bucket=perlu_tinjau{% if channel %}&channel={{ channel|urlencode }}{% endif %}" hx-get="?bucket=perlu_tinjau{% if channel %}&channel={{ channel|urlencode }}{% endif %}" hx-target="#result-table" hx-swap="outerHTML" hx-push-url="true" class="{% if bucket == 'perlu_tinjau' %}active{% endif %}">Perlu Ditinjau</a>
+    <a href="?bucket=tidak_cocok{% if channel %}&channel={{ channel|urlencode }}{% endif %}" hx-get="?bucket=tidak_cocok{% if channel %}&channel={{ channel|urlencode }}{% endif %}" hx-target="#result-table" hx-swap="outerHTML" hx-push-url="true" class="{% if bucket == 'tidak_cocok' %}active{% endif %}">Tidak Cocok</a>
+  </div>
+
+  {% if channels|length > 1 %}
+  {% comment %}Filter kedua bertingkat: channel/sumber (DANA/OVO/BCA/…) SETELAH filter bucket.{% endcomment %}
+  <div class="tabs reveal" style="margin-top:8px" hx-indicator="#result-table">
+    <a href="?bucket={{ bucket }}" hx-get="?bucket={{ bucket }}" hx-target="#result-table" hx-swap="outerHTML" hx-push-url="true" class="{% if not channel %}active{% endif %}">Semua channel</a>
+    {% for name, count in channels %}
+    <a href="?bucket={{ bucket }}&channel={{ name|urlencode }}" hx-get="?bucket={{ bucket }}&channel={{ name|urlencode }}" hx-target="#result-table" hx-swap="outerHTML" hx-push-url="true" class="{% if channel == name %}active{% endif %}">{{ name }} <span class="faint">({{ count }})</span></a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <div class="card pad0 reveal">
-    <div class="table-wrap sticky-col-wrap" style="border:none">
+    <div class="table-wrap" style="border:none">
     <table class="sticky-col">
       <thead><tr><th>Status</th><th>{{ left_label }}</th><th class="num">Nominal</th><th>{{ right_label }}</th><th>Alasan</th><th style="text-align:center">Aksi</th></tr></thead>
       <tbody>

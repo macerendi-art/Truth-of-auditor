@@ -63,6 +63,9 @@
 
 @layer base {
   *{box-sizing:border-box}
+  /* display di komponen (flex/grid) menimpa [hidden] bawaan browser —
+     paksa ulang di sini supaya elemen hidden benar-benar hilang. */
+  [hidden]{display:none !important}
   html,body{margin:0;padding:0}
   body{
     font-family:var(--font-body);background:var(--bg);color:var(--ink);
