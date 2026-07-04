@@ -178,25 +178,35 @@ def _rematch_candidates(toko, money_uploads):
     return hits
 
 
+def _selisih_abs(batch):
+    """Total |selisih| DP+WD dari summary batch — angka delta kartu penyembuhan."""
+    s = batch.summary or {}
+    return abs((s.get("dp") or {}).get("selisih") or 0) + abs((s.get("wd") or {}).get("selisih") or 0)
+
+
 def _auto_rematch(toko, money_uploads, user=None):
     """Re-match otomatis batch kandidat setelah upload sumber uang — tanpa klik.
 
-    Kembalikan list (level, pesan) untuk flash. Batch tanpa baris terpasang tidak
-    dilaporkan (anti-noise); error per-batch dilaporkan tapi tidak menggagalkan
-    upload (file sudah ter-ingest)."""
+    Kembalikan list dict terstruktur per batch (delta selisih before→after)
+    untuk kartu laporan penyembuhan. Batch tanpa baris terpasang tidak
+    dilaporkan (anti-noise); error per-batch dilaporkan tapi tidak
+    menggagalkan upload (file sudah ter-ingest)."""
     out = []
     for batch, no in _rematch_candidates(toko, money_uploads):
+        before = _selisih_abs(batch)
         try:
             stats = rematch_batch(batch, user=user)
         except Exception as e:  # noqa: BLE001 - upload jangan ikut gagal
-            out.append(("error", f"Re-match otomatis Batch #{no} gagal: {e}"))
+            out.append({"level": "error", "batch_pk": batch.pk, "batch_no": no, "error": str(e)})
             continue
         if stats["terpasang"]:
-            out.append((
-                "success",
-                f"Re-match otomatis Batch #{no}: {stats['terpasang']} baris tertutup "
-                f"({stats['cocok']} cocok, {stats['perlu_tinjau']} perlu ditinjau).",
-            ))
+            batch.refresh_from_db()
+            out.append({
+                "level": "success", "batch_pk": batch.pk, "batch_no": no,
+                "terpasang": stats["terpasang"], "cocok": stats["cocok"],
+                "perlu_tinjau": stats["perlu_tinjau"],
+                "selisih_before": before, "selisih_after": _selisih_abs(batch),
+            })
     return out
 
 
@@ -322,8 +332,15 @@ def upload(request):
         messages.success(request, f"{n_ok} file diproses, {n_err} gagal.")
         # Auto re-match: mutasi susulan langsung dipasangkan ke batch lama yang
         # punya baris tidak_cocok (ekor malam T+1 / statement bulanan) — tanpa klik.
-        for level, txt in _auto_rematch(active, money_uploads, user=request.user):
-            getattr(messages, level)(request, txt)
+        # Hasil sukses di-stash ke session (pola PRG) → dirender sekali sebagai
+        # kartu penyembuhan; error tetap lewat flash.
+        healing = _auto_rematch(active, money_uploads, user=request.user)
+        for h in healing:
+            if h["level"] == "error":
+                messages.error(request, f"Re-match otomatis Batch #{h['batch_no']} gagal: {h['error']}")
+        sukses = [h for h in healing if h["level"] == "success"]
+        if sukses:
+            request.session["healing_report"] = sukses
         return redirect("upload")
     if request.method == "POST" and request.POST.get("action") == "analyze":
         preview = []
@@ -350,11 +367,15 @@ def upload(request):
         return render(request, "web/upload.html", {
             "preview": preview, "parsers": sorted(PARSERS.keys()),
             "flows": ["", "dp", "wd"], "active_toko": active,
+            "n_cek": sum(1 for p in preview if p["needs_confirm"]),
+            "n_pwd": sum(1 for p in preview if p["needs_password"]),
             "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
+            "healing": request.session.pop("healing_report", None),
         })
     return render(request, "web/upload.html", {
         "parsers": sorted(PARSERS.keys()), "active_toko": active,
         "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
+        "healing": request.session.pop("healing_report", None),
     })
 
 
@@ -505,6 +526,7 @@ def batch_detail(request, pk):
     batch_no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
     return render(request, "web/batch_detail.html", {
         "batch": batch, "batch_no": batch_no, "s": batch.summary or {}, "runs": batch.runs.all(),
+        "healing": request.session.pop("healing_report", None),
     })
 
 
@@ -514,14 +536,18 @@ def rematch(request, pk):
     """Re-match batch: pasangkan mutasi uang susulan ke baris tidak_cocok batch ini
     (ekor malam T+1 / statement BNI bulanan) — tanpa hapus batch."""
     batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
+    before = _selisih_abs(batch)
     stats = rematch_batch(batch, user=request.user)
     if stats["terpasang"]:
-        messages.success(
-            request,
-            f"Re-match: {stats['terpasang']} baris terpasang "
-            f"({stats['cocok']} cocok, {stats['perlu_tinjau']} perlu ditinjau) "
-            f"dari {stats['diperiksa']} diperiksa.",
-        )
+        batch.refresh_from_db()
+        no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
+        # Kartu penyembuhan yang sama dgn auto re-match — stash session, render sekali.
+        request.session["healing_report"] = [{
+            "level": "success", "batch_pk": batch.pk, "batch_no": no,
+            "terpasang": stats["terpasang"], "cocok": stats["cocok"],
+            "perlu_tinjau": stats["perlu_tinjau"],
+            "selisih_before": before, "selisih_after": _selisih_abs(batch),
+        }]
     else:
         messages.info(request, "Tidak ada baris baru yang bisa dipasangkan.")
     return redirect("batch_detail", pk=batch.pk)

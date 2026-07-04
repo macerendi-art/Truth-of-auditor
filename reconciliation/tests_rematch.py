@@ -277,7 +277,7 @@ class RematchViewTests(TestCase):
             occurred_at=datetime(2026, 6, day, 21, 0), row_hash=rh, **kw,
         )
 
-    def test_post_redirects_with_message(self):
+    def test_post_redirects_with_healing_report(self):
         self._tx(self.panel, self.lbs, "depo", "50000", "p25", username="budi")
         # noise money → PANEL_BANK jalan & tinggalkan ekor tidak_cocok.
         self._tx(self.bank, self.lbs, "depo", "13000", "noise", username="zzz")
@@ -287,8 +287,11 @@ class RematchViewTests(TestCase):
         r = self.client.post(reverse("rematch_batch", args=[batch.pk]))
         self.assertEqual(r.status_code, 302)
         self.assertEqual(r.url, reverse("batch_detail", args=[batch.pk]))
-        msgs = [m.message for m in r.wsgi_request._messages]
-        self.assertTrue(any("Re-match" in m for m in msgs))
+        # Sukses tidak lagi lewat flash — kartu penyembuhan di-stash ke session.
+        report = self.client.session.get("healing_report")
+        self.assertTrue(report)
+        self.assertEqual(report[0]["batch_pk"], batch.pk)
+        self.assertEqual(report[0]["terpasang"], 1)
 
     def test_get_not_allowed(self):
         self._tx(self.panel, self.lbs, "depo", "50000", "p25", username="budi")
@@ -373,12 +376,14 @@ class AutoRematchTests(_Base):
             amount=Decimal("50000"), money_delta=Decimal("50000"),
             occurred_at=datetime(2026, 6, 25, 21, 0), row_hash="k_new", username="budi",
         )
-        msgs = _auto_rematch(self.lbs, [money_up])
-        self.assertEqual(len(msgs), 1)
-        level, txt = msgs[0]
-        self.assertEqual(level, "success")
-        self.assertIn("Re-match otomatis", txt)
-        self.assertIn("1 baris tertutup", txt)
+        out = _auto_rematch(self.lbs, [money_up])
+        self.assertEqual(len(out), 1)
+        h = out[0]
+        self.assertEqual(h["level"], "success")
+        self.assertEqual(h["terpasang"], 1)
+        self.assertEqual(h["batch_pk"], batch.pk)
+        self.assertGreater(h["selisih_before"], 0)
+        self.assertEqual(h["selisih_after"], 0)
 
         res = self._pb(batch).results.get(left__isnull=False)
         self.assertEqual(res.bucket, "cocok")

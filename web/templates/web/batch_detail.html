@@ -3,6 +3,7 @@
 {% block title %}Batch #{{ batch_no }} · Rekonsiliasi{% endblock %}
 {% block crumb %}Rekonsiliasi · Batch #{{ batch_no }}{% endblock %}
 {% block content %}
+{% include "web/_healing_card.html" %}
 <div class="page-head reveal" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
   <div>
     <h1>Batch #{{ batch_no }} — {{ batch.toko.name }}</h1>
