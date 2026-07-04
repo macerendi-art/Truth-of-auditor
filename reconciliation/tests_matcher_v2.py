@@ -126,6 +126,39 @@ class Pass1GlobalAssignTests(_Base):
         self.assertEqual(r.bucket, MatchResult.Bucket.TINJAU)
 
 
+class PhoneIdentityTests(_Base):
+    def test_va_ewallet_nomor_hp_jadi_cocok(self):
+        # Mutasi FTFVA/DANA tanpa nama pengirim tapi membawa nomor HP tujuan —
+        # sama dengan raw['Player Bank'] panel → identitas kuat, cocok.
+        p = self.tx(self.panel, self.up_panel, "wd", "126000", "-126000",
+                    datetime(2026, 6, 27, 10), ticket="W7", cp="ANGGER PRAJA",
+                    raw={"Player Bank": "DANA|Angger Praja |083174114447"})
+        m = self.tx(self.bank, self.up_hendi, "wd", "126000", "-126000",
+                    datetime(2026, 6, 27, 11), cp="",
+                    raw={"line": "2706/FTFVA/WS9527172345/DANA - - 083174114447 126,000.00 DB",
+                         "cont": "TRSF E-BANKING DB"})
+        decoy = self.tx(self.bank, self.up_hendi, "wd", "126000", "-126000",
+                        datetime(2026, 6, 27, 9), cp="",
+                        raw={"line": "2706/FTFVA/WS9500000001/DANA - - 081234567890 126,000.00 DB"})
+        self.match()
+        r = MatchResult.objects.get(left=p)
+        self.assertEqual(r.right_id, m.id)
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.score, 100)
+
+    def test_saldo_tidak_dianggap_nomor(self):
+        # Deret digit saldo/nominal tidak boleh jadi "nomor HP".
+        p = self.tx(self.panel, self.up_panel, "wd", "50000", "-50000",
+                    datetime(2026, 6, 27, 10), ticket="W8", cp="TANPA HP",
+                    raw={"Player Bank": "BCA|Tanpa Hp|12345678"})
+        self.tx(self.bank, self.up_hendi, "wd", "50000", "-50000",
+                datetime(2026, 6, 27, 11), cp="",
+                raw={"Saldo": "12345678.00"})
+        self.match()
+        r = MatchResult.objects.get(left=p)
+        self.assertNotEqual(r.bucket, MatchResult.Bucket.COCOK)
+
+
 class Pass3NearMissTests(_Base):
     def test_fee_kecil_identitas_kuat_jadi_tinjau(self):
         p = self.tx(self.panel, self.up_panel, "wd", "50000", "-50000",

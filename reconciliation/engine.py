@@ -37,6 +37,39 @@ def _wallet_label(name):
 
 
 _NORM_RE = re.compile(r"[^A-Z]")
+_DIGIT_RUN_RE = re.compile(r"\d{9,15}")
+
+
+def _panel_phone(t):
+    """Nomor HP/rekening wallet pemain dari raw['Player Bank'] (segmen ke-3),
+    dinormalisasi: buang non-digit + nol/62 di depan. '' bila tak ada."""
+    pb = (t.raw or {}).get("Player Bank") or ""
+    parts = pb.split("|")
+    digits = re.sub(r"\D", "", parts[2] if len(parts) > 2 else "")
+    return digits.lstrip("0").removeprefix("62").lstrip("0")
+
+
+def _money_phones(t):
+    """Deret digit (≥9) di baris uang — mutasi VA e-wallet (FTFVA/DANA, GOPAY
+    TOPUP, dst) menaruh nomor HP/VA tujuan di teks keterangan."""
+    text = " ".join(str(v) for v in (t.raw or {}).values())
+    out = set()
+    for run in _DIGIT_RUN_RE.findall(text + " " + (t.counterparty or "")):
+        norm = run.lstrip("0").removeprefix("62").lstrip("0")
+        if len(norm) >= 9:
+            out.add(norm)
+    return out
+
+
+def _phone_match(pp, phones):
+    """Cocok bila salah satu ujung sama (bank sering memotong digit)."""
+    if not pp or len(pp) < 9:
+        return False
+    for ph in phones:
+        if pp == ph or pp.endswith(ph) or ph.endswith(pp) \
+           or pp.startswith(ph) or ph.startswith(pp):
+            return True
+    return False
 
 
 def _norm_owner(s):
@@ -240,7 +273,17 @@ class _MoneyMatcher:
 
     @staticmethod
     def _identity(p, b):
-        """Skor identitas: username persis menang; selain itu fuzzy nama."""
+        """Skor identitas: nomor HP/VA wallet persis > username persis > fuzzy nama.
+        Mutasi VA e-wallet (FTFVA/DANA, GOPAY TOPUP) tak membawa nama pengirim,
+        tapi membawa nomor tujuan — sama dengan raw['Player Bank'] panel."""
+        pp = getattr(p, "_phone", None)
+        if pp is None:
+            pp = p._phone = _panel_phone(p)
+        phones = getattr(b, "_phones", None)
+        if phones is None:
+            phones = b._phones = _money_phones(b)
+        if _phone_match(pp, phones):
+            return 100.0
         if p.username and b.username:
             s = 100.0 if p.username.lower() == b.username.lower() else 40.0
             if p.counterparty and b.counterparty:
