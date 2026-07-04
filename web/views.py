@@ -506,6 +506,14 @@ def reconcile(request):
     total = len(all_batches)
     for i, b in enumerate(all_batches):
         b.no = total - i
+        # Triple bucket ternormalisasi utk bucket-bar (summary lama bisa tanpa buckets).
+        bk = (b.summary or {}).get("buckets") or {}
+        b.bk = {
+            "cocok": bk.get("cocok") or 0,
+            "perlu_tinjau": bk.get("perlu_tinjau") or 0,
+            "tidak_cocok": bk.get("tidak_cocok") or 0,
+        }
+        b.bk["total"] = b.bk["cocok"] + b.bk["perlu_tinjau"] + b.bk["tidak_cocok"]
     if bank:
         all_batches = [b for b in all_batches if (b.completeness or {}).get(bank)]
     batches = all_batches[:20]

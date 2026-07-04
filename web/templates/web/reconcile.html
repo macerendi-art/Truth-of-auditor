@@ -5,7 +5,7 @@
 {% block content %}
 <div class="page-head reveal">
   <h1>Rekonsiliasi — {{ active_toko.name }}</h1>
-  <p>Jalankan Panel↔Bracket &amp; Panel↔Bank/Gateway sekaligus. Cek kelengkapan dulu.</p>
+  <p>Ritual harian: cek kelengkapan → jalankan tanggal berikutnya. Ekor batch kemarin sembuh sendiri besok.</p>
 </div>
 
 <div class="grid cols-2">
@@ -13,12 +13,12 @@
     <h3 style="margin:0 0 12px">Kelengkapan Data</h3>
     <p class="faint" style="margin:-6px 0 12px;font-size:.86rem">Centang sumber yang ikut dijalankan. Sumber kosong tidak bisa dicentang.</p>
     {% with c=completeness %}
-    <table>
-      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_panel_dp" form="jalankan-form" {% if c.panel_dp %}checked{% else %}disabled{% endif %}> Panel Deposit</label></td><td>{% if c.panel_dp %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
-      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_panel_wd" form="jalankan-form" {% if c.panel_wd %}checked{% else %}disabled{% endif %}> Panel Withdraw</label></td><td>{% if c.panel_wd %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
-      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_bracket" form="jalankan-form" {% if c.bracket %}checked{% else %}disabled{% endif %}> Bracket / FR</label></td><td>{% if c.bracket %}<span class="badge ok">ada</span>{% else %}<span class="badge warn">tidak ada → Panel↔Bracket dilewati</span>{% endif %}</td></tr>
-      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_bank" form="jalankan-form" {% if c.bank %}checked{% else %}disabled{% endif %}> Bank</label></td><td>{% if c.bank %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
-      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_gateway" form="jalankan-form" {% if c.gateway %}checked{% else %}disabled{% endif %}> Gateway</label></td><td>{% if c.gateway %}<span class="badge ok">ada</span>{% else %}<span class="badge warn">kosong</span>{% endif %}</td></tr>
+    <table class="flush">
+      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0"><input type="checkbox" name="inc_panel_dp" form="jalankan-form" style="width:auto" {% if c.panel_dp %}checked{% else %}disabled title="Sumber kosong — upload dulu untuk mengaktifkan"{% endif %}> Panel Deposit</label></td><td>{% if c.panel_dp %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
+      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0"><input type="checkbox" name="inc_panel_wd" form="jalankan-form" style="width:auto" {% if c.panel_wd %}checked{% else %}disabled title="Sumber kosong — upload dulu untuk mengaktifkan"{% endif %}> Panel Withdraw</label></td><td>{% if c.panel_wd %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
+      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0"><input type="checkbox" name="inc_bracket" form="jalankan-form" style="width:auto" {% if c.bracket %}checked{% else %}disabled title="Sumber kosong — upload dulu untuk mengaktifkan"{% endif %}> Bracket / FR</label></td><td>{% if c.bracket %}<span class="badge ok">ada</span>{% else %}<span class="badge warn">tidak ada → Panel↔Bracket dilewati</span>{% endif %}</td></tr>
+      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0"><input type="checkbox" name="inc_bank" form="jalankan-form" style="width:auto" {% if c.bank %}checked{% else %}disabled title="Sumber kosong — upload dulu untuk mengaktifkan"{% endif %}> Bank</label></td><td>{% if c.bank %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
+      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0"><input type="checkbox" name="inc_gateway" form="jalankan-form" style="width:auto" {% if c.gateway %}checked{% else %}disabled title="Sumber kosong — upload dulu untuk mengaktifkan"{% endif %}> Gateway</label></td><td>{% if c.gateway %}<span class="badge ok">ada</span>{% else %}<span class="badge warn">kosong</span>{% endif %}</td></tr>
     </table>
     {% if not c.minimum_met %}<div class="msg error" style="margin-top:12px">⚠ Minimum belum terpenuhi (butuh Panel + minimal 1 Bank/Gateway). Kamu masih boleh menjalankan.</div>{% endif %}
     {% endwith %}
@@ -30,37 +30,53 @@
       {% csrf_token %}
       <div class="field"><label>Profil Toleransi</label>
         <select name="tolerance" class="f">{% for t in tolerances %}<option value="{{ t.name }}">{{ t.name }} (±{{ t.date_window_days }} hari)</option>{% endfor %}</select></div>
-      <div class="grid cols-2">
-        <div class="field"><label>Dari tanggal</label><input type="date" name="date_from" value="{{ date_from }}"></div>
-        <div class="field"><label>Sampai tanggal</label><input type="date" name="date_to" value="{{ date_to }}"></div>
+      <div class="{% if tanggal_disarankan %}date-hero{% endif %}">
+        {% if tanggal_disarankan %}<span class="kicker"><svg width="13" height="13"><use href="#i-sparkles"/></svg> Tanggal disarankan — hari berikutnya yang belum direkonsiliasi</span>{% endif %}
+        <div class="grid cols-2">
+          <div class="field" style="margin:0"><label>Dari tanggal</label><input type="date" name="date_from" value="{{ date_from }}"></div>
+          <div class="field" style="margin:0"><label>Sampai tanggal</label><input type="date" name="date_to" value="{{ date_to }}"></div>
+        </div>
       </div>
-      {% if tanggal_disarankan %}<div class="faint" style="font-size:11.5px;margin:-6px 0 12px">Tanggal disarankan otomatis — hari berikutnya yang belum direkonsiliasi. Ubah bila perlu.</div>{% endif %}
-      <button class="btn primary" type="submit">▶ Jalankan Rekonsiliasi</button>
+      <button class="btn primary block" type="submit" id="jalankan-btn" style="margin-top:14px">▶ Jalankan Rekonsiliasi</button>
+      <p class="faint" style="font-size:12px;margin:10px 0 0;text-align:center" id="recap"></p>
     </form>
   </div>
 </div>
 <script>
 /* Tanggal kosong = rekonsiliasi SEMUA data aktif jadi satu batch — minta
-   konfirmasi lewat modal data-confirm (atribut di-toggle dinamis). */
+   konfirmasi lewat modal data-confirm (atribut di-toggle dinamis) DAN
+   tombol berubah merah + label peringatan sebelum modal muncul. */
 (function(){
   var f=document.getElementById('jalankan-form');
   if(!f) return;
-  var df=f.querySelector('[name=date_from]'), dt=f.querySelector('[name=date_to]');
+  var df=f.querySelector('[name=date_from]'), dt=f.querySelector('[name=date_to]'),
+      btn=document.getElementById('jalankan-btn'),
+      recap=document.getElementById('recap'),
+      asli=btn.textContent;
   function sync(){
-    if(!df.value && !dt.value){
+    var kosong=!df.value && !dt.value;
+    if(kosong){
       f.setAttribute('data-confirm','Tanggal kosong = rekonsiliasi SEMUA data aktif (semua tanggal digabung jadi satu batch). Lanjutkan?');
     }else{
       f.removeAttribute('data-confirm');
       delete f.dataset.confirmed;
     }
+    btn.classList.toggle('danger', kosong);
+    btn.classList.toggle('primary', !kosong);
+    btn.textContent = kosong ? '⚠ Jalankan SEMUA data' : asli;
+    // Rekap live: pernyataan niat sebelum tombol ditekan.
+    var n=document.querySelectorAll('input[name^=inc_]:checked').length,
+        tgl = kosong ? 'SEMUA tanggal' : (df.value===dt.value ? df.value : df.value+' → '+dt.value);
+    recap.textContent = n+' sumber · '+tgl;
   }
   df.addEventListener('input',sync); dt.addEventListener('input',sync);
   df.addEventListener('change',sync); dt.addEventListener('change',sync);
+  document.addEventListener('change',function(e){ if(e.target && e.target.matches && e.target.matches('input[name^=inc_]')) sync(); });
   sync();
 })();
 </script>
 
-<div class="card reveal" style="padding:0;overflow:hidden">
+<div class="card reveal pad0">
   <div style="padding:18px 20px 6px;display:flex;align-items:center;justify-content:space-between;gap:12px">
     <h3 style="margin:0">Riwayat Batch</h3>
     <form method="get" style="margin:0">
@@ -75,15 +91,22 @@
   </div>
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>Batch</th><th>Waktu</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th>Cocok</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
+    <thead><tr><th>Batch</th><th>Waktu</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th>Bucket</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
     <tbody>
     {% for b in batches %}
       <tr>
         <td><a class="grad-text" style="font-weight:600" href="{% url 'batch_detail' b.pk %}">#{{ b.no }}</a></td>
         <td class="faint">{{ b.created_at|date:"d/m H:i" }}</td>
-        <td class="num">{{ b.summary.dp.selisih|default:0|floatformat:0|intcomma }}</td>
-        <td class="num">{{ b.summary.wd.selisih|default:0|floatformat:0|intcomma }}</td>
-        <td><span class="badge ok">{{ b.summary.buckets.cocok|default:0|intcomma }}</span></td>
+        <td class="num amount">{{ b.summary.dp.selisih|default:0|floatformat:0|intcomma }}</td>
+        <td class="num amount">{{ b.summary.wd.selisih|default:0|floatformat:0|intcomma }}</td>
+        <td style="min-width:140px">
+          {% if b.bk.total %}
+          <div class="bucket-bar" role="img" aria-label="{{ b.bk.cocok }} cocok, {{ b.bk.perlu_tinjau }} tinjau, {{ b.bk.tidak_cocok }} tidak cocok">
+            <span class="s-ok" style="width:{% widthratio b.bk.cocok b.bk.total 100 %}%"></span><span class="s-warn" style="width:{% widthratio b.bk.perlu_tinjau b.bk.total 100 %}%"></span><span class="s-bad" style="width:{% widthratio b.bk.tidak_cocok b.bk.total 100 %}%"></span>
+          </div>
+          <div class="faint num" style="font-size:11.5px;margin-top:4px">{{ b.bk.cocok|intcomma }} cocok · {{ b.bk.tidak_cocok|intcomma }} tidak</div>
+          {% else %}<span class="badge ok">{{ b.bk.cocok|intcomma }}</span>{% endif %}
+        </td>
         {% if is_admin_user %}
         <td class="r">
           <form method="post" action="{% url 'delete_batch' b.pk %}" style="display:inline"
