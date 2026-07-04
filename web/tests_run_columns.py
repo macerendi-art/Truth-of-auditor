@@ -53,7 +53,9 @@ class _Base(TestCase):
 
 
 class SplitPanelColumnsTests(_Base):
-    """TASK 1: kolom terpisah User ID / Full Name / Player Bank / Bank Title / Handler."""
+    """Tabel layar RINGKAS (tanpa scroll horizontal): identitas Panel + Player Bank/
+    Bank Title/Handler ditumpuk di SATU sel Panel; nominal panel di kolom Nominal.
+    Detail lengkap tetap di Export Excel."""
 
     RAW = {
         "Player Bank": "DANA|fajar Pratama |083822153879",
@@ -61,14 +63,17 @@ class SplitPanelColumnsTests(_Base):
         "Handler": "Mozart K25",
     }
 
-    def test_header_kolom_baru_ada(self):
+    def test_header_ringkas_tanpa_kolom_lebar(self):
         resp = self.client.get(reverse("run_detail", args=[self.run.pk]))
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, '<th class="num">Nominal</th>')
+        self.assertContains(resp, "<th>Alasan</th>")
+        # Kolom lama yang memaksa scroll horizontal sudah tidak ada.
         for th in ("<th>User ID</th>", "<th>Full Name</th>", "<th>Player Bank</th>",
                    "<th>Bank Title</th>", "<th>Handler</th>"):
-            self.assertContains(resp, th)
+            self.assertNotContains(resp, th)
 
-    def test_nilai_terpisah_per_sel_dan_sel_panel_hanya_ticket_tanggal(self):
+    def test_sel_panel_tumpuk_identitas_dan_meta(self):
         left = self._tx(
             self.panel, "rc1",
             ticket_no="D0012345", username="budi123", counterparty="BUDI SANTOSO",
@@ -80,23 +85,16 @@ class SplitPanelColumnsTests(_Base):
         )
         resp = self.client.get(reverse("run_detail", args=[self.run.pk]))
         cells = _row_cells(resp.content.decode(), r.pk)
-        # 12 kolom: Status, Panel, User ID, Full Name, Player Bank, Bank Title,
-        # Handler, Amount, Kanan, Amount, Alasan, Aksi
-        self.assertEqual(len(cells), 12)
-        # Sel PANEL: hanya ticket + tanggal — TANPA username / nama lengkap.
-        self.assertIn("D0012345", cells[1])
-        self.assertIn("27/06 10:00", cells[1])
-        self.assertNotIn("budi123", cells[1])
-        self.assertNotIn("BUDI SANTOSO", cells[1])
-        # Masing-masing nilai di kolomnya sendiri.
-        self.assertIn("budi123", cells[2])
-        self.assertIn("BUDI SANTOSO", cells[3])
-        self.assertIn("DANA|fajar Pratama |083822153879", cells[4])
-        self.assertIn("BCA|HENDI|7126201591", cells[5])
-        self.assertIn("Mozart K25", cells[6])
+        # 6 kolom: Status, Panel, Nominal, Kanan, Alasan, Aksi.
+        self.assertEqual(len(cells), 6)
+        panel = cells[1]
+        for val in ("D0012345", "27/06 10:00", "budi123", "BUDI SANTOSO",
+                    "DANA|fajar Pratama |083822153879", "BCA|HENDI|7126201591", "Mozart K25"):
+            self.assertIn(val, panel)
+        self.assertIn("50", cells[2])  # Nominal panel di kolomnya sendiri
 
-    def test_sisi_kiri_bracket_tanpa_field_panel_render_strip(self):
-        """Relasi dgn kiri=Bracket (tanpa username/raw panel) → sel berisi — tanpa error."""
+    def test_sisi_kiri_bracket_tanpa_field_panel_render_aman(self):
+        """Relasi dgn kiri=Bracket (tanpa username/raw panel) → render tanpa error."""
         bracket = SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})[0]
         run = MatchRun.objects.create(
             relation=MatchRun.Relation.BRACKET_BANK, tolerance=self.tol, batch=self.batch
@@ -108,13 +106,13 @@ class SplitPanelColumnsTests(_Base):
         resp = self.client.get(reverse("run_detail", args=[run.pk]))
         self.assertEqual(resp.status_code, 200)
         cells = _row_cells(resp.content.decode(), r.pk)
-        self.assertEqual(len(cells), 12)
-        for i in (2, 3, 4, 5, 6):  # User ID, Full Name, Player Bank, Bank Title, Handler
-            self.assertEqual(cells[i], "—")
+        self.assertEqual(len(cells), 6)
+        self.assertIn("BR-1", cells[1])
+        self.assertEqual(cells[3], "—")  # sisi kanan (uang) kosong
 
-    def test_empty_state_colspan_12(self):
+    def test_empty_state_colspan_6(self):
         resp = self.client.get(reverse("run_detail", args=[self.run.pk]))
-        self.assertContains(resp, 'colspan="12"')
+        self.assertContains(resp, 'colspan="6"')
 
 
 class RunBatchLabelTests(TestCase):
