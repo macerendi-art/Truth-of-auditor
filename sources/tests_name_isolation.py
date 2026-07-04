@@ -8,8 +8,14 @@ import tempfile
 
 from django.test import SimpleTestCase
 
-from sources.parsers.banks import BRIParser, extract_bca_name, extract_mandiri_name
-from sources.parsers.bca_pdf import _clean_name
+from sources.parsers.banks import (
+    BCACSVParser,
+    BRIParser,
+    extract_bca_name,
+    extract_mandiri_name,
+    is_bca_fee,
+)
+from sources.parsers.bca_pdf import BCAPDFParser, _clean_name
 
 
 class ExtractMandiriNameTests(SimpleTestCase):
@@ -212,3 +218,81 @@ class BRIParserNameTests(SimpleTestCase):
     def test_atmstrprm_tanpa_nama_kosong(self):
         r = self._parse_one("ATMSTRPRM 08888 000528944 6044603718 ESB:NBMB:0005T00F:151728528944")
         self.assertEqual(r["counterparty"], "")
+
+
+class ExtractBCAWDNameTests(SimpleTestCase):
+    """Task 6d: baris WD BCA nyata ('TRANSFER KE .../MyBCA/KBI') -> nama pemain bersih."""
+
+    def test_wd_csv_transfer_ke_kbi(self):
+        self.assertEqual(
+            extract_bca_name("BI-FAST DB TRANSFER   KE 009 FAHRIAH           KBI"),
+            "FAHRIAH",
+        )
+
+    def test_wd_pdf_transfer_ke_mybca_menempel(self):
+        self.assertEqual(
+            extract_bca_name("TRANSFER KE 535 MUHAMMAD SAILILLAHMyBCA"),
+            "MUHAMMAD SAILILLAH",
+        )
+
+    def test_wd_dana_hanya_nomor_hp_kosong(self):
+        # E-wallet WD: hanya nomor HP -> counterparty kosong (jangan dikarang).
+        self.assertEqual(
+            extract_bca_name(
+                "TRSF E-BANKING DB 2606/FTFVA/WS9501139010/DANA        -                 -                 82279003062"
+            ),
+            "",
+        )
+
+
+class BCAFeeRowTests(SimpleTestCase):
+    """Task 6b: baris 'BIAYA TXN ... 2.500' ditandai jenis='admin' (bukan WD)."""
+
+    def test_is_bca_fee_detects_biaya_txn(self):
+        self.assertTrue(is_bca_fee("BI-FAST DB BIAYA TXN  KE 009 FAHRIAH           KBI"))
+        self.assertTrue(is_bca_fee("BIAYA TXN KE 535 SUPRIADI MyBCA"))
+
+    def test_is_bca_fee_false_for_real_transfer(self):
+        self.assertFalse(is_bca_fee("BI-FAST DB TRANSFER   KE 009 FAHRIAH           KBI"))
+        self.assertFalse(is_bca_fee("TRANSFER KE 535 SUPRIADI MyBCA"))
+        self.assertFalse(is_bca_fee(""))
+
+    def test_csv_parser_marks_fee_row_admin_transfer_stays_wd(self):
+        import csv
+        import tempfile
+
+        rows = [
+            ["No. Rekening", "=", "'0202405914"],
+            ["Nama", "=", "NIJUN"],
+            [],
+            ["Tanggal", "Keterangan", "Cabang", "Jumlah", "", "Saldo"],
+            ["'27/06/2026", "BI-FAST DB BIAYA TXN  KE 009 FAHRIAH           KBI", "'0000", "2500.00", "DB", "11770137.00"],
+            ["'27/06/2026", "BI-FAST DB TRANSFER   KE 009 FAHRIAH           KBI", "'0000", "2000000.00", "DB", "11772637.00"],
+        ]
+        with tempfile.NamedTemporaryFile("w", suffix=".CSV", delete=False, newline="") as f:
+            csv.writer(f).writerows(rows)
+            path = f.name
+        parsed = BCACSVParser().parse(path)
+        by_amt = {str(p["amount"]): p for p in parsed}
+        self.assertEqual(by_amt["2500.00"]["jenis"], "admin")  # fee -> admin
+        self.assertEqual(by_amt["2000000.00"]["jenis"], "wd")  # WD nyata tetap wd
+        # nominal tidak diubah
+        self.assertEqual(by_amt["2500.00"]["counterparty"], "FAHRIAH")
+
+    def test_pdf_parser_marks_fee_rows_admin(self):
+        import os
+
+        path = (
+            "samples/SAMPLING TO RND (TOKO= OKE25)/27-06/WD/27_JUNI_2026_WD_BCA_HENDI.pdf"
+        )
+        if not os.path.exists(path):
+            self.skipTest("file kanonik BCA WD PDF tidak tersedia")
+        parsed = BCAPDFParser().parse(path)
+        fee = [p for p in parsed if is_bca_fee(p["description"])]
+        self.assertTrue(fee, "harus ada baris BIAYA TXN di sampel")
+        self.assertTrue(all(p["jenis"] == "admin" for p in fee))
+        # Semua baris fee bernominal 2.500 (Rp2.500/txn).
+        self.assertTrue(all(str(p["amount"]) == "2500.00" for p in fee))
+        # Baris TRANSFER nyata tetap wd.
+        transfer = [p for p in parsed if "TRANSFER" in p["description"] and not is_bca_fee(p["description"]) and p["money_delta"] < 0]
+        self.assertTrue(all(p["jenis"] == "wd" for p in transfer))

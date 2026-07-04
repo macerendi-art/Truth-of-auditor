@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import pdfplumber
 
-from .banks import extract_bca_name
+from .banks import extract_bca_name, is_bca_fee
 from .base import BaseParser, parse_decimal, parse_dt, row_hash
 
 DATE_RE = re.compile(r"^(\d{2}/\d{2}/\d{4})\s+(.*)$")
@@ -62,11 +62,12 @@ class BCAPDFParser(BaseParser):
             middle = t["rest"][: am.start()].strip()
             occurred = parse_dt(t["date"], dayfirst=True)
             desc = (middle + " " + " ".join(t["cont"])).strip()
+            jenis = "admin" if is_bca_fee(desc) else ("depo" if money > 0 else "wd" if money < 0 else "lainnya")
             row = {
                 "source_type": "bank",
                 "occurred_at": occurred,
                 "posted_date": occurred.date() if occurred else None,
-                "jenis": "depo" if money > 0 else "wd" if money < 0 else "lainnya",
+                "jenis": jenis,
                 "amount": amount,
                 "credit_delta": Decimal("0"),
                 "money_delta": money,

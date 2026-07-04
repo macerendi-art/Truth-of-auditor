@@ -24,6 +24,16 @@ def _jenis_from_money(money):
     return "depo" if money > 0 else "wd" if money < 0 else "lainnya"
 
 
+# Baris biaya transaksi BCA ("BI-FAST DB BIAYA TXN ... 2.500"): tiap WD nyata
+# berpasangan dengan satu baris fee ini. Ditandai 'admin' agar dikecualikan dari
+# uang WD & pencocokan (baris tetap disimpan untuk audit).
+BCA_FEE_RE = re.compile(r"BIAYA\s+TXN", re.IGNORECASE)
+
+
+def is_bca_fee(desc):
+    return bool(BCA_FEE_RE.search(str(desc or "")))
+
+
 # ---------------------------------------------------------------------------
 # Isolasi nama (Task 4). Urutan wajib: buang teks struktural per-sumber DULU,
 # baru nama dinormalisasi (clean_name) di engine saat fuzzy matching.
@@ -188,7 +198,7 @@ class BCACSVParser(BaseParser):
                 "source_type": "bank",
                 "occurred_at": occurred,
                 "posted_date": occurred.date() if occurred else None,
-                "jenis": _jenis_from_money(money),
+                "jenis": "admin" if is_bca_fee(desc) else _jenis_from_money(money),
                 "amount": abs(money),
                 "credit_delta": Decimal("0"),
                 "money_delta": money,

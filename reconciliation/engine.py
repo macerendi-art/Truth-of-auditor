@@ -137,7 +137,11 @@ class _MoneyMatcher:
             dfrom, dto,
         )
         right = _date_filter(
-            _toko_filter(Transaction.objects.filter(source_type__key__in=MONEY_SOURCES, is_duplicate=False), toko), dfrom, dto
+            _toko_filter(
+                Transaction.objects.filter(source_type__key__in=MONEY_SOURCES, is_duplicate=False).exclude(jenis="admin"),
+                toko,
+            ),
+            dfrom, dto,
         )
         return list(left), list(right)
 
@@ -217,6 +221,50 @@ def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None,
     return run
 
 
+def _matched_money(runs):
+    """Uang REAL yang benar-benar berpasangan ke baris Panel (bucket cocok + perlu_tinjau).
+
+    Dijumlah dari sisi UANG (right) pada MatchResult PANEL_BANK yang punya left&right.
+    DP = money_delta>0, WD = abs(money_delta<0). Tidak menjalankan ulang matching.
+    """
+    panel_bank = [r.id for r in runs if r.relation == MatchRun.Relation.PANEL_BANK]
+    dp = wd = 0.0
+    if panel_bank:
+        results = MatchResult.objects.filter(
+            run_id__in=panel_bank, left__isnull=False, right__isnull=False
+        ).select_related("right")
+        for res in results:
+            md = float(res.right.money_delta)
+            if md > 0:
+                dp += md
+            elif md < 0:
+                wd += -md
+    return dp, wd
+
+
+def _bracket_overlap_warning(runs):
+    """Peringatan bila cocok Panel↔Bracket sangat rendah PADAHAL kedua sisi ada data —
+    indikasi file Panel & Bracket beda periode / tidak sepasang (bukan mengubah join)."""
+    for r in runs:
+        if r.relation != MatchRun.Relation.PANEL_BRACKET:
+            continue
+        s = r.summary or {}
+        left, right = s.get("left", 0), s.get("right", 0)
+        cocok = s.get("cocok", 0)
+        if left and right:  # kedua sisi punya baris
+            # Pakai sisi TERBESAR sebagai penyebut: file beda periode membuat salah
+            # satu sisi (mis. bracket setelah filter tanggal) menyusut jadi ~0 baris,
+            # sehingga cocok jadi porsi kecil dari sisi yang penuh.
+            denom = max(left, right)
+            if (cocok / denom) < 0.10:
+                return (
+                    f"Panel↔Bracket cocok sangat rendah ({cocok} dari {denom}) — "
+                    "kemungkinan file Panel & Bracket beda periode/tidak sepasang. "
+                    "Cek tanggal file."
+                )
+    return None
+
+
 def _aggregate_batch(toko, date_from, date_to, runs, skipped):
     tx = _date_filter(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko), date_from, date_to)
 
@@ -224,21 +272,38 @@ def _aggregate_batch(toko, date_from, date_to, runs, skipped):
         return float(qs.aggregate(x=Sum(field))["x"] or 0)
 
     panel = tx.filter(source_type__key="panel")
-    money = tx.filter(source_type__key__in=MONEY_SOURCES)
+    # Baris fee BCA ('admin') dikecualikan dari uang WD (bukan WD nyata).
+    money = tx.filter(source_type__key__in=MONEY_SOURCES).exclude(jenis="admin")
     dp_panel = total(panel.filter(jenis="depo"), "amount")
-    dp_money = total(money.filter(money_delta__gt=0), "money_delta")
+    dp_gross = total(money.filter(money_delta__gt=0), "money_delta")
     wd_panel = total(panel.filter(jenis="wd"), "amount")
-    wd_money = abs(total(money.filter(money_delta__lt=0), "money_delta"))
+    wd_gross = abs(total(money.filter(money_delta__lt=0), "money_delta"))
+
+    dp_matched, wd_matched = _matched_money(runs)
 
     buckets = {"cocok": 0, "perlu_tinjau": 0, "tidak_cocok": 0}
     for r in runs:
         for k in buckets:
             buckets[k] += (r.summary or {}).get(k, 0)
 
+    warnings = []
+    w = _bracket_overlap_warning(runs)
+    if w:
+        warnings.append(w)
+
     return {
-        "dp": {"panel": dp_panel, "money": dp_money, "selisih": dp_panel - dp_money},
-        "wd": {"panel": wd_panel, "money": wd_money, "selisih": wd_panel - wd_money},
+        # money_matched = uang yang berpasangan ke Panel; selisih = panel - matched.
+        # 'money'/'selisih' dipertahankan (backward-compat) = versi MATCHED.
+        "dp": {
+            "panel": dp_panel, "money_gross": dp_gross, "money_matched": dp_matched,
+            "money": dp_matched, "selisih": dp_panel - dp_matched,
+        },
+        "wd": {
+            "panel": wd_panel, "money_gross": wd_gross, "money_matched": wd_matched,
+            "money": wd_matched, "selisih": wd_panel - wd_matched,
+        },
         "buckets": buckets,
+        "warnings": warnings,
         "relations": [r.relation for r in runs],
         "skipped": skipped,
     }
