@@ -9,6 +9,7 @@ from reconciliation.models import ReconBatch
 from sources.models import Toko, Upload
 from transactions.models import Transaction
 from web.access import admin_required
+from web.views import _active_toko
 
 
 VALID_ROLES = ("admin", "supervisor", "auditor")
@@ -145,6 +146,34 @@ def delete_upload(request, pk):
             up.file.delete(save=False)
         up.delete()
         messages.success(request, f"{name} dihapus — {n_tx} transaksi ikut terhapus.")
+    return redirect("upload")
+
+
+@admin_required
+def bulk_delete_uploads(request):
+    """Hapus banyak upload sekaligus dari halaman Riwayat Upload.
+
+    Beda dari `delete_upload` per-baris (yang tak scope toko sama sekali), view
+    massal ini dibatasi ke TOKO AKTIF — persis daftar yang dirender di form.
+    Toko aktif otomatis sudah tersaring lewat `tokos_for` (RBAC), jadi id di luar
+    toko aktif (termasuk toko lain yang sebetulnya boleh diakses) di-skip aman
+    dan tak bisa dipakai menghapus data toko lain lewat id tebak-tebakan.
+    """
+    if request.method == "POST":
+        active = _active_toko(request)
+        ids = [i for i in request.POST.getlist("upload_ids") if i.isdecimal()]
+        ups = list(Upload.objects.filter(pk__in=ids, toko=active)) if active else []
+        n_file = len(ups)
+        n_tx = 0
+        for up in ups:
+            n_tx += up.transactions.count()
+            if up.file:
+                up.file.delete(save=False)
+            up.delete()
+        if n_file:
+            messages.success(
+                request, f"{n_file} file dihapus — {n_tx} transaksi ikut terhapus."
+            )
     return redirect("upload")
 
 
