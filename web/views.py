@@ -460,6 +460,59 @@ def transactions(request):
     return render(request, "web/transactions.html", ctx)
 
 
+# Nama bulan pendek Indonesia — filter |date Django ikut LANGUAGE_CODE (en) dan
+# ganti locale global terlalu invasif untuk satu label.
+_BULAN_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+
+
+def _tgl_id(d, with_year=False):
+    s = f"{d.day} {_BULAN_ID[d.month - 1]}"
+    return f"{s} {d.year}" if with_year else s
+
+
+def _window_label(dfrom, dto, with_year=False):
+    """Label tanggal DATA sebuah batch — identitas utama batch di mata auditor
+    ("hari 28"), bukan waktu dibuatnya. '28 Jun' / '27–29 Jun' /
+    '30 Jun – 2 Jul' / 'semua tanggal'."""
+    if not dfrom and not dto:
+        return "semua tanggal"
+    if dfrom and dto:
+        if dfrom == dto:
+            return _tgl_id(dfrom, with_year)
+        if (dfrom.year, dfrom.month) == (dto.year, dto.month):
+            return f"{dfrom.day}–{_tgl_id(dto, with_year)}"
+        return f"{_tgl_id(dfrom)} – {_tgl_id(dto, with_year)}"
+    return f"sejak {_tgl_id(dfrom, with_year)}" if dfrom else f"s.d. {_tgl_id(dto, with_year)}"
+
+
+def _status_batches(batches):
+    """Chip status per batch riwayat (F3): pisahkan ekor T+1 yang normal dari
+    selisih beneran, dan tandai batch cangkang yang buktinya sudah dihapus.
+    Mengisi atribut `window_label` dan `status` pada tiap batch (in-place)."""
+    ids = [b.id for b in batches]
+    res_counts = {
+        row["run__batch"]: row["n"]
+        for row in MatchResult.objects.filter(run__batch__in=ids)
+        .values("run__batch").annotate(n=Count("id"))
+    }
+    for b in batches:
+        b.window_label = _window_label(b.date_from, b.date_to)
+        tidak, tinjau = b.bk["tidak_cocok"], b.bk["perlu_tinjau"]
+        ekor = 0
+        if tidak and b.date_to:
+            ekor = min(tidak, MatchResult.objects.filter(
+                run__batch=b, bucket=MatchResult.Bucket.TIDAK, reason_code="no_money",
+                left__occurred_at__date=b.date_to, left__occurred_at__hour__gte=_JAM_EKOR,
+            ).count())
+        b.status = {
+            "rusak": b.bk["total"] > 0 and res_counts.get(b.id, 0) == 0,
+            "ekor": ekor,
+            "real": max(tidak - ekor, 0),
+            "tinjau": tinjau,
+            "final": tidak == 0 and tinjau == 0,
+        }
+
+
 @login_required
 def reconcile(request):
     active = _active_toko(request)
@@ -517,6 +570,7 @@ def reconcile(request):
     if bank:
         all_batches = [b for b in all_batches if (b.completeness or {}).get(bank)]
     batches = all_batches[:20]
+    _status_batches(batches)  # chip status + label tanggal data, hanya utk yg tampil
     ctx = {
         "active_toko": active,
         "completeness": check_completeness(active, df, dt),
@@ -571,6 +625,7 @@ def batch_detail(request, pk):
         "batch": batch, "batch_no": batch_no, "s": s, "bk": bk, "runs": batch.runs.all(),
         "healing": request.session.pop("healing_report", None),
         "pending_t1": pending_t1,
+        "window_label": _window_label(batch.date_from, batch.date_to, with_year=True),
     })
 
 

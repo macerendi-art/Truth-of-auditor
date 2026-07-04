@@ -91,12 +91,24 @@
   </div>
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>Batch</th><th>Waktu</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th>Bucket</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
+    <thead><tr><th>Batch</th><th>Tanggal data</th><th>Status</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th>Bucket</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
     <tbody>
     {% for b in batches %}
       <tr>
         <td><a class="grad-text" style="font-weight:600" href="{% url 'batch_detail' b.pk %}">#{{ b.no }}</a></td>
-        <td class="faint">{{ b.created_at|date:"d/m H:i" }}</td>
+        <td style="white-space:nowrap">
+          <div style="font-weight:600">{{ b.window_label }}</div>
+          <div class="faint" style="font-size:11px" title="Waktu batch dibuat">dibuat {{ b.created_at|date:"d/m H:i" }}</div>
+        </td>
+        <td style="white-space:nowrap">
+          {% if b.status.rusak %}<span class="badge bad" title="Upload sumber hasil ini sudah dihapus — angka tidak bisa diverifikasi">bukti dihapus</span>
+          {% else %}
+            {% if b.status.final %}<span class="badge ok" title="Tidak ada baris terbuka">✓ final</span>{% endif %}
+            {% if b.status.ekor %}<span class="badge warn" title="Transaksi malam hari terakhir window — uangnya di file besok, tertutup auto re-match">⏳ {{ b.status.ekor }} ekor</span>{% endif %}
+            {% if b.status.real %}<span class="badge bad" title="Tidak cocok di luar heuristik ekor malam — periksa">⚠ {{ b.status.real }} selisih real</span>{% endif %}
+            {% if b.status.tinjau %}<span class="badge warn" title="Menunggu keputusan review">⚑ {{ b.status.tinjau }} tinjau</span>{% endif %}
+          {% endif %}
+        </td>
         <td class="num amount">{{ b.summary.dp.selisih|default:0|floatformat:0|intcomma }}</td>
         <td class="num amount">{{ b.summary.wd.selisih|default:0|floatformat:0|intcomma }}</td>
         <td style="min-width:140px">
@@ -117,7 +129,7 @@
         </td>
         {% endif %}
       </tr>
-    {% empty %}<tr><td colspan="{% if is_admin_user %}6{% else %}5{% endif %}" class="faint">{% if bank %}Tidak ada batch dengan sumber ini.{% else %}Belum ada batch.{% endif %}</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="{% if is_admin_user %}7{% else %}6{% endif %}" class="faint">{% if bank %}Tidak ada batch dengan sumber ini.{% else %}Belum ada batch.{% endif %}</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>

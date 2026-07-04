@@ -6,8 +6,8 @@
 {% include "web/_healing_card.html" %}
 <div class="page-head reveal" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
   <div>
-    <h1>Batch #{{ batch_no }} — {{ batch.toko.name }}</h1>
-    <p>{{ batch.created_at|date:"d/m/Y H:i" }} · Toleransi {{ batch.tolerance.name }}</p>
+    <h1>Batch #{{ batch_no }} — {{ window_label }}</h1>
+    <p>{{ batch.toko.name }} · dibuat {{ batch.created_at|date:"d/m/Y H:i" }} · Toleransi {{ batch.tolerance.name }}</p>
   </div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
     <div style="display:flex;gap:8px;align-items:center">
