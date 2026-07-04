@@ -21,11 +21,21 @@
 {% endif %}
 
 <div class="tabs reveal" style="margin-top:24px">
-  <a href="?" class="{% if not bucket %}active{% endif %}">Semua</a>
-  <a href="?bucket=cocok" class="{% if bucket == 'cocok' %}active{% endif %}">Cocok</a>
-  <a href="?bucket=perlu_tinjau" class="{% if bucket == 'perlu_tinjau' %}active{% endif %}">Perlu Ditinjau</a>
-  <a href="?bucket=tidak_cocok" class="{% if bucket == 'tidak_cocok' %}active{% endif %}">Tidak Cocok</a>
+  <a href="?{% if channel %}channel={{ channel|urlencode }}{% endif %}" class="{% if not bucket %}active{% endif %}">Semua</a>
+  <a href="?bucket=cocok{% if channel %}&channel={{ channel|urlencode }}{% endif %}" class="{% if bucket == 'cocok' %}active{% endif %}">Cocok</a>
+  <a href="?bucket=perlu_tinjau{% if channel %}&channel={{ channel|urlencode }}{% endif %}" class="{% if bucket == 'perlu_tinjau' %}active{% endif %}">Perlu Ditinjau</a>
+  <a href="?bucket=tidak_cocok{% if channel %}&channel={{ channel|urlencode }}{% endif %}" class="{% if bucket == 'tidak_cocok' %}active{% endif %}">Tidak Cocok</a>
 </div>
+
+{% if channels|length > 1 %}
+{# Filter kedua bertingkat: channel/sumber (DANA/OVO/BCA/…) SETELAH filter bucket. #}
+<div class="tabs reveal" style="margin-top:8px">
+  <a href="?bucket={{ bucket }}" class="{% if not channel %}active{% endif %}">Semua channel</a>
+  {% for name, count in channels %}
+  <a href="?bucket={{ bucket }}&channel={{ name|urlencode }}" class="{% if channel == name %}active{% endif %}">{{ name }} <span class="faint">({{ count }})</span></a>
+  {% endfor %}
+</div>
+{% endif %}
 
 <div class="card pad0 reveal">
   <div class="table-wrap" style="border:none">
@@ -41,9 +51,9 @@
 
 {% if page.has_other_pages %}
 <div class="pager">
-  {% if page.has_previous %}<a class="btn sm" href="?bucket={{ bucket }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
+  {% if page.has_previous %}<a class="btn sm" href="?bucket={{ bucket }}{% if channel %}&channel={{ channel|urlencode }}{% endif %}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
   <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
-  {% if page.has_next %}<a class="btn sm" href="?bucket={{ bucket }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
+  {% if page.has_next %}<a class="btn sm" href="?bucket={{ bucket }}{% if channel %}&channel={{ channel|urlencode }}{% endif %}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}
