@@ -97,3 +97,17 @@ class FolderInputTests(_Base):
         r = self.client.get(reverse("upload"))
         self.assertContains(r, "webkitdirectory")
         self.assertContains(r, ".zip")
+
+
+class DragDropMarkupTests(_Base):
+    """Dropzone interaktif: drag-drop file & folder (webkitGetAsEntry traversal),
+    pilihan terakumulasi (pilih dua kali = gabung, bukan reset), tombol bersihkan."""
+
+    def test_dropzone_punya_handler_drop_dan_traversal_folder(self):
+        r = self.client.get(reverse("upload"))
+        self.assertContains(r, 'id="dropzone"')
+        self.assertContains(r, "webkitGetAsEntry")
+
+    def test_ada_tombol_bersihkan_pilihan(self):
+        r = self.client.get(reverse("upload"))
+        self.assertContains(r, 'id="fclear"')
