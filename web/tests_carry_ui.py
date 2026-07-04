@@ -107,6 +107,17 @@ class SettlementDisplayTests(_LoggedIn):
         r = self.client.get(reverse("batch_detail", args=[b27.pk]))
         self.assertContains(r, "di-settle terlambat")
 
+    def test_batch_menampilkan_catatan_susulan(self):
+        # Batch 27 rapi, lalu baris bertanggal 27 muncul susulan di run 28.
+        self._tx(self.panel, "depo", "50000", "50000", "D1", "p1", username="budi")
+        self._tx(self.bank, "depo", "50000", "50000", "", "k1", username="budi")
+        run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 27))
+        self._tx(self.bank, "depo", "90000", "90000", "", "k3",
+                 username="rudi", dt=datetime(2026, 6, 27, 23, 30))
+        b28 = run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 28))
+        r = self.client.get(reverse("batch_detail", args=[b28.pk]))
+        self.assertContains(r, "susulan")
+
     def test_batch_detail_menampilkan_tanggal(self):
         p, b27, b28 = self._flow_27_28()
         r = self.client.get(reverse("batch_detail", args=[b27.pk]))

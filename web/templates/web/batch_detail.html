@@ -86,6 +86,12 @@
 </div>
 {% endif %}
 
+{% if s.retro.count %}
+<div class="msg warning reveal" style="margin-bottom:16px">
+  ↩ {{ s.retro.count }} transaksi susulan bertanggal sebelumnya ditemukan di run ini — hasil &amp; totalnya sudah ditulis ke batch tanggal asalnya, tidak masuk angka batch ini.
+</div>
+{% endif %}
+
 <div class="card reveal">
   <h3 style="margin:0 0 12px">Ringkasan Bucket</h3>
   <span class="badge ok">{{ s.buckets.cocok|default:0|intcomma }} cocok</span>

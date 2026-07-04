@@ -43,9 +43,21 @@ immutable") ditolak karena tiga hal:
 - **Expiry:** carried yang tak match dan lewat window dikonsumsi diam-diam ke batch
   asalnya; jejak `{tx, home}` disimpan di `summary["late_settlement"]["expired"]`
   batch N+1 supaya bisa dipulihkan.
+- **Baris susulan (retro write-back):** baris BARU bertanggal D < recon_date yang
+  tanggal D-nya sudah punya batch (mis. mutasi malam 27 yang baru muncul di file 28,
+  atau baris panel 27 yang telat diekspor) **ditulis ke batch tanggal asalnya**:
+  hasil match masuk MatchRun batch D (dibuat bila relasinya belum ada), gross
+  panel/money batch D ditambah (`_add_retro_gross`), lalu summary-nya dihitung ulang;
+  barisnya dikonsumsi ke batch D. Kecuali: panel susulan tanpa pasangan uang yang
+  masih dalam window → tetap aktif "menunggu settlement" (hasil no_money-nya sudah
+  di batch D, jadi run berikutnya memperlakukannya sebagai carried biasa).
+  Tanggal tanpa batch → perlakuan lama (masuk batch berjalan). Batch berjalan hanya
+  menampilkan catatan "N transaksi susulan…" (`summary["retro"]`).
 - **Hapus batch penyelesai:** `revert_late_settlements(batch)` (dipanggil view hapus,
   atomic) mengembalikan flip ke `tidak_cocok/no_money`, mengaktifkan lagi baris
-  carried/expired, dan menghitung ulang summary batch asal.
+  carried/expired, dan menghitung ulang summary batch asal. Baris susulan tidak
+  tersentuh penghapusan batch pemrosesnya — mereka memang milik batch asalnya;
+  menghapus batch asal membebaskannya seperti biasa (CASCADE + SET_NULL).
 - **`run_batch` atomic:** gagal di tengah = rollback total (tidak ada batch yatim yang
   memblokir tanggal via unique constraint).
 - Path legacy (`recon_date=None`, CLI/test lama) berperilaku persis seperti sebelumnya.
@@ -60,6 +72,10 @@ immutable") ditolak karena tiga hal:
 - Delete programatik (shell/queryset) melewati revert — jalur resmi adalah view web.
 - Filter `date_from`/`date_to` bila diisi mengecualikan baris carried dari run
   (tetap aktif) — ada hint di form.
+- File bracket yang telat satu hari menghasilkan pasangan `no_panel`/`no_bracket`
+  terpisah di batch asal (panel pasangannya sudah dikonsumsi tanpa bisa di-join
+  ulang) — bucket-nya jadi dua `tidak_cocok`, bukan satu `cocok`. Diterima; solusi
+  penuh butuh re-match terhadap baris yang sudah dikonsumsi.
 
 ## Verifikasi
 

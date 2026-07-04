@@ -269,3 +269,114 @@ class LateSettlementTests(_Base):
         b28 = run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 28))
         # Carried p tidak boleh dapat hasil no_bracket di batch 28.
         self.assertFalse(MatchResult.objects.filter(run__batch=b28, left=p).exists())
+
+
+class RetroSusulanTests(_Base):
+    """Baris SUSULAN: transaksi bertanggal D yang baru muncul di upload berikutnya,
+    padahal batch tanggal D sudah ada → hasil & totalnya ditulis ke batch D."""
+
+    def _batch27_selesai(self, tol=None):
+        """Batch 27 rapi: satu pasangan cocok, tidak ada carry."""
+        self._tx(self.panel, "depo", "50000", "50000", "D1", "p1", username="budi")
+        self._tx(self.bank, "depo", "50000", "50000", "", "k1", username="budi")
+        return run_batch(self.lbs, tol or self.tol, recon_date=date(2026, 6, 27))
+
+    def test_pasangan_susulan_ditulis_ke_batch_asal(self):
+        b27 = self._batch27_selesai()
+        # Panel tanggal 27 baru muncul di file 28; uangnya tanggal 28.
+        p2 = self._tx(self.panel, "depo", "60000", "60000", "D2", "p2",
+                      username="andi", dt=datetime(2026, 6, 27, 22, 0))
+        k2 = self._tx(self.bank, "depo", "60000", "60000", "", "k2",
+                      username="andi", dt=datetime(2026, 6, 28, 1, 0))
+        b28 = run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 28))
+        r = MatchResult.objects.get(left=p2)
+        self.assertEqual(r.run.batch, b27)  # hasil ada di batch 27, bukan 28
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        p2.refresh_from_db()
+        k2.refresh_from_db()
+        self.assertEqual(p2.consumed_by_batch, b27)  # baris 27 milik batch 27
+        self.assertEqual(k2.consumed_by_batch, b28)  # uang tanggal 28 milik batch 28
+        b27.refresh_from_db()
+        self.assertEqual(b27.summary["dp"]["panel"], 110000.0)
+        self.assertEqual(b27.summary["dp"]["money_matched"], 110000.0)
+        self.assertEqual(b27.summary["dp"]["selisih"], 0.0)
+        # Batch 28 murni: panel susulan tidak ikut totalnya.
+        self.assertEqual(b28.summary["dp"]["panel"], 0.0)
+        self.assertEqual(b28.summary["retro"]["count"], 1)
+
+    def test_uang_susulan_masuk_gross_batch_asal(self):
+        b27 = self._batch27_selesai()
+        # Mutasi bertanggal 27 baru muncul di file 28, tanpa pasangan panel.
+        k3 = self._tx(self.bank, "depo", "90000", "90000", "", "k3",
+                      username="rudi", dt=datetime(2026, 6, 27, 23, 30))
+        b28 = run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 28))
+        k3.refresh_from_db()
+        self.assertEqual(k3.consumed_by_batch, b27)
+        b27.refresh_from_db()
+        self.assertEqual(b27.summary["dp"]["money_gross"], 140000.0)  # 50k + 90k
+        self.assertEqual(b27.summary["dp"]["selisih"], 0.0)  # selisih dari matched
+        self.assertEqual(b28.summary["dp"]["money_gross"], 0.0)
+        self.assertEqual(b28.summary["retro"]["count"], 1)
+
+    def test_uang_susulan_men_settle_carried_dan_pulang_ke_batch_asal(self):
+        # Batch 27 dengan carry: panel malam 27 belum ada uangnya.
+        p1 = self._tx(self.panel, "depo", "50000", "50000", "D1", "p1",
+                      username="budi", dt=datetime(2026, 6, 27, 21, 0))
+        self._tx(self.bank, "depo", "70000", "70000", "", "k1", username="siti")
+        b27 = run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 27))
+        # Mutasinya bertanggal 27 juga, tapi baru muncul di file 28.
+        k2 = self._tx(self.bank, "depo", "50000", "50000", "", "k2",
+                      username="budi", dt=datetime(2026, 6, 27, 23, 50))
+        b28 = run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 28))
+        r = MatchResult.objects.get(run__batch=b27, left=p1)
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.resolved_by_batch, b28)
+        k2.refresh_from_db()
+        self.assertEqual(k2.consumed_by_batch, b27)  # uang tgl 27 milik batch 27
+        b27.refresh_from_db()
+        self.assertEqual(b27.summary["dp"]["money_gross"], 120000.0)  # 70k + 50k
+        self.assertEqual(b27.summary["dp"]["selisih"], 0.0)
+
+    def test_kredit_susulan_belum_settle_tetap_menunggu(self):
+        longgar = ToleranceProfile.objects.get_or_create(
+            name="Longgar", defaults={"date_window_days": 2}
+        )[0]
+        b27 = self._batch27_selesai(tol=longgar)
+        # Panel 27 susulan, uangnya belum ada; bank pengisi agar PANEL_BANK jalan.
+        p2 = self._tx(self.panel, "depo", "60000", "60000", "D2", "p2",
+                      username="andi", dt=datetime(2026, 6, 27, 22, 0))
+        self._tx(self.bank, "depo", "90000", "90000", "", "k9",
+                 username="rudi", dt=datetime(2026, 6, 28, 10, 0))
+        run_batch(self.lbs, longgar, recon_date=date(2026, 6, 28))
+        r = MatchResult.objects.get(left=p2)
+        self.assertEqual(r.run.batch, b27)  # no_money tercatat di batch asalnya
+        self.assertEqual(r.reason_code, "no_money")
+        p2.refresh_from_db()
+        self.assertIsNone(p2.consumed_by_batch)  # masih dalam window → menunggu
+        b27.refresh_from_db()
+        self.assertEqual(b27.summary["dp"]["panel"], 110000.0)
+        self.assertEqual(b27.summary["dp"]["selisih"], 60000.0)
+        # Hari berikutnya uangnya muncul → settle, flip di batch 27.
+        self._tx(self.bank, "depo", "60000", "60000", "", "k10",
+                 username="andi", dt=datetime(2026, 6, 29, 1, 0))
+        b29 = run_batch(self.lbs, longgar, recon_date=date(2026, 6, 29))
+        r.refresh_from_db()
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.resolved_by_batch, b29)
+        p2.refresh_from_db()
+        self.assertEqual(p2.consumed_by_batch, b27)
+        b27.refresh_from_db()
+        self.assertEqual(b27.summary["dp"]["selisih"], 0.0)
+
+    def test_susulan_tanpa_batch_asal_tetap_di_batch_berjalan(self):
+        self._batch27_selesai()
+        # Baris tanggal 26 — tidak pernah ada batch 26 → perlakuan biasa.
+        p0 = self._tx(self.panel, "depo", "40000", "40000", "D0", "p0",
+                      username="cici", dt=datetime(2026, 6, 26, 20, 0))
+        self._tx(self.bank, "depo", "90000", "90000", "", "k9",
+                 username="rudi", dt=datetime(2026, 6, 28, 10, 0))
+        b28 = run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 28))
+        r = MatchResult.objects.get(left=p0)
+        self.assertEqual(r.run.batch, b28)
+        p0.refresh_from_db()
+        self.assertEqual(p0.consumed_by_batch, b28)
