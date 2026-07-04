@@ -6,6 +6,19 @@
       "runtimeExecutable": "/Users/macads/Truth-of-auditor/.venv/bin/python",
       "runtimeArgs": ["manage.py", "runserver", "127.0.0.1:8000", "--noreload"],
       "port": 8000
+    },
+    {
+      "name": "trial",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DATABASE_URL=sqlite:////private/tmp/claude-501/-Users-macads-Truth-of-auditor/c7e39364-cb82-47ac-92fa-fbe5c174f014/scratchpad/trial.sqlite3",
+        "/Users/macads/Truth-of-auditor/.venv/bin/python",
+        "manage.py",
+        "runserver",
+        "127.0.0.1:8713",
+        "--noreload"
+      ],
+      "port": 8713
     }
   ]
 }
