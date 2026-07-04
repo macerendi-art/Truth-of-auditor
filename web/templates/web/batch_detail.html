@@ -14,7 +14,7 @@
       {% if s.buckets.tidak_cocok %}
       <form method="post" action="{% url 'rematch_batch' batch.pk %}" style="margin:0">
         {% csrf_token %}
-        <button class="btn sm" type="submit">⟳ Re-match</button>
+        <button class="btn sm" type="submit"><svg width="15" height="15"><use href="#i-rotate-cw"/></svg> Re-match</button>
       </form>
       {% endif %}
       {% if is_admin_user %}
@@ -42,24 +42,24 @@
 <div class="grid cols-2">
   {% with dp=s.dp %}
   <div class="card reveal">
-    <h3 style="margin:0 0 12px">Deposit (DP)</h3>
-    <table>
-      <tr><td>Panel (koin)</td><td>{{ dp.panel|default:0|floatformat:0|intcomma }}</td></tr>
+    <div class="h-row"><h3 style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" style="color:var(--periwinkle-text)"><use href="#i-landmark"/></svg> Deposit (DP)</h3></div>
+    <table class="flush">
+      <tr><td>Panel (koin)</td><td class="r num amount">{{ dp.panel|default:0|floatformat:0|intcomma }}</td></tr>
       {# money_matched baru; batch lama pakai 'money'. Keduanya di-|default sendiri agar aman saat summary kosong. #}
-      <tr><td>Uang real (matched)</td><td>{% if dp.money_matched != None %}{{ dp.money_matched|floatformat:0|intcomma }}{% else %}{{ dp.money|default:0|floatformat:0|intcomma }}{% endif %}</td></tr>
-      <tr><td class="faint">Uang real (gross)</td><td class="faint">{{ dp.money_gross|default:0|floatformat:0|intcomma }}</td></tr>
-      <tr><td><b>Selisih</b></td><td>{% if dp.selisih == 0 %}<span class="badge ok">Balanced ✓</span>{% else %}<span class="badge warn">{{ dp.selisih|default:0|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
+      <tr><td>Uang real (matched)</td><td class="r num amount">{% if dp.money_matched != None %}{{ dp.money_matched|floatformat:0|intcomma }}{% else %}{{ dp.money|default:0|floatformat:0|intcomma }}{% endif %}</td></tr>
+      <tr><td class="faint">Uang real (gross)</td><td class="faint r num amount">{{ dp.money_gross|default:0|floatformat:0|intcomma }}</td></tr>
+      <tr><td><b>Selisih</b></td><td class="r">{% if dp.selisih == 0 %}<span class="badge ok">Balanced ✓</span>{% else %}<span class="badge warn plain num amount">{{ dp.selisih|default:0|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
     </table>
   </div>
   {% endwith %}
   {% with wd=s.wd %}
   <div class="card reveal">
-    <h3 style="margin:0 0 12px">Withdraw (WD)</h3>
-    <table>
-      <tr><td>Panel (koin)</td><td>{{ wd.panel|default:0|floatformat:0|intcomma }}</td></tr>
-      <tr><td>Uang real (matched)</td><td>{% if wd.money_matched != None %}{{ wd.money_matched|floatformat:0|intcomma }}{% else %}{{ wd.money|default:0|floatformat:0|intcomma }}{% endif %}</td></tr>
-      <tr><td class="faint">Uang real (gross)</td><td class="faint">{{ wd.money_gross|default:0|floatformat:0|intcomma }}</td></tr>
-      <tr><td><b>Selisih</b></td><td>{% if wd.selisih == 0 %}<span class="badge ok">Balanced ✓</span>{% else %}<span class="badge warn">{{ wd.selisih|default:0|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
+    <div class="h-row"><h3 style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" style="color:var(--periwinkle-text)"><use href="#i-wallet"/></svg> Withdraw (WD)</h3></div>
+    <table class="flush">
+      <tr><td>Panel (koin)</td><td class="r num amount">{{ wd.panel|default:0|floatformat:0|intcomma }}</td></tr>
+      <tr><td>Uang real (matched)</td><td class="r num amount">{% if wd.money_matched != None %}{{ wd.money_matched|floatformat:0|intcomma }}{% else %}{{ wd.money|default:0|floatformat:0|intcomma }}{% endif %}</td></tr>
+      <tr><td class="faint">Uang real (gross)</td><td class="faint r num amount">{{ wd.money_gross|default:0|floatformat:0|intcomma }}</td></tr>
+      <tr><td><b>Selisih</b></td><td class="r">{% if wd.selisih == 0 %}<span class="badge ok">Balanced ✓</span>{% else %}<span class="badge warn plain num amount">{{ wd.selisih|default:0|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
     </table>
   </div>
   {% endwith %}
@@ -67,9 +67,14 @@
 
 <div class="card reveal">
   <h3 style="margin:0 0 12px">Ringkasan Bucket</h3>
-  <span class="badge ok">{{ s.buckets.cocok|default:0|intcomma }} cocok</span>
-  <span class="badge warn">{{ s.buckets.perlu_tinjau|default:0|intcomma }} tinjau</span>
-  <span class="badge bad">{{ s.buckets.tidak_cocok|default:0|intcomma }} tidak cocok</span>
+  {% if bk.total %}
+  <div class="bucket-bar" role="img" aria-label="{{ bk.cocok }} cocok, {{ bk.perlu_tinjau }} tinjau, {{ bk.tidak_cocok }} tidak cocok" style="margin-bottom:12px">
+    <span class="s-ok" style="width:{% widthratio bk.cocok bk.total 100 %}%"></span><span class="s-warn" style="width:{% widthratio bk.perlu_tinjau bk.total 100 %}%"></span><span class="s-bad" style="width:{% widthratio bk.tidak_cocok bk.total 100 %}%"></span>
+  </div>
+  {% endif %}
+  <span class="badge ok">{{ bk.cocok|intcomma }} cocok</span>
+  <span class="badge warn">{{ bk.perlu_tinjau|intcomma }} tinjau</span>
+  <span class="badge bad">{{ bk.tidak_cocok|intcomma }} tidak cocok</span>
   {% if s.skipped %}<p class="faint" style="margin-top:10px">Dilewati (data tidak ada): {{ s.skipped|join:", " }}</p>{% endif %}
 </div>
 
@@ -85,7 +90,7 @@
         <td><span class="badge ok">{{ run.summary.cocok|default:0|intcomma }}</span></td>
         <td><span class="badge warn">{{ run.summary.perlu_tinjau|default:0|intcomma }}</span></td>
         <td><span class="badge bad">{{ run.summary.tidak_cocok|default:0|intcomma }}</span></td>
-        <td><a class="btn sm" href="{% url 'run_detail' run.pk %}">Detail →</a> <a class="btn sm ghost" href="{% url 'export_run' run.pk %}">Excel</a></td>
+        <td><a class="btn sm" href="{% url 'run_detail' run.pk %}">Detail <svg width="14" height="14"><use href="#i-chevron-right"/></svg></a> <a class="btn sm ghost" href="{% url 'export_run' run.pk %}"><svg width="14" height="14"><use href="#i-download"/></svg> Excel</a></td>
       </tr>
     {% empty %}<tr><td colspan="5" class="faint">Tidak ada relasi dijalankan.</td></tr>{% endfor %}
     </tbody>

@@ -533,8 +533,17 @@ def reconcile(request):
 def batch_detail(request, pk):
     batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
     batch_no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
+    s = batch.summary or {}
+    # Triple bucket ternormalisasi utk bucket-bar (summary lama bisa tanpa buckets).
+    raw_bk = s.get("buckets") or {}
+    bk = {
+        "cocok": raw_bk.get("cocok") or 0,
+        "perlu_tinjau": raw_bk.get("perlu_tinjau") or 0,
+        "tidak_cocok": raw_bk.get("tidak_cocok") or 0,
+    }
+    bk["total"] = bk["cocok"] + bk["perlu_tinjau"] + bk["tidak_cocok"]
     return render(request, "web/batch_detail.html", {
-        "batch": batch, "batch_no": batch_no, "s": batch.summary or {}, "runs": batch.runs.all(),
+        "batch": batch, "batch_no": batch_no, "s": s, "bk": bk, "runs": batch.runs.all(),
         "healing": request.session.pop("healing_report", None),
     })
 
