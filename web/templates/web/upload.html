@@ -14,16 +14,31 @@
     <label class="dz" for="fileInput">
       <div class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></div>
       <div style="font-weight:600">Lepas file di sini atau klik untuk pilih</div>
-      <div class="faint" style="font-size:13px;margin-top:4px">xlsx · csv · pdf — bisa banyak sekaligus</div>
+      <div class="faint" style="font-size:13px;margin-top:4px">xlsx · csv · pdf · zip — bisa banyak sekaligus, zip diekstrak otomatis</div>
       <div id="flist" class="faint" style="font-size:13px;margin-top:8px"></div>
-      <input id="fileInput" type="file" name="files" multiple required accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF" style="display:none">
+      <input id="fileInput" type="file" name="files" multiple accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF,.zip,.ZIP" style="display:none">
     </label>
-    <button class="btn primary" type="submit" style="margin-top:16px">Analisa File →</button>
+    <input id="folderInput" type="file" name="files" multiple webkitdirectory style="display:none">
+    <div style="display:flex;gap:10px;align-items:center;margin-top:16px">
+      <button class="btn primary" type="submit">Analisa File →</button>
+      <label class="btn ghost" for="folderInput" style="cursor:pointer;margin:0">📁 Pilih Folder</label>
+    </div>
   </form>
 </div>
 <script>
-(function(){var i=document.getElementById('fileInput'),l=document.getElementById('flist');
-  if(i)i.addEventListener('change',function(){l.textContent=i.files.length?[].map.call(i.files,function(f){return f.name;}).join(' · '):'';});})();
+(function(){
+  var i=document.getElementById('fileInput'),d=document.getElementById('folderInput'),
+      l=document.getElementById('flist');
+  function tampil(inp,lain){
+    if(!inp.files.length){return;}
+    if(lain){lain.value='';} // satu sumber saja per analisa — hindari dobel
+    var n=inp.files.length;
+    l.textContent = n<=6 ? [].map.call(inp.files,function(f){return f.name;}).join(' · ')
+                         : n+' file dipilih';
+  }
+  if(i)i.addEventListener('change',function(){tampil(i,d);});
+  if(d)d.addEventListener('change',function(){tampil(d,i);});
+})();
 </script>
 
 {% if preview %}
