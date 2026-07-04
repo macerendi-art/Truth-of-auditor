@@ -34,6 +34,7 @@ class DeleteUploadTests(TestCase):
             occurred_at=datetime(2026, 6, 27, 10, 0), row_hash="del-1",
         )
         self.client.login(username="adm", password="pw123456")
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
         r = self.client.post(reverse("delete_upload", args=[up.pk]))
         self.assertEqual(r.status_code, 302)
         self.assertFalse(Upload.objects.filter(pk=up.pk).exists())
@@ -51,7 +52,19 @@ class DeleteUploadTests(TestCase):
     def test_get_tidak_menghapus(self):
         up, _ = _mk_upload(self.lbs)
         self.client.login(username="adm", password="pw123456")
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
         self.client.get(reverse("delete_upload", args=[up.pk]))
+        self.assertTrue(Upload.objects.filter(pk=up.pk).exists())
+
+    def test_admin_toko_aktif_beda_tidak_bisa_hapus_upload_toko_lain(self):
+        # Admin dengan toko aktif LBS tidak boleh hapus upload milik SLO
+        # lewat id tebak-tebakan — harus 404 dan upload tetap utuh.
+        slo = Toko.objects.get(key="slo")
+        up, _ = _mk_upload(slo)
+        self.client.login(username="adm", password="pw123456")
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
+        r = self.client.post(reverse("delete_upload", args=[up.pk]))
+        self.assertEqual(r.status_code, 404)
         self.assertTrue(Upload.objects.filter(pk=up.pk).exists())
 
     def test_tombol_hanya_untuk_admin(self):
@@ -89,11 +102,26 @@ class DeleteBatchTests(TestCase):
             occurred_at=datetime(2026, 6, 27, 10, 0), row_hash="keep-1",
         )
         self.client.login(username="adm", password="pw123456")
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
         r = self.client.post(reverse("delete_batch", args=[self.batch.pk]))
         self.assertEqual(r.status_code, 302)
         self.assertFalse(ReconBatch.objects.filter(pk=self.batch.pk).exists())
         self.assertEqual(MatchRun.objects.filter(batch_id=self.batch.pk).count(), 0)
         self.assertEqual(Transaction.objects.count(), 1)  # transaksi TIDAK ikut terhapus
+
+    def test_admin_toko_aktif_beda_tidak_bisa_hapus_batch_toko_lain(self):
+        # Admin dengan toko aktif LBS tidak boleh hapus batch milik SLO
+        # lewat id tebak-tebakan — harus 404 dan batch tetap utuh.
+        from reconciliation.engine import run_batch
+        from reconciliation.models import ReconBatch, ToleranceProfile
+        slo = Toko.objects.get(key="slo")
+        tol = ToleranceProfile.objects.get(name="Default")
+        batch_slo = run_batch(slo, tol)
+        self.client.login(username="adm", password="pw123456")
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
+        r = self.client.post(reverse("delete_batch", args=[batch_slo.pk]))
+        self.assertEqual(r.status_code, 404)
+        self.assertTrue(ReconBatch.objects.filter(pk=batch_slo.pk).exists())
 
     def test_supervisor_ditolak(self):
         from reconciliation.models import ReconBatch

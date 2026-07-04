@@ -138,7 +138,10 @@ def kelola_user_edit(request, pk):
 
 @admin_required
 def delete_upload(request, pk):
-    up = get_object_or_404(Upload, pk=pk)
+    # Scope ke TOKO AKTIF (sama seperti `bulk_delete_uploads`): id milik toko
+    # lain — termasuk yang sebenarnya boleh diakses — jatuh ke 404, jadi tak
+    # bisa menghapus data toko lain lewat id tebak-tebakan.
+    up = get_object_or_404(Upload, pk=pk, toko=_active_toko(request))
     if request.method == "POST":
         name = up.original_name or f"Upload #{up.pk}"
         n_tx = up.transactions.count()
@@ -153,11 +156,11 @@ def delete_upload(request, pk):
 def bulk_delete_uploads(request):
     """Hapus banyak upload sekaligus dari halaman Riwayat Upload.
 
-    Beda dari `delete_upload` per-baris (yang tak scope toko sama sekali), view
-    massal ini dibatasi ke TOKO AKTIF — persis daftar yang dirender di form.
-    Toko aktif otomatis sudah tersaring lewat `tokos_for` (RBAC), jadi id di luar
-    toko aktif (termasuk toko lain yang sebetulnya boleh diakses) di-skip aman
-    dan tak bisa dipakai menghapus data toko lain lewat id tebak-tebakan.
+    Sama seperti `delete_upload` per-baris, view massal ini dibatasi ke TOKO
+    AKTIF — persis daftar yang dirender di form. Toko aktif otomatis sudah
+    tersaring lewat `tokos_for` (RBAC), jadi id di luar toko aktif (termasuk
+    toko lain yang sebetulnya boleh diakses) di-skip aman dan tak bisa dipakai
+    menghapus data toko lain lewat id tebak-tebakan.
     """
     if request.method == "POST":
         active = _active_toko(request)
@@ -179,7 +182,8 @@ def bulk_delete_uploads(request):
 
 @admin_required
 def delete_batch(request, pk):
-    batch = get_object_or_404(ReconBatch, pk=pk)
+    # Scope ke TOKO AKTIF — alasan sama dengan `delete_upload` di atas.
+    batch = get_object_or_404(ReconBatch, pk=pk, toko=_active_toko(request))
     if request.method == "POST":
         no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
         n_runs = batch.runs.count()
