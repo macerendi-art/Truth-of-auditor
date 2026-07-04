@@ -49,6 +49,26 @@
   {% endwith %}
 </div>
 
+{% if s.unmatched_money %}
+{% with um=s.unmatched_money %}
+<a class="card reveal" href="{% url 'batch_uang' batch.pk %}"
+   style="display:block;margin-top:16px;text-decoration:none;border-color:var(--accent,#378add)">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+    <div>
+      <h3 style="margin:0 0 4px">Uang tanpa pasangan</h3>
+      <p class="faint" style="margin:0;font-size:.86rem">
+        Periksa (D): <b>{{ um.d.n|default:0|intcomma }}</b> baris ·
+        Ticket asing (B): {{ um.b.n|default:0|intcomma }} ·
+        Internal (C): {{ um.c.n|default:0|intcomma }} ·
+        Histori (A): {{ um.a.n|default:0|intcomma }}
+      </p>
+    </div>
+    <span class="btn sm">Lihat daftar →</span>
+  </div>
+</a>
+{% endwith %}
+{% endif %}
+
 {% if resolved_here %}
 <div class="card reveal" style="padding:0;overflow:hidden">
   <div style="padding:18px 20px 6px">

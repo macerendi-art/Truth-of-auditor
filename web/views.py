@@ -6,7 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
-from django.http import HttpResponseBadRequest
+from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
@@ -342,6 +342,103 @@ def batch_detail(request, pk):
     return render(request, "web/batch_detail.html", {
         "batch": batch, "batch_no": batch_no, "s": batch.summary or {}, "runs": batch.runs.all(),
         "resolved_here": resolved_here, "settled_elsewhere": settled_elsewhere,
+    })
+
+
+KATEGORI_UANG = {
+    "a": ("Histori", "di luar periode rekonsiliasi"),
+    "b": ("Ticket asing", "ticket gateway tak dikenal panel"),
+    "c": ("Internal", "pindah dana antar rekening operator"),
+    "d": ("Periksa", "dalam periode tanpa catatan panel"),
+}
+
+
+@login_required
+def batch_uang(request, pk):
+    """Uang tanpa pasangan milik satu batch — daftar live berkategori a/b/c/d.
+    Baris b/d juga punya MatchResult no_panel (bisa ditinjau di halaman run);
+    halaman ini adalah ikhtisar + filter + export."""
+    from django.db.models import Exists, OuterRef
+
+    from reconciliation.engine import _operator_names, classify_unmatched_money
+
+    batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
+    batch_no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
+    paired = MatchResult.objects.filter(left__isnull=False, right_id=OuterRef("id"))
+    rows = list(
+        Transaction.objects.filter(
+            consumed_by_batch=batch, source_type__key__in=["bank", "gateway"]
+        )
+        .exclude(jenis="admin")
+        .annotate(berpasangan=Exists(paired))
+        .filter(berpasangan=False)
+        .select_related("source_type", "upload")
+        .order_by("occurred_at", "id")
+    )
+    recon_date = batch.recon_date
+    window = batch.tolerance.date_window_days
+    if recon_date:
+        panel_tickets = set(
+            Transaction.objects.filter(toko=batch.toko, source_type__key="panel")
+            .exclude(ticket_no="").values_list("ticket_no", flat=True)
+        )
+        ops = _operator_names(batch.toko)
+        for t in rows:
+            t.kategori = classify_unmatched_money(t, recon_date, window, panel_tickets, ops)
+    else:  # batch lama tanpa tanggal harian — tak bisa diklasifikasi
+        for t in rows:
+            t.kategori = "d"
+    stats = {k: {"n": 0, "amt": 0.0} for k in KATEGORI_UANG}
+    for t in rows:
+        stats[t.kategori]["n"] += 1
+        stats[t.kategori]["amt"] += abs(float(t.money_delta))
+    kat = request.GET.get("k", "")
+    if kat in KATEGORI_UANG:
+        rows = [t for t in rows if t.kategori == kat]
+
+    if request.GET.get("export"):
+        import io
+
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Uang tanpa pasangan"
+        ws.append(["Kategori", "Tanggal", "Sumber", "File/Rekening", "Ticket",
+                   "Username", "Pengirim/Penerima", "Nominal"])
+        for c in ws[1]:
+            c.font = Font(bold=True)
+        for t in rows:
+            ws.append([
+                t.kategori.upper(),
+                t.occurred_at.strftime("%d/%m/%Y %H:%M") if t.occurred_at else "",
+                t.source_type.key,
+                t.upload.original_name if t.upload else "",
+                t.ticket_no, t.username, t.counterparty,
+                float(t.money_delta),
+            ])
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        resp = HttpResponse(
+            buf.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        resp["Content-Disposition"] = (
+            f'attachment; filename="uang_tanpa_pasangan_batch{batch.pk}.xlsx"'
+        )
+        return resp
+
+    page = Paginator(rows, 40).get_page(request.GET.get("page"))
+    kartu = [
+        {"key": k, "label": KATEGORI_UANG[k][0], "desc": KATEGORI_UANG[k][1],
+         "n": stats[k]["n"], "amt": stats[k]["amt"]}
+        for k in KATEGORI_UANG
+    ]
+    return render(request, "web/batch_uang.html", {
+        "batch": batch, "batch_no": batch_no, "page": page,
+        "kartu": kartu, "kat": kat,
     })
 
 

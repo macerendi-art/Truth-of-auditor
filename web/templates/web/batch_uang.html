@@ -1,0 +1,62 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% block title %}Uang Tanpa Pasangan · Batch #{{ batch_no }}{% endblock %}
+{% block crumb %}Rekonsiliasi · <a href="{% url 'batch_detail' batch.pk %}">Batch #{{ batch_no }}</a> · Uang Tanpa Pasangan{% endblock %}
+{% block content %}
+<div class="page-head reveal" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+  <div>
+    <h1>Uang Tanpa Pasangan</h1>
+    <p><a href="{% url 'batch_detail' batch.pk %}">Batch #{{ batch_no }}</a> — {{ batch.toko.name }}{% if batch.recon_date %} · Tanggal {{ batch.recon_date|date:"d/m/Y" }}{% endif %} — mutasi bank/gateway yang tidak berpasangan dengan catatan panel mana pun.</p>
+  </div>
+  <a class="btn" href="?export=1{% if kat %}&k={{ kat }}{% endif %}">⬇ Export Excel</a>
+</div>
+
+<div class="grid cols-4 reveal">
+  {% for c in kartu %}
+  <div class="card stat" title="{{ c.desc }}">
+    <div class="k">{{ c.key|upper }} · {{ c.label }}</div>
+    <div class="v">{{ c.n|intcomma }}</div>
+    <div class="faint" style="font-size:.8rem">Rp {{ c.amt|floatformat:0|intcomma }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="tabs reveal" style="margin-top:24px">
+  <a href="?" class="{% if not kat %}active{% endif %}">Semua</a>
+  {% for c in kartu %}
+  <a href="?k={{ c.key }}" class="{% if kat == c.key %}active{% endif %}">{{ c.key|upper }} · {{ c.label }}</a>
+  {% endfor %}
+</div>
+
+<div class="card pad0 reveal">
+  <table>
+    <thead>
+      <tr><th>Kat</th><th>Tanggal</th><th>Sumber</th><th>File/Rekening</th><th>Ticket</th><th>Username</th><th>Pengirim/Penerima</th><th style="text-align:right">Nominal</th></tr>
+    </thead>
+    <tbody>
+      {% for t in page.object_list %}
+      <tr>
+        <td><span class="badge {% if t.kategori == 'd' %}bad{% elif t.kategori == 'b' %}warn{% else %}muted{% endif %}">{{ t.kategori|upper }}</span></td>
+        <td>{{ t.occurred_at|date:"d/m H:i" }}</td>
+        <td>{{ t.source_type.key }}</td>
+        <td class="faint" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.upload.original_name|default:"—" }}</td>
+        <td>{{ t.ticket_no|default:"—" }}</td>
+        <td>{{ t.username|default:"—" }}</td>
+        <td>{{ t.counterparty|default:"—" }}</td>
+        <td style="text-align:right{% if t.money_delta < 0 %};color:var(--bad){% endif %}">{{ t.money_delta|floatformat:0|intcomma }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="faint" style="text-align:center;padding:24px">Tidak ada — semua uang batch ini berpasangan. ✓</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if page.has_other_pages %}
+<div class="reveal" style="display:flex;gap:12px;align-items:center;justify-content:center;margin-top:16px">
+  {% if page.has_previous %}<a class="btn sm" href="?k={{ kat }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
+  <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
+  {% if page.has_next %}<a class="btn sm" href="?k={{ kat }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}
