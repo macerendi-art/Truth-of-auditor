@@ -298,11 +298,39 @@ def batch_detail(request, pk):
 
 @login_required
 def run_detail(request, pk):
+    import collections
+
+    from django.db.models.fields.json import KeyTextTransform
+
     run = get_object_or_404(MatchRun, pk=pk, batch__toko__in=tokos_for(request.user))
     qs = MatchResult.objects.filter(run=run).select_related("left", "right").order_by("bucket", "-score")
     bucket = request.GET.get("bucket", "")
     if bucket:
         qs = qs.filter(bucket=bucket)
+
+    # Daftar chip channel/sumber dibangun dari qs SETELAH filter bucket tapi SEBELUM
+    # filter channel — segmen pertama Player Bank sisi Panel ("DANA|nama|nomor").
+    # Kunci JSON "Player Bank" mengandung spasi → tak bisa jadi alias values_list
+    # langsung, jadi anotasi lewat KeyTextTransform dgn alias aman (jalan di
+    # sqlite JSON1 & Postgres JSONB).
+    counter = collections.Counter()
+    pb_values = qs.annotate(
+        _player_bank=KeyTextTransform("Player Bank", "left__raw")
+    ).values_list("_player_bank", flat=True)
+    for v in pb_values:
+        if not v:
+            continue
+        name = str(v).split("|")[0].strip().upper()
+        if name:
+            counter[name] += 1
+    channels = counter.most_common()  # [(nama, count), ...] urut count desc
+
+    # Filter channel diterapkan SETELAH bucket; normalisasi ke upper + istartswith
+    # supaya kapitalisasi tersimpan tak berpengaruh.
+    channel = request.GET.get("channel", "").strip().upper()
+    if channel:
+        qs = qs.filter(**{"left__raw__Player Bank__istartswith": channel + "|"})
+
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
     left_label, right_label = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
     # Nomor batch per-toko (posisi urut, bukan pk global) — konsisten dgn batch_detail.
@@ -314,6 +342,7 @@ def run_detail(request, pk):
         "run": run, "page": page, "bucket": bucket, "bucket_meta": BUCKET_META,
         "left_label": left_label, "right_label": right_label,
         "batch": batch, "batch_no": batch_no,
+        "channels": channels, "channel": channel,
     }
     return render(request, "web/run_detail.html", ctx)
 
