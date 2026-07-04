@@ -73,13 +73,25 @@
 
 {% load humanize %}
 <div class="card reveal" style="padding:0;overflow:hidden">
-  <div style="padding:18px 20px 6px"><h3 style="margin:0">Riwayat Upload — {{ active_toko.name }}</h3></div>
+  <div style="padding:18px 20px 6px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <h3 style="margin:0">Riwayat Upload — {{ active_toko.name }}</h3>
+    {% if is_admin_user and uploads %}
+    {# Form massal berdiri sendiri; checkbox baris menautkan diri via atribut form="bulkform" #}
+    {# supaya tak ada <form> bersarang di dalam tabel. #}
+    <form id="bulkform" method="post" action="{% url 'bulk_delete_uploads' %}" style="margin:0"
+          onsubmit="return confirm('Hapus ' + document.querySelectorAll('.upsel:checked').length + ' file terpilih? Semua baris transaksinya ikut terhapus. Tidak bisa dibatalkan.')">
+      {% csrf_token %}
+      <button id="bulkbtn" class="btn sm ghost" type="submit" style="color:var(--bad)" disabled>Hapus terpilih (0)</button>
+    </form>
+    {% endif %}
+  </div>
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>File</th><th>Jenis</th><th>Provider</th><th>DP/WD</th><th class="r">Baris</th><th class="r">Dup</th><th>Status</th><th>Oleh</th><th>Waktu</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
+    <thead><tr>{% if is_admin_user %}<th class="r" style="width:34px"><input type="checkbox" id="upall" aria-label="Pilih semua"></th>{% endif %}<th>File</th><th>Jenis</th><th>Provider</th><th>DP/WD</th><th class="r">Baris</th><th class="r">Dup</th><th>Status</th><th>Oleh</th><th>Waktu</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
     <tbody>
     {% for u in uploads %}
       <tr>
+        {% if is_admin_user %}<td class="r"><input type="checkbox" class="upsel" form="bulkform" name="upload_ids" value="{{ u.pk }}" aria-label="Pilih {{ u.original_name|default:u.pk }}"></td>{% endif %}
         <td>{{ u.original_name|default:u.pk }}</td>
         <td>{{ u.source_type.name }}</td>
         <td>{{ u.provider|default:"—" }}</td>
@@ -100,10 +112,29 @@
         {% endif %}
       </tr>
     {% empty %}
-      <tr><td colspan="{% if is_admin_user %}10{% else %}9{% endif %}" class="faint">Belum ada upload untuk toko ini.</td></tr>
+      <tr><td colspan="{% if is_admin_user %}11{% else %}9{% endif %}" class="faint">Belum ada upload untuk <b>{{ active_toko.name }}</b>. Kalau datamu ada di toko lain, ganti toko lewat pemilih di kanan-atas.</td></tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
 </div>
+{% if is_admin_user %}
+<script>
+(function(){
+  var all=document.getElementById('upall'),
+      btn=document.getElementById('bulkbtn'),
+      sel=function(){return [].slice.call(document.querySelectorAll('.upsel'));};
+  if(!btn)return;
+  function sync(){
+    var n=sel().filter(function(c){return c.checked;}).length;
+    btn.textContent='Hapus terpilih ('+n+')';
+    btn.disabled=(n===0);
+    if(all)all.checked=(n>0 && n===sel().length);
+  }
+  sel().forEach(function(c){c.addEventListener('change',sync);});
+  if(all)all.addEventListener('change',function(){sel().forEach(function(c){c.checked=all.checked;});sync();});
+  sync();
+})();
+</script>
+{% endif %}
 {% endblock %}
