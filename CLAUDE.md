@@ -67,4 +67,4 @@ Railway (Nixpacks), config in `railway.json` / `Procfile`. Production is trigger
 
 - Design specs and implementation plans for completed features live in `docs/superpowers/{specs,plans}/` — check there for intent behind non-obvious decisions.
 - `db.sqlite3` is committed and large (contains real working data); it is the local dev DB.
-- After each work chunk, commit and push — the team pulls from GitHub.
+- After each work chunk, commit locally. **Do not push to origin main** — pushes are coordinated manually with the team.
