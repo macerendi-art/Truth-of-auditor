@@ -216,10 +216,18 @@ class _MoneyMatcher:
                 best = next(b for s, b in scored if s == best_s)
             else:
                 best, best_s = None, -1
-            # Ambigu: >=2 kandidat SERI di skor tertinggi DAN lolos ambang → tinjau,
-            # JANGAN konsumsi (auditor pilih); auto-match salah satu bisa keliru.
+            # Ambigu SEJATI: >=2 kandidat SERI di skor tertinggi DAN lolos ambang DAN
+            # ber-IDENTITAS BERBEDA → tinjau, JANGAN konsumsi (auditor pilih). Deposit
+            # berulang oleh user SAMA (mis. QRIS nominal bulat: 1 player, N deposit
+            # nominal sama dalam window) BUKAN ambigu — identitas pasti & uang identik,
+            # jadi pasangkan greedy 1-1. Identitas = username, fallback ke nama.
             tied = [b for s, b in scored if s == best_s]
-            if best is not None and best_s >= tol.fuzzy_threshold and len(tied) >= 2:
+            tied_idents = {
+                (b.username or "").strip().lower() or (b.counterparty or "").strip().lower()
+                for b in tied
+            }
+            ambiguous = len(tied) >= 2 and len(tied_idents) >= 2
+            if best is not None and best_s >= tol.fuzzy_threshold and ambiguous:
                 names = ", ".join(f"#{b.id} {b.counterparty or b.username or '-'}" for b in tied)
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=None,
                                        score=best_s, reason_code="ambiguous_multi",

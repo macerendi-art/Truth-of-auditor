@@ -200,10 +200,13 @@ class T1SettlementTests(TestCase):
         bank.refresh_from_db()
         self.assertEqual(bank.consumed_by_batch_id, batch.id)
 
-    def test_t1_ambiguous_two_candidates_review(self):
-        self._tx(self.panel, "depo", "50000", "p26", 26, username="budi")
-        b1 = self._tx(self.bank, "depo", "50000", "k27a", 27, username="budi")
-        b2 = self._tx(self.bank, "depo", "50000", "k27b", 27, username="budi")
+    def test_t1_ambiguous_distinct_identity_review(self):
+        # Ambigu SEJATI: 2 kandidat nominal+tanggal seri di skor tertinggi TAPI
+        # IDENTITAS BERBEDA (nama sama, akun beda) — tak bisa dipastikan mana
+        # pasangannya → perlu ditinjau, tak satupun dikonsumsi (auditor pilih).
+        self._tx(self.panel, "depo", "50000", "p26", 26, counterparty="BUDI SANTOSO")
+        b1 = self._tx(self.bank, "depo", "50000", "k27a", 27, counterparty="BUDI SANTOSO", username="acc1")
+        b2 = self._tx(self.bank, "depo", "50000", "k27b", 27, counterparty="BUDI SANTOSO", username="acc2")
         batch = self._day26()
         pb = batch.runs.get(relation=MatchRun.Relation.PANEL_BANK)
         self.assertEqual(pb.summary["cocok"], 0)
@@ -216,6 +219,25 @@ class T1SettlementTests(TestCase):
         self.assertIsNone(b1.consumed_by_batch_id)
         self.assertIsNone(b2.consumed_by_batch_id)
         self.assertEqual(batch.summary["dp"]["money_matched"], 0.0)
+
+    def test_t1_repeat_same_user_pairs_not_review(self):
+        # BUG asli (QRIS): 1 player deposit nominal bulat berkali-kali dalam window.
+        # N baris Panel + N baris bank dgn username SAMA BUKAN ambigu — identitas
+        # pasti & uang identik, jadi PASANGKAN greedy 1-1 (COCOK), jangan banjir
+        # perlu-ditinjau. Sebelumnya semua ke-flag ambiguous_multi (skor 100).
+        self._tx(self.panel, "depo", "50000", "p26a", 26, username="nono1989")
+        self._tx(self.panel, "depo", "50000", "p26b", 26, username="nono1989")
+        b1 = self._tx(self.bank, "depo", "50000", "k27a", 27, username="nono1989")
+        b2 = self._tx(self.bank, "depo", "50000", "k27b", 27, username="nono1989")
+        batch = self._day26()
+        pb = batch.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+        self.assertEqual(pb.summary["cocok"], 2)
+        self.assertEqual(pb.summary["perlu_tinjau"], 0)
+        b1.refresh_from_db()
+        b2.refresh_from_db()
+        self.assertEqual(b1.consumed_by_batch_id, batch.id)
+        self.assertEqual(b2.consumed_by_batch_id, batch.id)
+        self.assertEqual(batch.summary["dp"]["money_matched"], 100000.0)
 
     def test_t1_single_best_candidate_matches(self):
         # Dua bank beda nama: hanya satu cocok nama → bukan ambigu, tetap COCOK.
