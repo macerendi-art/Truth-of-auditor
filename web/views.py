@@ -242,11 +242,21 @@ def reconcile(request):
         return render(request, "web/no_toko.html")
     if request.method == "POST":
         tol = get_object_or_404(ToleranceProfile, name=request.POST.get("tolerance", "Default"))
+        # Checkbox inc_* per baris kelengkapan = sumber yang DIIKUTKAN. Tidak ada
+        # → tidak dicentang → tidak dicocokkan & tidak dikonsumsi.
+        include = {
+            "panel_dp": "inc_panel_dp" in request.POST,
+            "panel_wd": "inc_panel_wd" in request.POST,
+            "bracket": "inc_bracket" in request.POST,
+            "bank": "inc_bank" in request.POST,
+            "gateway": "inc_gateway" in request.POST,
+        }
         batch = run_batch(
             active, tol,
             request.POST.get("date_from") or None,
             request.POST.get("date_to") or None,
             user=request.user,
+            include=include,
         )
         no = ReconBatch.objects.filter(toko=active).count()
         messages.success(request, f"Rekonsiliasi selesai (Batch #{no}).")

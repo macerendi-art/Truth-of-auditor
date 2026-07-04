@@ -11,13 +11,14 @@
 <div class="grid cols-2">
   <div class="card reveal">
     <h3 style="margin:0 0 12px">Kelengkapan Data</h3>
+    <p class="faint" style="margin:-6px 0 12px;font-size:.86rem">Centang sumber yang ikut dijalankan. Sumber kosong tidak bisa dicentang.</p>
     {% with c=completeness %}
     <table>
-      <tr><td>Panel Deposit</td><td>{% if c.panel_dp %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
-      <tr><td>Panel Withdraw</td><td>{% if c.panel_wd %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
-      <tr><td>Bracket / FR</td><td>{% if c.bracket %}<span class="badge ok">ada</span>{% else %}<span class="badge warn">tidak ada → Panel↔Bracket dilewati</span>{% endif %}</td></tr>
-      <tr><td>Bank</td><td>{% if c.bank %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
-      <tr><td>Gateway</td><td>{% if c.gateway %}<span class="badge ok">ada</span>{% else %}<span class="badge warn">kosong</span>{% endif %}</td></tr>
+      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_panel_dp" form="jalankan-form" {% if c.panel_dp %}checked{% else %}disabled{% endif %}> Panel Deposit</label></td><td>{% if c.panel_dp %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
+      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_panel_wd" form="jalankan-form" {% if c.panel_wd %}checked{% else %}disabled{% endif %}> Panel Withdraw</label></td><td>{% if c.panel_wd %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
+      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_bracket" form="jalankan-form" {% if c.bracket %}checked{% else %}disabled{% endif %}> Bracket / FR</label></td><td>{% if c.bracket %}<span class="badge ok">ada</span>{% else %}<span class="badge warn">tidak ada → Panel↔Bracket dilewati</span>{% endif %}</td></tr>
+      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_bank" form="jalankan-form" {% if c.bank %}checked{% else %}disabled{% endif %}> Bank</label></td><td>{% if c.bank %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
+      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_gateway" form="jalankan-form" {% if c.gateway %}checked{% else %}disabled{% endif %}> Gateway</label></td><td>{% if c.gateway %}<span class="badge ok">ada</span>{% else %}<span class="badge warn">kosong</span>{% endif %}</td></tr>
     </table>
     {% if not c.minimum_met %}<div class="msg error" style="margin-top:12px">⚠ Minimum belum terpenuhi (butuh Panel + minimal 1 Bank/Gateway). Kamu masih boleh menjalankan.</div>{% endif %}
     {% endwith %}
@@ -25,7 +26,7 @@
 
   <div class="card reveal">
     <h3 style="margin:0 0 12px">Jalankan</h3>
-    <form method="post">
+    <form method="post" id="jalankan-form">
       {% csrf_token %}
       <div class="field"><label>Profil Toleransi</label>
         <select name="tolerance" class="f">{% for t in tolerances %}<option value="{{ t.name }}">{{ t.name }} (±{{ t.date_window_days }} hari)</option>{% endfor %}</select></div>
@@ -53,7 +54,7 @@
   </div>
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>Batch</th><th>Waktu</th><th>DP selisih</th><th>WD selisih</th><th>Cocok</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
+    <thead><tr><th>Batch</th><th>Waktu</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th>Cocok</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
     <tbody>
     {% for b in batches %}
       <tr>

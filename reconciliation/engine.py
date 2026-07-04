@@ -6,7 +6,7 @@ dengan bucket cocok / tidak_cocok / perlu_tinjau + reason. Toleransi dari Tolera
 from collections import Counter
 
 from django.db import transaction as db_tx
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from rapidfuzz import fuzz
 
 from sources.parsers.base import clean_name
@@ -15,6 +15,14 @@ from transactions.models import Transaction
 from .models import MatchResult, MatchRun, ReconBatch, ToleranceProfile
 
 MONEY_SOURCES = ["bank", "gateway"]
+
+
+def _included_money_sources(include):
+    """Sumber uang yang ikut run. include=None → semua (bank+gateway, perilaku lama).
+    Jika include diberikan, hanya sumber dengan inc_* dicentang yang dipakai."""
+    if include is None:
+        return list(MONEY_SOURCES)
+    return [k for k in MONEY_SOURCES if include.get(k, True)]
 
 
 def amount_ok(a, b, tol):
@@ -60,8 +68,14 @@ def _toko_filter(qs, toko):
     return qs.filter(toko=toko) if toko is not None else qs
 
 
+def _active(qs):
+    """Pool AKTIF = transaksi yang belum dikonsumsi batch mana pun. Transaksi yang
+    sudah dipakai (consumed_by_batch terisi) tidak ikut kelengkapan/pencocokan/total."""
+    return qs.filter(consumed_by_batch__isnull=True)
+
+
 def check_completeness(toko, date_from=None, date_to=None):
-    qs = _toko_filter(Transaction.objects.filter(is_duplicate=False), toko)
+    qs = _active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko))
     qs = _date_filter(qs, date_from, date_to)
 
     def has(**kw):
@@ -82,12 +96,19 @@ def check_completeness(toko, date_from=None, date_to=None):
 class PanelBracketMatcher:
     """Join via Ticket Number (kuat). Cek kecocokan nominal."""
 
-    def sides(self, dfrom, dto, toko=None):
-        left = _date_filter(
-            _toko_filter(Transaction.objects.filter(source_type__key="panel", is_duplicate=False), toko), dfrom, dto
-        )
+    def sides(self, dfrom, dto, toko=None, include=None):
+        left = Transaction.objects.filter(source_type__key="panel", is_duplicate=False)
+        # include: hilangkan sisi Panel yang tidak dicentang (depo/wd) bila diberikan.
+        if include is not None:
+            if not include.get("panel_dp", True):
+                left = left.exclude(jenis="depo")
+            if not include.get("panel_wd", True):
+                left = left.exclude(jenis="wd")
+        left = _date_filter(_active(_toko_filter(left, toko)), dfrom, dto)
         right = _date_filter(
-            _toko_filter(Transaction.objects.filter(source_type__key="bracket", is_duplicate=False).exclude(ticket_no=""), toko),
+            _active(_toko_filter(
+                Transaction.objects.filter(source_type__key="bracket", is_duplicate=False).exclude(ticket_no=""), toko
+            )),
             dfrom, dto,
         )
         return list(left), list(right)
@@ -128,19 +149,25 @@ class _MoneyMatcher:
 
     left_key = "panel"
 
-    def sides(self, dfrom, dto, toko=None):
-        left = _date_filter(
-            _toko_filter(
-                Transaction.objects.filter(source_type__key=self.left_key, is_duplicate=False).filter(jenis__in=["depo", "wd"]),
-                toko,
-            ),
-            dfrom, dto,
-        )
+    def sides(self, dfrom, dto, toko=None, include=None):
+        left = Transaction.objects.filter(
+            source_type__key=self.left_key, is_duplicate=False
+        ).filter(jenis__in=["depo", "wd"])
+        # include: sisi Panel — buang depo/wd yang tidak dicentang.
+        if include is not None:
+            if not include.get("panel_dp", True):
+                left = left.exclude(jenis="depo")
+            if not include.get("panel_wd", True):
+                left = left.exclude(jenis="wd")
+        left = _date_filter(_active(_toko_filter(left, toko)), dfrom, dto)
+
+        # right: hanya sumber UANG yang dicentang (bank dan/atau gateway).
+        money_keys = _included_money_sources(include)
         right = _date_filter(
-            _toko_filter(
-                Transaction.objects.filter(source_type__key__in=MONEY_SOURCES, is_duplicate=False).exclude(jenis="admin"),
+            _active(_toko_filter(
+                Transaction.objects.filter(source_type__key__in=money_keys, is_duplicate=False).exclude(jenis="admin"),
                 toko,
-            ),
+            )),
             dfrom, dto,
         )
         return list(left), list(right)
@@ -199,14 +226,14 @@ MATCHERS = {
 }
 
 
-def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None, toko=None, batch=None):
+def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None, toko=None, batch=None, include=None):
     tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
     matcher = MATCHERS[relation]()
     run = MatchRun.objects.create(
         relation=relation, tolerance=tolerance, date_from=date_from, date_to=date_to,
         created_by=user, batch=batch,
     )
-    left, right = matcher.sides(date_from, date_to, toko)
+    left, right = matcher.sides(date_from, date_to, toko, include=include)
     results = matcher.match(run, left, right)
     with db_tx.atomic():
         MatchResult.objects.bulk_create(results, batch_size=2000)
@@ -265,15 +292,22 @@ def _bracket_overlap_warning(runs):
     return None
 
 
-def _aggregate_batch(toko, date_from, date_to, runs, skipped):
-    tx = _date_filter(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko), date_from, date_to)
+def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None):
+    tx = _date_filter(_active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko)), date_from, date_to)
 
     def total(qs, field):
         return float(qs.aggregate(x=Sum(field))["x"] or 0)
 
     panel = tx.filter(source_type__key="panel")
+    # include: Panel — buang sisi yang tidak dicentang dari total.
+    if include is not None:
+        if not include.get("panel_dp", True):
+            panel = panel.exclude(jenis="depo")
+        if not include.get("panel_wd", True):
+            panel = panel.exclude(jenis="wd")
     # Baris fee BCA ('admin') dikecualikan dari uang WD (bukan WD nyata).
-    money = tx.filter(source_type__key__in=MONEY_SOURCES).exclude(jenis="admin")
+    # Hanya sumber uang yang dicentang ikut total gross.
+    money = tx.filter(source_type__key__in=_included_money_sources(include)).exclude(jenis="admin")
     dp_panel = total(panel.filter(jenis="depo"), "amount")
     dp_gross = total(money.filter(money_delta__gt=0), "money_delta")
     wd_panel = total(panel.filter(jenis="wd"), "amount")
@@ -309,7 +343,32 @@ def _aggregate_batch(toko, date_from, date_to, runs, skipped):
     }
 
 
-def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None):
+def _inc(include, key):
+    """Sumber ikut run? include=None → semua ikut (perilaku lama). Selain itu: cek toggle."""
+    return include is None or include.get(key, True)
+
+
+def _consume_scope(toko, date_from, date_to, include):
+    """Transaksi AKTIF dalam lingkup toko+tanggal yang HANYA dari sumber yang diikutkan.
+    Ini yang akan dikunci ke batch setelah sukses (tidak menyentuh sumber tak dicentang)."""
+    qs = _date_filter(_active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko)), date_from, date_to)
+    panel = Q()
+    if _inc(include, "panel_dp"):
+        panel |= Q(source_type__key="panel", jenis="depo")
+    if _inc(include, "panel_wd"):
+        panel |= Q(source_type__key="panel", jenis="wd")
+    cond = panel
+    if _inc(include, "bracket"):
+        cond |= Q(source_type__key="bracket")
+    money_keys = _included_money_sources(include)
+    if money_keys:
+        cond |= Q(source_type__key__in=money_keys)
+    if not cond:
+        return Transaction.objects.none()
+    return qs.filter(cond)
+
+
+def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, include=None):
     tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
     comp = check_completeness(toko, date_from, date_to)
     batch = ReconBatch.objects.create(
@@ -317,19 +376,25 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None):
         created_by=user, completeness=comp,
     )
     relations, skipped = [], []
-    if comp["bracket"]:
+    # PANEL_BRACKET hanya jika bracket ADA dan dicentang.
+    if comp["bracket"] and _inc(include, "bracket"):
         relations.append(MatchRun.Relation.PANEL_BRACKET)
     else:
         skipped.append(MatchRun.Relation.PANEL_BRACKET.value)
-    if comp["bank"] or comp["gateway"]:
+    # PANEL_BANK hanya jika ada sumber uang yang ADA dan dicentang.
+    if (comp["bank"] and _inc(include, "bank")) or (comp["gateway"] and _inc(include, "gateway")):
         relations.append(MatchRun.Relation.PANEL_BANK)
     else:
         skipped.append(MatchRun.Relation.PANEL_BANK.value)
 
     runs = [
-        run_match(rel, tolerance, date_from, date_to, user=user, toko=toko, batch=batch)
+        run_match(rel, tolerance, date_from, date_to, user=user, toko=toko, batch=batch, include=include)
         for rel in relations
     ]
-    batch.summary = _aggregate_batch(toko, date_from, date_to, runs, skipped)
+    batch.summary = _aggregate_batch(toko, date_from, date_to, runs, skipped, include=include)
     batch.save(update_fields=["summary"])
+    # KONSUMSI-SAAT-SUKSES: langkah TERAKHIR. Bila ada exception di atas, tidak
+    # tercapai → transaksi tetap aktif (gagal = tidak dibersihkan). Hanya sumber
+    # yang diikutkan yang dikunci; sumber tak dicentang tetap tersedia lain kali.
+    _consume_scope(toko, date_from, date_to, include).update(consumed_by_batch=batch)
     return batch

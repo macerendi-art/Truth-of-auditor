@@ -137,6 +137,17 @@ class Transaction(TimeStampedModel):
         max_length=64, db_index=True, help_text="guard idempotensi re-import"
     )
     is_duplicate = models.BooleanField(default=False)
+    # Setelah batch rekonsiliasi sukses, transaksi yang dipakai "dikonsumsi" (dikunci
+    # ke batch itu) agar tidak masuk lagi ke kelengkapan/pencocokan run berikutnya —
+    # run selanjutnya butuh upload ulang. SET_NULL: hapus batch → transaksi bebas lagi.
+    consumed_by_batch = models.ForeignKey(
+        "reconciliation.ReconBatch",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="consumed_transactions",
+        db_index=True,
+    )
 
     class Meta:
         indexes = [

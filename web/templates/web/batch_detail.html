@@ -17,23 +17,36 @@
   {% endif %}
 </div>
 
+{% if s.warnings %}
+<div class="msg error reveal" style="margin-bottom:16px">
+  {% for w in s.warnings %}<div>⚠ {{ w }}</div>{% endfor %}
+</div>
+{% endif %}
+
 <div class="grid cols-2">
+  {% with dp=s.dp %}
   <div class="card reveal">
     <h3 style="margin:0 0 12px">Deposit (DP)</h3>
     <table>
-      <tr><td>Panel (koin)</td><td>{{ s.dp.panel|default:0|floatformat:0|intcomma }}</td></tr>
-      <tr><td>Uang real</td><td>{{ s.dp.money|default:0|floatformat:0|intcomma }}</td></tr>
-      <tr><td><b>Selisih</b></td><td>{% if s.dp.selisih == 0 %}<span class="badge ok">Balanced ✓</span>{% else %}<span class="badge warn">{{ s.dp.selisih|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
+      <tr><td>Panel (koin)</td><td>{{ dp.panel|default:0|floatformat:0|intcomma }}</td></tr>
+      {# money_matched baru; batch lama pakai 'money'. Keduanya di-|default sendiri agar aman saat summary kosong. #}
+      <tr><td>Uang real (matched)</td><td>{% if dp.money_matched != None %}{{ dp.money_matched|floatformat:0|intcomma }}{% else %}{{ dp.money|default:0|floatformat:0|intcomma }}{% endif %}</td></tr>
+      <tr><td class="faint">Uang real (gross)</td><td class="faint">{{ dp.money_gross|default:0|floatformat:0|intcomma }}</td></tr>
+      <tr><td><b>Selisih</b></td><td>{% if dp.selisih == 0 %}<span class="badge ok">Balanced ✓</span>{% else %}<span class="badge warn">{{ dp.selisih|default:0|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
     </table>
   </div>
+  {% endwith %}
+  {% with wd=s.wd %}
   <div class="card reveal">
     <h3 style="margin:0 0 12px">Withdraw (WD)</h3>
     <table>
-      <tr><td>Panel (koin)</td><td>{{ s.wd.panel|default:0|floatformat:0|intcomma }}</td></tr>
-      <tr><td>Uang real</td><td>{{ s.wd.money|default:0|floatformat:0|intcomma }}</td></tr>
-      <tr><td><b>Selisih</b></td><td>{% if s.wd.selisih == 0 %}<span class="badge ok">Balanced ✓</span>{% else %}<span class="badge warn">{{ s.wd.selisih|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
+      <tr><td>Panel (koin)</td><td>{{ wd.panel|default:0|floatformat:0|intcomma }}</td></tr>
+      <tr><td>Uang real (matched)</td><td>{% if wd.money_matched != None %}{{ wd.money_matched|floatformat:0|intcomma }}{% else %}{{ wd.money|default:0|floatformat:0|intcomma }}{% endif %}</td></tr>
+      <tr><td class="faint">Uang real (gross)</td><td class="faint">{{ wd.money_gross|default:0|floatformat:0|intcomma }}</td></tr>
+      <tr><td><b>Selisih</b></td><td>{% if wd.selisih == 0 %}<span class="badge ok">Balanced ✓</span>{% else %}<span class="badge warn">{{ wd.selisih|default:0|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
     </table>
   </div>
+  {% endwith %}
 </div>
 
 <div class="card reveal">
