@@ -100,28 +100,29 @@ def dashboard(request):
     return render(request, "web/dashboard.html", ctx)
 
 
-def _rematch_hint(toko, money_uploads):
-    """Setelah upload sumber UANG, cari batch lama yang berpotensi ditutup oleh mutasi
-    baru ini (ekor malam T+1 / statement BNI bulanan) → saran klik Re-match.
+def _rematch_candidates(toko, money_uploads):
+    """Setelah upload sumber UANG: batch lama yang berpotensi ditutup mutasi baru
+    (ekor malam T+1 / statement BNI bulanan). Kandidat: toko sama, punya baris
+    tidak_cocok, window overlap rentang tanggal transaksi baru
+    (batch.date_from <= max & batch.date_to >= min-1hari).
 
-    Batch kandidat: toko sama, punya baris tidak_cocok, dan window-nya overlap dengan
-    rentang tanggal transaksi baru (batch.date_from <= max & batch.date_to >= min-1hari).
-    Kembalikan satu kalimat (maks 3 batch) atau '' bila tak ada.
+    Urut TERTUA dulu — auto re-match memberi hari lebih awal pilihan pertama atas
+    uang yang sama. Kembalikan list (batch, nomor_per_toko), maks 10.
     """
     if not money_uploads:
-        return ""
+        return []
     agg = Transaction.objects.filter(upload__in=money_uploads).aggregate(
         lo=Min("occurred_at"), hi=Max("occurred_at")
     )
     lo, hi = agg["lo"], agg["hi"]
     if lo is None or hi is None:
-        return ""
-    lo_d, hi_d = lo.date(), hi.date()
-    lo_slack = lo_d - timedelta(days=1)  # aproksimasi window toleransi 1 hari
+        return []
+    hi_d = hi.date()
+    lo_slack = lo.date() - timedelta(days=1)  # aproksimasi window toleransi 1 hari
 
-    recent = list(ReconBatch.objects.filter(toko=toko).order_by("-id")[:30])
+    recent = ReconBatch.objects.filter(toko=toko).order_by("-id")[:30]
     hits = []
-    for b in recent:
+    for b in sorted(recent, key=lambda b: b.id):
         if (b.summary or {}).get("buckets", {}).get("tidak_cocok", 0) <= 0:
             continue
         # Tanpa batas tanggal (None) = seluruh rentang → selalu overlap.
@@ -130,17 +131,49 @@ def _rematch_hint(toko, money_uploads):
         if b.date_to is not None and b.date_to < lo_slack:
             continue
         no = ReconBatch.objects.filter(toko=toko, id__lte=b.id).count()
-        label = b.date_from.strftime("%d/%m") if b.date_from else "—"
-        hits.append(f"#{no} ({label})")
-        if len(hits) == 3:
+        hits.append((b, no))
+        if len(hits) == 10:
             break
-    if not hits:
-        return ""
-    return (
-        "File ini berpotensi menutup baris tidak cocok di Batch "
-        + ", ".join(hits)
-        + " — buka batch lalu klik Re-match."
+    return hits
+
+
+def _auto_rematch(toko, money_uploads, user=None):
+    """Re-match otomatis batch kandidat setelah upload sumber uang — tanpa klik.
+
+    Kembalikan list (level, pesan) untuk flash. Batch tanpa baris terpasang tidak
+    dilaporkan (anti-noise); error per-batch dilaporkan tapi tidak menggagalkan
+    upload (file sudah ter-ingest)."""
+    out = []
+    for batch, no in _rematch_candidates(toko, money_uploads):
+        try:
+            stats = rematch_batch(batch, user=user)
+        except Exception as e:  # noqa: BLE001 - upload jangan ikut gagal
+            out.append(("error", f"Re-match otomatis Batch #{no} gagal: {e}"))
+            continue
+        if stats["terpasang"]:
+            out.append((
+                "success",
+                f"Re-match otomatis Batch #{no}: {stats['terpasang']} baris tertutup "
+                f"({stats['cocok']} cocok, {stats['perlu_tinjau']} perlu ditinjau).",
+            ))
+    return out
+
+
+def _saran_tanggal(toko):
+    """Saran tanggal reconcile berikutnya: hari setelah window batch terakhir; bila
+    belum ada batch berjendela, tanggal transaksi AKTIF tertua (data yang belum
+    direkonsiliasi). None = tanpa saran (form dibiarkan kosong)."""
+    last = (
+        ReconBatch.objects.filter(toko=toko, date_to__isnull=False)
+        .order_by("-date_to", "-id")
+        .first()
     )
+    if last:
+        return last.date_to + timedelta(days=1)
+    lo = Transaction.objects.filter(
+        toko=toko, is_duplicate=False, consumed_by_batch__isnull=True
+    ).aggregate(lo=Min("occurred_at"))["lo"]
+    return lo.date() if lo else None
 
 
 @login_required
@@ -178,11 +211,11 @@ def upload(request):
             finally:
                 if default_storage.exists(path_rel):
                     default_storage.delete(path_rel)
-        msg = f"{n_ok} file diproses, {n_err} gagal."
-        hint = _rematch_hint(active, money_uploads)
-        if hint:
-            msg += " " + hint
-        messages.success(request, msg)
+        messages.success(request, f"{n_ok} file diproses, {n_err} gagal.")
+        # Auto re-match: mutasi susulan langsung dipasangkan ke batch lama yang
+        # punya baris tidak_cocok (ekor malam T+1 / statement bulanan) — tanpa klik.
+        for level, txt in _auto_rematch(active, money_uploads, user=request.user):
+            getattr(messages, level)(request, txt)
         return redirect("upload")
     if request.method == "POST" and request.POST.get("action") == "analyze":
         preview = []
@@ -323,6 +356,14 @@ def reconcile(request):
 
     df = request.GET.get("date_from") or None
     dt = request.GET.get("date_to") or None
+    # Saran tanggal: tanpa param eksplisit, prefill hari berikutnya yang belum
+    # direkonsiliasi — cegah footgun "tanggal kosong = telan semua data".
+    tanggal_disarankan = False
+    if df is None and dt is None:
+        saran = _saran_tanggal(active)
+        if saran:
+            df = dt = saran.isoformat()
+            tanggal_disarankan = True
     bank = request.GET.get("bank", "")
     if bank not in ("bank", "gateway"):
         bank = ""  # nilai tak dikenal → perlakukan sebagai "semua sumber"
@@ -342,6 +383,7 @@ def reconcile(request):
         "batches": batches,
         "bank": bank,
         "date_from": df or "", "date_to": dt or "",
+        "tanggal_disarankan": tanggal_disarankan,
     }
     return render(request, "web/reconcile.html", ctx)
 

@@ -34,10 +34,31 @@
         <div class="field"><label>Dari tanggal</label><input type="date" name="date_from" value="{{ date_from }}"></div>
         <div class="field"><label>Sampai tanggal</label><input type="date" name="date_to" value="{{ date_to }}"></div>
       </div>
+      {% if tanggal_disarankan %}<div class="faint" style="font-size:11.5px;margin:-6px 0 12px">Tanggal disarankan otomatis — hari berikutnya yang belum direkonsiliasi. Ubah bila perlu.</div>{% endif %}
       <button class="btn primary" type="submit">▶ Jalankan Rekonsiliasi</button>
     </form>
   </div>
 </div>
+<script>
+/* Tanggal kosong = rekonsiliasi SEMUA data aktif jadi satu batch — minta
+   konfirmasi lewat modal data-confirm (atribut di-toggle dinamis). */
+(function(){
+  var f=document.getElementById('jalankan-form');
+  if(!f) return;
+  var df=f.querySelector('[name=date_from]'), dt=f.querySelector('[name=date_to]');
+  function sync(){
+    if(!df.value && !dt.value){
+      f.setAttribute('data-confirm','Tanggal kosong = rekonsiliasi SEMUA data aktif (semua tanggal digabung jadi satu batch). Lanjutkan?');
+    }else{
+      f.removeAttribute('data-confirm');
+      delete f.dataset.confirmed;
+    }
+  }
+  df.addEventListener('input',sync); dt.addEventListener('input',sync);
+  df.addEventListener('change',sync); dt.addEventListener('change',sync);
+  sync();
+})();
+</script>
 
 <div class="card reveal" style="padding:0;overflow:hidden">
   <div style="padding:18px 20px 6px;display:flex;align-items:center;justify-content:space-between;gap:12px">
