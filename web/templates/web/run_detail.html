@@ -1,12 +1,12 @@
 {% extends "web/app_base.html" %}
 {% load humanize %}
-{% block title %}Run #{{ run.pk }} · Truth of Auditor{% endblock %}
-{% block crumb %}Rekonsiliasi · {{ run.get_relation_display }}{% endblock %}
+{% block title %}Run #{{ run.pk }}{% if batch %} · Batch #{{ batch_no }}{% endif %} · Truth of Auditor{% endblock %}
+{% block crumb %}Rekonsiliasi{% if batch %} · <a href="{% url 'batch_detail' batch.pk %}">Batch #{{ batch_no }}</a>{% endif %} · {{ run.get_relation_display }} (Run #{{ run.pk }}){% endblock %}
 {% block content %}
 <div class="page-head reveal" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
   <div>
     <h1>{{ run.get_relation_display }}</h1>
-    <p>Run #{{ run.pk }} · toleransi <b>{{ run.tolerance.name }}</b> (±{{ run.tolerance.date_window_days }} hari) · {{ run.created_at|date:"d/m/Y H:i" }}</p>
+    <p>{% if batch %}<a href="{% url 'batch_detail' batch.pk %}">Batch #{{ batch_no }}</a> · {% endif %}{{ run.get_relation_display }} (Run #{{ run.pk }}) · toleransi <b>{{ run.tolerance.name }}</b> (±{{ run.tolerance.date_window_days }} hari) · {{ run.created_at|date:"d/m/Y H:i" }}</p>
   </div>
   <a class="btn" href="{% url 'export_run' run.pk %}">⬇ Export Excel</a>
 </div>
@@ -30,10 +30,10 @@
 <div class="card pad0 reveal">
   <div class="table-wrap" style="border:none">
   <table>
-    <thead><tr><th>Status</th><th>{{ left_label }}</th><th class="num">Amount</th><th>{{ right_label }}</th><th class="num">Amount</th><th>Alasan</th><th style="text-align:center">Aksi</th></tr></thead>
+    <thead><tr><th>Status</th><th>{{ left_label }}</th><th>User ID</th><th>Full Name</th><th>Player Bank</th><th>Bank Title</th><th>Handler</th><th class="num">Amount</th><th>{{ right_label }}</th><th class="num">Amount</th><th>Alasan</th><th style="text-align:center">Aksi</th></tr></thead>
     <tbody>
     {% for r in page %}{% include "web/_result_row.html" %}{% empty %}
-      <tr><td colspan="7" class="muted" style="padding:28px;text-align:center">Tidak ada hasil pada bucket ini.</td></tr>{% endfor %}
+      <tr><td colspan="12" class="muted" style="padding:28px;text-align:center">Tidak ada hasil pada bucket ini.</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>

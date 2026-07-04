@@ -1,6 +1,86 @@
+import re
+
 from django.db import models
 
 from core.models import TimeStampedModel
+
+# Peta token -> label sumber spesifik. Kunci = huruf/angka saja (tanpa spasi),
+# dicocokkan per-token utuh dari nama file / provider — BUKAN substring, dan
+# TIDAK PERNAH menebak dari teks counterparty.
+SPECIFIC_SOURCE_LABELS = {
+    "BCA": "BCA",
+    "BRI": "BRI",
+    "BNI": "BNI",
+    "MANDIRI": "MANDIRI",
+    "CIMB": "CIMB",
+    "PERMATA": "PERMATA",
+    "DANAMON": "DANAMON",
+    "SEABANK": "SEABANK",
+    "JAGO": "JAGO",
+    "DANA": "DANA",
+    "OVO": "OVO",
+    "GOPAY": "GOPAY",
+    "LINKAJA": "LINKAJA",
+    "SHOPEEPAY": "SHOPEEPAY",
+    "QRIS": "QRIS",
+    "NXPAY": "NXPAY",
+    "QRFLYER": "QR FLYER",
+}
+
+_MONEY_KEYS = ("bank", "gateway")
+
+
+def _normalize_provider(value):
+    """'QRFLYER'/'qr flyer' -> 'QR FLYER'; provider tak dikenal tetap dipakai apa adanya."""
+    compact = re.sub(r"[^A-Z0-9]+", "", (value or "").upper())
+    if not compact:
+        return ""
+    return SPECIFIC_SOURCE_LABELS.get(compact, (value or "").strip().upper())
+
+
+def provider_from_filename(name):
+    """Ambil token bank/gateway dari nama file upload.
+
+    Contoh nyata: '27_JUNI_2026_WD_BCA_HENDI.pdf' -> 'BCA',
+    'MUTASI DP QR FLYER OKE25 27-06.xlsx' -> 'QR FLYER'. Tidak dikenal -> ''.
+    """
+    tokens = [t for t in re.split(r"[^A-Z0-9]+", (name or "").upper()) if t]
+    for i, tok in enumerate(tokens):
+        if i + 1 < len(tokens):  # token dua kata, mis. 'QR' + 'FLYER'
+            pair = tok + tokens[i + 1]
+            if pair in SPECIFIC_SOURCE_LABELS:
+                return SPECIFIC_SOURCE_LABELS[pair]
+        if tok in SPECIFIC_SOURCE_LABELS:
+            return SPECIFIC_SOURCE_LABELS[tok]
+    return ""
+
+
+def specific_source_label(source_key, account=None, upload=None):
+    """Label sumber spesifik untuk badge Transaksi.
+
+    Bank/gateway: account.provider > upload.account.provider > upload.provider >
+    token dari upload.original_name > fallback 'Bank'/'Gateway'.
+    Panel/bracket: tetap label generik ('Panel'/'Bracket').
+    """
+    key = (source_key or "").lower()
+    if key not in _MONEY_KEYS:
+        return key.capitalize()
+    candidates = []
+    if account is not None:
+        candidates.append(account.provider)
+    if upload is not None:
+        if upload.account_id and upload.account is not None:
+            candidates.append(upload.account.provider)
+        candidates.append(upload.provider)
+    for cand in candidates:
+        label = _normalize_provider(cand)
+        if label:
+            return label
+    if upload is not None:
+        label = provider_from_filename(upload.original_name)
+        if label:
+            return label
+    return key.capitalize()
 
 
 class Transaction(TimeStampedModel):
@@ -66,3 +146,12 @@ class Transaction(TimeStampedModel):
 
     def __str__(self):
         return f"{self.get_jenis_display()} {self.amount}"
+
+    @property
+    def source_label(self):
+        """Badge sumber spesifik (BCA/BRI/NXPAY/QR FLYER/...) — read-only, tanpa migrasi."""
+        return specific_source_label(
+            self.source_type.key,
+            account=self.account if self.account_id else None,
+            upload=self.upload if self.upload_id else None,
+        )

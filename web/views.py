@@ -16,7 +16,7 @@ from sources.detect import detect_source
 from sources.management.commands.ingest import detect_flow
 from sources.models import SourceType, Upload
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
-from transactions.models import Transaction
+from transactions.models import Transaction, specific_source_label
 from web.access import tokos_for
 
 BUCKET_META = {
@@ -160,10 +160,15 @@ def transactions(request):
     active = _active_toko(request)
     if active is None:
         return render(request, "web/no_toko.html")
-    qs = Transaction.objects.filter(toko=active).select_related("source_type").order_by("-occurred_at")
+    qs = (
+        Transaction.objects.filter(toko=active)
+        .select_related("source_type", "account", "upload", "upload__account")
+        .order_by("-occurred_at")
+    )
     src = request.GET.get("source", "")
     jenis = request.GET.get("jenis", "")
     q = request.GET.get("q", "").strip()
+    bank = request.GET.get("bank", "").strip()
     if src:
         qs = qs.filter(source_type__key=src)
     if jenis:
@@ -175,7 +180,47 @@ def transactions(request):
             | Q(reference__icontains=q)
             | Q(counterparty__icontains=q)
         )
+
+    # Tombol filter per-bank: label diturunkan dari data upload toko ini
+    # (account.provider / provider / nama file) — bukan daftar hardcode.
+    bank_options = []
+    if src in ("bank", "gateway"):
+        ups = Upload.objects.filter(toko=active, source_type__key=src).select_related("account")
+        label_by_upload = {
+            u.id: specific_source_label(src, account=u.account, upload=u) for u in ups
+        }
+        fallback = src.capitalize()
+        bank_options = sorted({lbl for lbl in label_by_upload.values() if lbl and lbl != fallback})
+        if bank:
+            qs = qs.filter(
+                upload_id__in=[uid for uid, lbl in label_by_upload.items() if lbl == bank]
+            )
+    else:
+        bank = ""
+
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
+
+    # Ticket/Username/Nama Lengkap sisi uang: ambil dari pasangan panel/bracket
+    # hasil rekonsiliasi — hanya untuk baris halaman ini (tanpa join tabel penuh).
+    txs = list(page.object_list)
+    page.object_list = txs
+    money_ids = [t.id for t in txs if t.source_type.key in ("bank", "gateway")]
+    best = {}
+    if money_ids:
+        results = (
+            MatchResult.objects.filter(right_id__in=money_ids, left__isnull=False)
+            .exclude(bucket=MatchResult.Bucket.TIDAK)
+            .select_related("left")
+        )
+        for r in results:
+            # cocok > skor tertinggi > run terbaru
+            rank = (r.bucket == MatchResult.Bucket.COCOK, r.score or 0, r.run_id, r.id)
+            if r.right_id not in best or rank > best[r.right_id][0]:
+                best[r.right_id] = (rank, r.left)
+    for t in txs:
+        t.is_money = t.source_type.key in ("bank", "gateway")
+        t.matched_panel = best.get(t.id, (None, None))[1]
+
     ctx = {
         "page": page,
         "sources": SourceType.objects.all(),
@@ -183,6 +228,8 @@ def transactions(request):
         "src": src,
         "jenis": jenis,
         "q": q,
+        "bank": bank,
+        "bank_options": bank_options,
         "total": page.paginator.count,
     }
     return render(request, "web/transactions.html", ctx)
@@ -248,9 +295,15 @@ def run_detail(request, pk):
         qs = qs.filter(bucket=bucket)
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
     left_label, right_label = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
+    # Nomor batch per-toko (posisi urut, bukan pk global) — konsisten dgn batch_detail.
+    batch = run.batch
+    batch_no = (
+        ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count() if batch else None
+    )
     ctx = {
         "run": run, "page": page, "bucket": bucket, "bucket_meta": BUCKET_META,
         "left_label": left_label, "right_label": right_label,
+        "batch": batch, "batch_no": batch_no,
     }
     return render(request, "web/run_detail.html", ctx)
 
@@ -304,7 +357,8 @@ def export_run(request, pk):
 
     d = wb.create_sheet("Hasil")
     L, R = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
-    headers = ["Bucket", f"{L} Ticket", f"{L} Amount", f"{L} User", f"{L} Nama Lengkap", f"{L} Waktu",
+    headers = ["Bucket", f"{L} Ticket", f"{L} Amount", f"{L} User", f"{L} Nama Lengkap",
+               f"{L} Player Bank", f"{L} Bank Title", f"{L} Handler", f"{L} Waktu",
                R, f"{R} Sumber", f"{R} Amount", f"{R} Waktu", "Skor", "Alasan", "Detail"]
     d.append(headers)
     for c in d[1]:
@@ -318,6 +372,9 @@ def export_run(request, pk):
             float(left.amount) if left else "",
             left.username if left else "",
             left.counterparty if left else "",
+            (left.raw or {}).get("Player Bank", "") if left else "",
+            (left.raw or {}).get("Bank Title", "") if left else "",
+            (left.raw or {}).get("Handler", "") if left else "",
             left.occurred_at.strftime("%d/%m %H:%M") if left and left.occurred_at else "",
             (right.ticket_no or right.counterparty) if right else "",
             right.source_type.key if right else "",

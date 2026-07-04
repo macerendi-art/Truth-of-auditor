@@ -2,10 +2,16 @@
 {% load web_extras %}
 <tr id="res-{{ r.pk }}">
   <td>{% if r.bucket == 'cocok' %}<span class="badge ok">{% elif r.bucket == 'perlu_tinjau' %}<span class="badge warn">{% else %}<span class="badge bad">{% endif %}{{ r.get_bucket_display }}</span></td>
-  <td>{% if r.left %}<div class="mono">{{ r.left.ticket_no|default:r.left.counterparty|default:"—" }}</div>
-    <div class="faint" style="font-size:12px">{% if r.left.username %}{{ r.left.username }}{% endif %}{% if r.left.counterparty %}{% if r.left.username %} · {% endif %}{{ r.left.counterparty|truncatechars:26 }}{% endif %}{% if r.left.occurred_at %}{% if r.left.username or r.left.counterparty %} · {% endif %}{{ r.left.occurred_at|date:"d/m H:i" }}{% endif %}</div>
-    {% with pb=r.left.raw|raw_get:"Player Bank" bt=r.left.raw|raw_get:"Bank Title" hd=r.left.raw|raw_get:"Handler" %}{% if pb or bt or hd %}<div class="faint" style="font-size:12px">{% if pb %}Player Bank: {{ pb }}{% endif %}{% if bt %}{% if pb %} · {% endif %}Bank Title: {{ bt }}{% endif %}{% if hd %}{% if pb or bt %} · {% endif %}Handler: {{ hd }}{% endif %}</div>{% endif %}{% endwith %}
+  <td>{% if r.left %}<div class="mono">{{ r.left.ticket_no|default:"—" }}</div>
+    {% if r.left.occurred_at %}<div class="faint" style="font-size:12px">{{ r.left.occurred_at|date:"d/m H:i" }}</div>{% endif %}
   {% else %}<span class="faint">—</span>{% endif %}</td>
+  <td style="font-size:12.5px">{% if r.left.username %}{{ r.left.username }}{% else %}<span class="faint">—</span>{% endif %}</td>
+  <td style="font-size:12.5px">{% if r.left.counterparty %}<span title="{{ r.left.counterparty }}">{{ r.left.counterparty|truncatechars:26 }}</span>{% else %}<span class="faint">—</span>{% endif %}</td>
+  {% with pb=r.left.raw|raw_get:"Player Bank" bt=r.left.raw|raw_get:"Bank Title" hd=r.left.raw|raw_get:"Handler" %}
+  <td class="faint" style="font-size:12px">{% if pb %}{{ pb }}{% else %}—{% endif %}</td>
+  <td class="faint" style="font-size:12px">{% if bt %}{{ bt }}{% else %}—{% endif %}</td>
+  <td class="faint" style="font-size:12px">{% if hd %}{{ hd }}{% else %}—{% endif %}</td>
+  {% endwith %}
   <td class="num mono">{% if r.left %}{{ r.left.amount|floatformat:0|intcomma }}{% endif %}</td>
   <td>{% if r.right %}<div class="mono">{{ r.right.ticket_no|default:r.right.counterparty|default:"—"|truncatechars:22 }}</div>
     <div class="faint" style="font-size:12px">{{ r.right.source_type.key }}{% if r.right.occurred_at %} · {{ r.right.occurred_at|date:"d/m H:i" }}{% endif %}</div>{% else %}<span class="faint">—</span>{% endif %}</td>

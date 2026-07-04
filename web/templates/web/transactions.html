@@ -18,27 +18,38 @@
       {% for val,lbl in jenis_choices %}<option value="{{ val }}" {% if jenis == val %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></div>
     <div class="field" style="flex:2"><label>Cari (username / ticket / referensi / nama)</label>
       <input name="q" value="{{ q }}" placeholder="mis. Wacor20 atau D1757153"></div>
-    <button class="btn primary" type="submit" style="flex:0 0 auto;align-self:end">Filter</button>
+    {% if bank %}<input type="hidden" name="bank" value="{{ bank }}">{% endif %}
+    <button class="btn primary" type="submit" style="flex:0 0 auto;align-self:flex-end;margin-bottom:15px">Filter</button>
   </form>
+  {% if bank_options %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <span class="faint" style="font-size:12px">Bank:</span>
+    <a class="btn sm{% if not bank %} primary{% endif %}" href="?source={{ src }}&jenis={{ jenis }}&q={{ q|urlencode }}">Semua</a>
+    {% for b in bank_options %}
+    <a class="btn sm{% if bank == b %} primary{% endif %}" href="?source={{ src }}&jenis={{ jenis }}&q={{ q|urlencode }}&bank={{ b|urlencode }}">{{ b }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
 </div>
 
 <div class="card pad0 reveal">
   <div class="table-wrap" style="border:none">
   <table>
-    <thead><tr><th>Waktu</th><th>Sumber</th><th>Jenis</th><th class="num">Amount</th><th class="num">Δ Uang</th><th>Ticket</th><th>Username</th><th>Counterparty</th></tr></thead>
+    <thead><tr><th>Waktu</th><th>Sumber</th><th>Jenis</th><th class="num">Amount</th><th class="num">Δ Uang</th><th>Ticket</th><th>Username</th><th>Nama Lengkap</th><th>Counterparty</th></tr></thead>
     <tbody>
     {% for t in page %}
       <tr>
         <td class="faint mono">{{ t.occurred_at|date:"d/m H:i"|default:"—" }}</td>
-        <td><span class="badge src">{{ t.source_type.key }}</span></td>
+        <td><span class="badge src">{{ t.source_label }}</span></td>
         <td>{{ t.get_jenis_display }}</td>
         <td class="num mono">{{ t.amount|floatformat:0|intcomma }}</td>
         <td class="num mono" style="color:{% if t.money_delta > 0 %}var(--ok){% elif t.money_delta < 0 %}var(--bad){% else %}var(--faint){% endif %}">{{ t.money_delta|floatformat:0|intcomma }}</td>
-        <td class="mono">{{ t.ticket_no|default:"—" }}</td>
-        <td>{{ t.username|default:"—" }}</td>
+        <td class="mono">{% if t.ticket_no %}{{ t.ticket_no }}{% elif t.matched_panel.ticket_no %}<span class="faint" title="Dari pasangan rekonsiliasi">≈ {{ t.matched_panel.ticket_no }}</span>{% else %}—{% endif %}</td>
+        <td>{% if t.username %}{{ t.username }}{% elif t.matched_panel.username %}<span class="faint" title="Dari pasangan rekonsiliasi">≈ {{ t.matched_panel.username }}</span>{% else %}—{% endif %}</td>
+        <td>{% if t.is_money %}{% if t.matched_panel.counterparty %}<span class="faint" title="Dari pasangan rekonsiliasi">≈ {{ t.matched_panel.counterparty|truncatechars:26 }}</span>{% else %}—{% endif %}{% else %}{{ t.counterparty|truncatechars:26|default:"—" }}{% endif %}</td>
         <td class="faint">{{ t.counterparty|truncatechars:26|default:"—" }}</td>
       </tr>
-    {% empty %}<tr><td colspan="8" class="muted" style="padding:28px;text-align:center">Tidak ada transaksi. Coba ubah filter atau <a class="grad-text" href="{% url 'upload' %}">upload file</a>.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="9" class="muted" style="padding:28px;text-align:center">Tidak ada transaksi. Coba ubah filter atau <a class="grad-text" href="{% url 'upload' %}">upload file</a>.</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>
@@ -46,9 +57,9 @@
 
 {% if page.has_other_pages %}
 <div class="pager">
-  {% if page.has_previous %}<a class="btn sm" href="?source={{ src }}&jenis={{ jenis }}&q={{ q }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
+  {% if page.has_previous %}<a class="btn sm" href="?source={{ src }}&jenis={{ jenis }}&q={{ q|urlencode }}&bank={{ bank|urlencode }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
   <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
-  {% if page.has_next %}<a class="btn sm" href="?source={{ src }}&jenis={{ jenis }}&q={{ q }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
+  {% if page.has_next %}<a class="btn sm" href="?source={{ src }}&jenis={{ jenis }}&q={{ q|urlencode }}&bank={{ bank|urlencode }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}
