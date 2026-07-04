@@ -33,6 +33,30 @@ class UploadAnalyzeTests(TestCase):
         self.assertEqual(preview[0]["parser_key"], "bri")
         self.assertFalse(preview[0]["needs_confirm"])
 
+    def test_password_field_readonly_when_not_encrypted(self):
+        # File tak terkunci → kolom Password harus readonly (tak bisa diisi).
+        f = SimpleUploadedFile(
+            "bri.csv",
+            b"TGL_TRAN,MUTASI_DEBET,MUTASI_KREDIT,DESK_TRAN\n",
+            content_type="text/csv",
+        )
+        r = self.client.post(reverse("upload"), {"action": "analyze", "files": [f]})
+        self.assertFalse(r.context["preview"][0]["needs_password"])
+        self.assertContains(r, 'name="password"')
+        self.assertContains(r, 'readonly tabindex="-1"')
+
+    def test_password_field_enabled_when_encrypted(self):
+        # File xlsx terenkripsi (OLE2 magic) → kolom Password aktif (tak readonly).
+        f = SimpleUploadedFile(
+            "locked.xlsx",
+            b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1padding-encrypted",
+            content_type="application/vnd.ms-excel",
+        )
+        r = self.client.post(reverse("upload"), {"action": "analyze", "files": [f]})
+        self.assertTrue(r.context["preview"][0]["needs_password"])
+        self.assertContains(r, 'name="password"')
+        self.assertNotContains(r, 'readonly tabindex="-1"')
+
 
 _ROW = {
     "occurred_at": datetime(2026, 6, 27, 10, 0), "posted_date": None, "jenis": "depo",
