@@ -367,6 +367,7 @@ def upload(request):
         return render(request, "web/upload.html", {
             "preview": preview, "parsers": sorted(PARSERS.keys()),
             "flows": ["", "dp", "wd"], "active_toko": active,
+            "n_siap": sum(1 for p in preview if not p["needs_confirm"] and not p["needs_password"]),
             "n_cek": sum(1 for p in preview if p["needs_confirm"]),
             "n_pwd": sum(1 for p in preview if p["needs_password"]),
             "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],

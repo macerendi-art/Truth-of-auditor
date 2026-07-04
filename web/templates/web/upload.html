@@ -13,27 +13,30 @@
     {% csrf_token %}
     <input type="hidden" name="action" value="analyze">
     <label class="dz" for="fileInput" id="dropzone">
-      <div class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></div>
-      <div style="font-weight:600">Lepas file atau folder di sini, atau klik untuk pilih</div>
+      <div class="di"><svg width="22" height="22"><use href="#i-upload"/></svg></div>
+      <div style="font-weight:600" id="dzcopy" data-idle="Lepas file atau folder di sini, atau klik untuk pilih" data-over="Lepas untuk menambahkan">Lepas file atau folder di sini, atau klik untuk pilih</div>
       <div class="faint" style="font-size:13px;margin-top:4px">xlsx · csv · pdf · zip — pilihan menumpuk, zip diekstrak otomatis</div>
-      <div id="flist" class="faint" style="font-size:13px;margin-top:8px"></div>
       <input id="fileInput" type="file" name="files" multiple accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF,.zip,.ZIP" style="display:none">
     </label>
+    <div id="flist" class="file-list"></div>
     <input id="folderInput" type="file" multiple webkitdirectory style="display:none">
-    <div style="display:flex;gap:10px;align-items:center;margin-top:16px">
-      <button class="btn primary" type="submit">Analisa File →</button>
-      <label class="btn ghost" for="folderInput" style="cursor:pointer;margin:0">📁 Pilih Folder</label>
-      <button class="btn ghost" type="button" id="fclear" hidden>✕ Bersihkan pilihan</button>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap">
+      <button class="btn primary" type="submit" id="analyzeBtn">Analisa File →</button>
+      <label class="btn ghost" for="folderInput" style="cursor:pointer;margin:0"><svg width="16" height="16"><use href="#i-folder-open"/></svg> Pilih Folder</label>
+      <button class="btn ghost" type="button" id="fclear" hidden><svg width="16" height="16"><use href="#i-x"/></svg> Bersihkan pilihan</button>
     </div>
   </form>
 </div>
-<style>.dz.dz-over{border-color:var(--ink,#1a1a1a);background:rgba(0,0,0,.04)}</style>
 <script>
 (function(){
   var i=document.getElementById('fileInput'), d=document.getElementById('folderInput'),
       l=document.getElementById('flist'), dz=document.getElementById('dropzone'),
-      clearBtn=document.getElementById('fclear');
+      copyEl=document.getElementById('dzcopy'),
+      clearBtn=document.getElementById('fclear'),
+      analyzeBtn=document.getElementById('analyzeBtn'),
+      form=document.getElementById('upform');
   if(!i||!dz) return;
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Akumulator: pilihan MENUMPUK lintas dialog/drop — tidak di-reset tiap tambah.
   var store=new DataTransfer();
 
@@ -42,28 +45,68 @@
       if(g.name===f.name && g.size===f.size) return true;}
     return false;
   }
+  // Ekstensi yang punya parser — mirror _is_junk_name di server (indikasi visual saja).
+  var CHIP={xlsx:'t-xlsx','xls':'t-xlsx',csv:'t-csv',pdf:'t-pdf',zip:'t-zip'};
+  var ICON={ 't-xlsx':'#i-file-spreadsheet','t-csv':'#i-file-text','t-pdf':'#i-file-text','t-zip':'#i-file-archive','t-skip':'#i-file-text' };
+  function ukur(n){ return n>=1048576 ? (n/1048576).toFixed(1)+' MB' : Math.max(1,Math.round(n/1024))+' KB'; }
+  function baris(f,idx){
+    var ext=(f.name.split('.').pop()||'').toLowerCase(),
+        cls=CHIP[ext]||'t-skip',
+        row=document.createElement('div');
+    row.className='file-row'+(cls==='t-skip'?' skip':'');
+    var path=(f.webkitRelativePath||'').replace(/\/[^/]*$/,'');
+    row.innerHTML=
+      '<span class="file-chip '+cls+'"><svg width="15" height="15"><use href="'+ICON[cls]+'"/></svg></span>'+
+      '<span class="fname"><span class="n"></span>'+(path?'<span class="p"></span>':'')+'</span>'+
+      (cls==='t-zip'?'<span class="badge warn plain">diekstrak</span>':'')+
+      (cls==='t-skip'?'<span class="badge plain" style="color:var(--faint);background:var(--surface-alt)">dilewati</span>':'')+
+      '<span class="fsize num">'+ukur(f.size)+'</span>'+
+      '<button type="button" class="frm" title="Hapus dari pilihan" data-idx="'+idx+'"><svg width="15" height="15"><use href="#i-x"/></svg></button>';
+    row.querySelector('.fname .n').textContent=f.name;
+    if(path) row.querySelector('.fname .p').textContent=path;
+    return row;
+  }
   function render(){
     i.files=store.files; // input inilah yang tersubmit
     var n=store.files.length;
     clearBtn.hidden=!n;
-    l.textContent=!n?'':(n<=6?[].map.call(store.files,function(f){return f.name;}).join(' · ')
-                             :n+' file dipilih');
+    analyzeBtn.textContent = n ? 'Analisa '+n+' File →' : 'Analisa File →';
+    l.innerHTML='';
+    [].forEach.call(store.files,function(f,idx){ l.appendChild(baris(f,idx)); });
   }
   function tambah(files){
-    [].forEach.call(files,function(f){ if(!sudahAda(f)) store.items.add(f); });
+    var baru=[];
+    [].forEach.call(files,function(f){ if(!sudahAda(f)){ store.items.add(f); baru.push(f.name); } });
     render();
+    if(baru.length && window.gsap && !reduce){
+      gsap.from(l.children, {y:-6, opacity:0, duration:.28, ease:'power2.out', stagger:.03, clearProps:'all'});
+    }
   }
+  // Hapus per-baris: DataTransfer tak punya remove-at — rebuild.
+  l.addEventListener('click',function(e){
+    var btn=e.target.closest('.frm'); if(!btn) return;
+    var idx=parseInt(btn.getAttribute('data-idx'),10),
+        keep=new DataTransfer();
+    [].forEach.call(store.files,function(f,k){ if(k!==idx) keep.items.add(f); });
+    store=keep; render();
+  });
 
   i.addEventListener('change',function(){ tambah(i.files); });
   d.addEventListener('change',function(){ tambah(d.files); d.value=''; });
   clearBtn.addEventListener('click',function(){ store=new DataTransfer(); render(); });
 
+  // Status sibuk: akui klik sebelum navigasi POST — cegah double-submit.
+  form.addEventListener('submit',function(){
+    analyzeBtn.disabled=true;
+    analyzeBtn.textContent='Menganalisa…';
+  });
+
   // Drag & drop — termasuk FOLDER (traversal webkitGetAsEntry, batch readEntries).
   ['dragover','dragenter'].forEach(function(ev){
-    dz.addEventListener(ev,function(e){ e.preventDefault(); dz.classList.add('dz-over'); });
+    dz.addEventListener(ev,function(e){ e.preventDefault(); dz.classList.add('dz-over'); copyEl.textContent=copyEl.getAttribute('data-over'); });
   });
   ['dragleave','drop'].forEach(function(ev){
-    dz.addEventListener(ev,function(e){ e.preventDefault(); dz.classList.remove('dz-over'); });
+    dz.addEventListener(ev,function(e){ e.preventDefault(); dz.classList.remove('dz-over'); copyEl.textContent=copyEl.getAttribute('data-idle'); });
   });
   function bacaEntry(entry,done){
     if(entry.isFile){
@@ -96,7 +139,12 @@
 {% if preview %}
 <div class="card reveal">
   <h3>Preview — konfirmasi jenis sebelum simpan</h3>
-  <form method="post">
+  <p class="summary-line" style="margin:-4px 0 14px">
+    <span class="badge ok plain">{{ n_siap }} siap</span>
+    {% if n_cek %}<span class="badge warn plain">{{ n_cek }} perlu dicek</span>{% endif %}
+    {% if n_pwd %}<span class="badge bad plain">{{ n_pwd }} perlu password</span>{% endif %}
+  </p>
+  <form method="post" id="commitform">
     {% csrf_token %}
     <input type="hidden" name="action" value="commit">
     <div class="twrap">
@@ -104,14 +152,17 @@
       <thead><tr><th>File</th><th>Jenis terdeteksi</th><th>Keyakinan</th><th>DP/WD</th><th>Password</th></tr></thead>
       <tbody>
       {% for p in preview %}
-      <tr>
+      <tr{% if p.needs_confirm %} class="needs-confirm"{% endif %}>
         <td>{{ p.name }}<input type="hidden" name="staged" value="{{ p.staged }}"></td>
         <td>
           <select name="parser_key" class="f">
             {% for pk in parsers %}<option value="{{ pk }}" {% if pk == p.parser_key %}selected{% endif %}>{{ pk }}</option>{% endfor %}
           </select>
         </td>
-        <td>{% if p.needs_confirm %}<span class="badge warn">{{ p.confidence }}% — cek</span>{% else %}<span class="badge ok">{{ p.confidence }}%</span>{% endif %}</td>
+        <td style="white-space:nowrap">
+          <span class="conf-meter"><i class="{% if p.confidence >= 80 %}hi{% elif p.confidence >= 60 %}mid{% else %}lo{% endif %}" style="width:{{ p.confidence }}%"></i></span><span class="num">{{ p.confidence }}%</span>
+          {% if p.needs_confirm %}<div class="faint" style="font-size:11.5px;margin-top:3px">cek jenisnya</div>{% endif %}
+        </td>
         <td>
           <select name="flow" class="f">
             <option value="" {% if p.flow == '' %}selected{% endif %}>otomatis</option>
@@ -120,8 +171,11 @@
           </select>
         </td>
         <td>
-          <input type="password" name="password" class="f{% if not p.needs_password %} muted{% endif %}" autocomplete="off"{% if not p.needs_password %} readonly tabindex="-1" style="opacity:.45;pointer-events:none;background:var(--panel-2)"{% endif %} placeholder="{% if p.needs_password %}terkunci — isi password{% else %}—{% endif %}">
-          {% if p.needs_password %}<div class="faint" style="font-size:12px;margin-top:4px">🔒 terkunci — isi password</div>{% endif %}
+          {% if p.needs_password %}
+          <span class="pw-lock"><svg width="14" height="14"><use href="#i-lock"/></svg><input type="password" name="password" class="f" autocomplete="off" placeholder="terkunci — isi password"></span>
+          {% else %}
+          <input type="password" name="password" class="f muted" autocomplete="off" readonly tabindex="-1" style="opacity:.45;pointer-events:none;background:var(--panel-2)" placeholder="—">
+          {% endif %}
         </td>
       </tr>
       {% endfor %}
@@ -132,13 +186,25 @@
       <label>Panel Provider (opsional)</label>
       <input type="text" name="provider" placeholder="mis. Nexus">
     </div>
-    <button class="btn primary" type="submit">Simpan &amp; Parse ({{ preview|length }} file)</button>
+    <button class="btn primary" type="submit" id="commitBtn">Simpan &amp; Parse ({{ preview|length }} file)</button>
   </form>
 </div>
+<script>
+(function(){
+  var f=document.getElementById('commitform'), b=document.getElementById('commitBtn');
+  if(!f||!b) return;
+  f.addEventListener('submit',function(){ b.disabled=true; b.textContent='Menyimpan…'; });
+  // Meter keyakinan terisi dari kiri saat render — komunikasi "sedang diukur".
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(window.gsap && !reduce){
+    gsap.from('.conf-meter i',{scaleX:0,transformOrigin:'left',duration:.5,ease:'power2.out',stagger:.04,clearProps:'all'});
+  }
+})();
+</script>
 {% endif %}
 
 {% load humanize %}
-<div class="card reveal" style="padding:0;overflow:hidden">
+<div class="card reveal pad0">
   <div style="padding:18px 20px 6px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
     <h3 style="margin:0">Riwayat Upload — {{ active_toko.name }}</h3>
     {% if is_admin_user and uploads %}
