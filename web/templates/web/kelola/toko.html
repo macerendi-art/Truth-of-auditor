@@ -39,7 +39,7 @@
             <button class="btn sm" type="submit">{% if t.is_active %}Nonaktifkan{% else %}Aktifkan{% endif %}</button>
           </form>
           <form method="post" action="{% url 'delete_toko' t.id %}" style="display:inline"
-                onsubmit="return confirm('Hapus PERMANEN Toko {{ t.name }} beserta SEMUA transaksi, upload, dan batch-nya? Tindakan ini tidak bisa dibatalkan.')">
+                data-confirm="Hapus PERMANEN Toko {{ t.name }} beserta SEMUA transaksi, upload, dan batch-nya? Tindakan ini tidak bisa dibatalkan.">
             {% csrf_token %}
             <button class="btn sm" type="submit" style="color:#dc2828">Hapus</button>
           </form>
