@@ -24,6 +24,98 @@ def _jenis_from_money(money):
     return "depo" if money > 0 else "wd" if money < 0 else "lainnya"
 
 
+# ---------------------------------------------------------------------------
+# Isolasi nama (Task 4). Urutan wajib: buang teks struktural per-sumber DULU,
+# baru nama dinormalisasi (clean_name) di engine saat fuzzy matching.
+# Angka/simbol masih dibutuhkan di tahap ini untuk mengenali pola struktural.
+# ---------------------------------------------------------------------------
+
+# --- BCA (dipakai CSV & PDF) ---
+# Nama via baris lanjutan e-wallet: 'TRFDN-<nama>ESPAY DEBIT INDONE' (bisa menempel).
+BCA_TRFDN_RE = re.compile(r"TRFDN-\s*(.+?)\s*(?:ESPAY\s+DEBIT\s+INDONE\S*|ESPAY|$)")
+# Kode transaksi: '2706/FTSCY/WS95271', '2606/FTFVA/WS9501139010/DANA', dst.
+BCA_CODE_RE = re.compile(r"\b\d{3,4}/[A-Z]+/\S+")
+# Nominal menempel ke nama: '100000.00M. YULIANSAR SIREG' -> nama di belakang nominal.
+BCA_GLUED_AMT_RE = re.compile(r"\d[\d,.]*\.\d{2}\s*(.*)$")
+# Label/kata struktural yang bukan bagian nama (frasa dulu, baru kata tunggal).
+BCA_NOISE_RE = re.compile(
+    r"TRSF E-BANKING|BI-?FAST|SWITCHING|ESPAY\s+DEBIT\s+INDONE\S*|DEBIT\s+INDONE\S*|ESPAY"
+    r"|Web BRILink|MyBCA|\bKBI\b|\bTOPUP\b|\bTANGGAL\b|\bTRANSFER\b|\bBIAYA\b|\bTXN\b"
+    r"|\bTRF\b|\bDR\b|\bKE\b|\bCR\b|\bDB\b"
+)
+
+
+def extract_bca_name(text):
+    """Isolasi nama orang dari keterangan BCA: buang kode transaksi, label
+    struktural, nominal menempel, & nomor rekening/HP. Baris tanpa nama
+    (mis. topup DANA/GOPAY hanya nomor HP) -> '' (jangan dikarang)."""
+    s = re.sub(r"\s+", " ", str(text or "")).strip()
+    trfdn = BCA_TRFDN_RE.search(s)
+    s = BCA_TRFDN_RE.sub(" ", s)
+    s = BCA_CODE_RE.sub(" ", s)
+    s = BCA_NOISE_RE.sub(" ", s)
+    m = BCA_GLUED_AMT_RE.search(s)
+    if m:  # nama menempel di belakang nominal -> ambil bagian setelahnya
+        s = m.group(1)
+    # Sisa token murni angka/simbol = nomor rekening/HP/kode -> bukan nama.
+    toks = [t for t in s.split() if re.search(r"[A-Za-z]", t) and not re.search(r"\d", t)]
+    name = " ".join(toks).strip(" -.,:/")
+    if not name and trfdn:  # fallback: nama dari baris lanjutan TRFDN
+        name = trfdn.group(1).strip(" -.,:/")
+    return re.sub(r"\s+", " ", name).strip()
+
+
+# --- Mandiri ---
+# Prefiks: 'Transfer dari/ke ...', 'Transfer BI Fast Dari/Ke ...',
+# 'Transfer antar Mandiri DARI ...' (+ opsional 'Bank lain').
+MANDIRI_PREFIX_RE = re.compile(
+    r"^Transfer\s+(?:BI\s*Fast\s+)?(?:dari|ke|antar)\s+(?:Mandiri\s+(?:dari|ke)\s+)?(?:Bank\s+lain\s+)?",
+    re.IGNORECASE,
+)
+# Nama bank pengirim/penerima (terpanjang dulu agar 'BANK MANDIRI TASPEN'
+# tidak terpotong jadi 'BANK MANDIRI' + sisa 'TASPEN').
+MANDIRI_BANK_NAMES = (
+    "BANK MANDIRI TASPEN", "SUPER BANK INDONESIA", "SEABANK INDONESIA",
+    "BANK RAKYAT INDONESIA", "BANK CENTRAL ASIA", "BANK NEGARA INDONESIA",
+    "BANK SYARIAH INDONESIA", "BANK NEO COMMERCE", "BANK CIMB NIAGA",
+    "BANK MANDIRI", "BANK DANAMON", "BANK PERMATA", "BANK JAGO", "BANK MEGA",
+    "BANK BTPN", "BANK BNI", "BANK BRI", "BANK BCA", "BANK BTN", "BANK BJB",
+    "BCA DIGITAL", "CIMB NIAGA", "SUPERBANK", "ALLO BANK", "SEABANK",
+    "BCA", "BRI", "BNI", "BTN", "BSI",
+)
+# Ekor struktural GoPay/fee: buang sampai akhir teks.
+MANDIRI_TAIL_RES = (
+    re.compile(r"\bGoPay\s+Bank\s+Transfer\b.*$", re.IGNORECASE),
+    re.compile(r"\bTransfer\s+Fee\b.*$", re.IGNORECASE),
+)
+
+
+def extract_mandiri_name(text):
+    """Isolasi nama dari Keterangan Mandiri e-statement: buang prefiks
+    'Transfer dari/ke <BANK>', nama bank, dan nomor rekening/referensi di ekor.
+    Baris biaya/pembayaran tanpa nama -> ''. """
+    s = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not s.lower().startswith("transfer"):
+        return ""  # 'Biaya ...' / 'Pembayaran GoPay Customer <HP>' -> tanpa nama
+    stripped = MANDIRI_PREFIX_RE.sub("", s)
+    if stripped == s:  # bukan pola transfer yang dikenal -> jangan menebak
+        return ""
+    s = stripped.strip()
+    upper = s.upper()
+    for bank in MANDIRI_BANK_NAMES:  # buang nama bank di depan (batas kata)
+        if upper == bank or upper.startswith(bank + " "):
+            s = s[len(bank):].strip()
+            break
+    s = re.sub(r"^DANA-\s*", "", s)  # e-wallet: 'DANA-<nama>' menempel
+    for tail_re in MANDIRI_TAIL_RES:
+        s = tail_re.sub("", s).strip()
+    # Ekor nomor rekening/HP/referensi (mengandung angka) + tanda '-'.
+    toks = s.split()
+    while toks and (re.search(r"\d", toks[-1]) or toks[-1] in ("-", "transfer")):
+        toks.pop()
+    return " ".join(toks).strip(" -.,:/")
+
+
 class BRIParser(BaseParser):
     source_key = "bank"
 
@@ -106,7 +198,7 @@ class BCACSVParser(BaseParser):
                 "ticket_no": "",
                 "username": "",
                 "reference": "",
-                "counterparty": "",
+                "counterparty": extract_bca_name(desc),
                 "description": desc,
                 "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
             }
@@ -194,7 +286,7 @@ class MandiriParser(BaseParser):
                 "ticket_no": "",
                 "username": "",
                 "reference": "",
-                "counterparty": ket.replace("\n", " "),
+                "counterparty": extract_mandiri_name(ket.replace("\n", " ")),
                 "description": ket.replace("\n", " "),
                 "raw": {"Tanggal": datestr, "Jam": timestr, "Keterangan": ket.replace("\n", " "),
                         "Masuk": str(masuk), "Keluar": str(keluar), "Saldo": str(saldo)},

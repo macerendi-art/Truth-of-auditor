@@ -94,6 +94,28 @@ class MoneyMatcherNameCleanEngineTests(TestCase):
         self.assertEqual(result.bucket, MatchResult.Bucket.COCOK)
         self.assertEqual(result.score, 100)
 
+    def test_nama_terpotong_bca_tetap_cocok(self):
+        """Task 4: BCA memotong nama ~18 char ("M. YULIANSAR SIREG") — harus tetap
+        cocok dengan nama lengkap Panel ("M. YULIANSAR SIREGAR"), skor >= 85."""
+        Transaction.objects.create(
+            upload=self.up, source_type=self.panel, toko=self.lbs, jenis="depo",
+            amount=Decimal("100000"), money_delta=Decimal("100000"),
+            occurred_at=datetime(2026, 6, 27, 11, 0),
+            username="", counterparty="M. YULIANSAR SIREGAR",
+            row_hash="nc7",
+        )
+        Transaction.objects.create(
+            upload=self.up, source_type=self.bank, toko=self.lbs, jenis="lainnya",
+            amount=Decimal("100000"), money_delta=Decimal("100000"),
+            occurred_at=datetime(2026, 6, 27, 11, 5),
+            username="", counterparty="M. YULIANSAR SIREG",
+            row_hash="nc8",
+        )
+        run = run_match("panel_bank", self.tol, user=None, toko=self.lbs, batch=self.batch)
+        result = MatchResult.objects.get(run=run)
+        self.assertEqual(result.bucket, MatchResult.Bucket.COCOK)
+        self.assertGreaterEqual(result.score, 85)
+
     def test_regresi_username_exact_match_tetap_skor_100(self):
         """Regresi: username sama persis dua sisi (dua-duanya berisi) tetap skor 100 cocok,
         clean_name tidak boleh menyentuh jalur username."""

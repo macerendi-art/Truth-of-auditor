@@ -27,6 +27,20 @@ def amount_ok(a, b, tol):
     return diff == 0, diff
 
 
+def _name_score(a, b):
+    """Skor kemiripan nama, toleran nama terpotong (BCA ~18 char, BRI ~17).
+    Nama sudah diisolasi di parser; di sini tinggal normalisasi + fuzzy."""
+    a = clean_name(a).upper()
+    b = clean_name(b).upper()
+    if not a or not b:
+        return 0.0
+    score = fuzz.token_set_ratio(a, b)
+    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+    if len(shorter) >= 10:  # nama sangat pendek jangan dianggap potongan nama lain
+        score = max(score, fuzz.ratio(shorter, longer[: len(shorter)]))
+    return score
+
+
 def date_ok(left_dt, right_dt, tol):
     """Terarah: sisi uang (right) >= sisi kredit (left), dalam window hari."""
     if left_dt is None or right_dt is None:
@@ -145,9 +159,9 @@ class _MoneyMatcher:
                 if p.username and b.username:
                     s = 100.0 if p.username.lower() == b.username.lower() else 40.0
                     if p.counterparty and b.counterparty:
-                        s = max(s, fuzz.token_set_ratio(clean_name(p.counterparty).upper(), clean_name(b.counterparty).upper()))
+                        s = max(s, _name_score(p.counterparty, b.counterparty))
                 else:
-                    s = fuzz.token_set_ratio(clean_name(p.counterparty).upper(), clean_name(b.counterparty).upper())
+                    s = _name_score(p.counterparty, b.counterparty)
                 if s > best_s:
                     best, best_s = b, s
             if best is not None and best_s >= tol.fuzzy_threshold:

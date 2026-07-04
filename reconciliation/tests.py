@@ -1,12 +1,37 @@
 from datetime import datetime
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
-from reconciliation.engine import amount_ok, date_ok, run_match
+from reconciliation.engine import _name_score, amount_ok, date_ok, run_match
 from reconciliation.models import ToleranceProfile
 from sources.models import SourceType, Upload
 from transactions.models import Transaction
+
+
+class NameScoreTests(SimpleTestCase):
+    """Skor nama toleran-truncation: bank sering memotong nama (BCA ~18 karakter)."""
+
+    def test_nama_terpotong_bca_18_char_tetap_lolos_threshold(self):
+        # Kasus wajib: sisi BCA "M. YULIANSAR SIREG" vs Panel "M. YULIANSAR SIREGAR"
+        self.assertGreaterEqual(_name_score("M. YULIANSAR SIREGAR", "M. YULIANSAR SIREG"), 85)
+
+    def test_nama_terpotong_bri_tetap_lolos_threshold(self):
+        self.assertGreaterEqual(_name_score("MARIO KARO-KARO", "MARIO KARO-KAR"), 85)
+
+    def test_nama_identik_skor_100(self):
+        self.assertEqual(_name_score("BUDI SANTOSO", "BUDI SANTOSO"), 100)
+
+    def test_nama_beda_tetap_rendah(self):
+        self.assertLess(_name_score("BUDI SANTOSO", "SITI AMINAH"), 85)
+
+    def test_nama_pendek_tidak_dapat_bonus_prefix(self):
+        # Nama sangat pendek jangan dianggap "terpotong" dari nama lain (false positive)
+        self.assertLess(_name_score("ITA", "ROSITA WATI NINGSIH"), 85)
+
+    def test_kosong_skor_nol(self):
+        self.assertEqual(_name_score("", ""), 0)
+        self.assertEqual(_name_score("BUDI", ""), 0)
 
 
 class ToleranceHelperTests(TestCase):

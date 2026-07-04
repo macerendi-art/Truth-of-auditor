@@ -8,6 +8,7 @@ from decimal import Decimal
 
 import pdfplumber
 
+from .banks import extract_bca_name
 from .base import BaseParser, parse_decimal, parse_dt, row_hash
 
 DATE_RE = re.compile(r"^(\d{2}/\d{2}/\d{4})\s+(.*)$")
@@ -18,7 +19,6 @@ SKIP = (
     "Apabila nasabah", "dengan akhir", "tercantum pada", "SALDO AWAL",
     "SALDO AKHIR", "MUTASI CR", "MUTASI DB",
 )
-NOISE = ("ESPAY DEBIT INDONE", "TRSF E-BANKING", "BI-FAST", "TRFDN-", "TRFDN", "CR", "DB")
 
 
 def _is_skip(s):
@@ -26,19 +26,9 @@ def _is_skip(s):
 
 
 def _clean_name(middle, cont):
-    name = ""
-    m = re.search(r"\d+\.\d{2}\s*(.*)$", middle)
-    if m and m.group(1).strip() and not m.group(1).strip().isdigit():
-        name = m.group(1).strip()
-    if not name:
-        mm = re.search(r"TRFDN-(.+?)ESPAY", " ".join(cont))
-        if mm:
-            name = mm.group(1).strip()
-    if not name:
-        name = re.sub(r"^TRANSFER DR \d+\s*", "", middle).strip()
-    for n in NOISE:
-        name = name.replace(n, " ")
-    return re.sub(r"\s+", " ", name).strip()
+    """Isolasi nama: gabung baris utama + baris lanjutan, lalu ekstrak lewat
+    helper BCA bersama (buang teks struktural dulu, baru normalisasi di engine)."""
+    return extract_bca_name(" ".join([middle, *cont]))
 
 
 class BCAPDFParser(BaseParser):
