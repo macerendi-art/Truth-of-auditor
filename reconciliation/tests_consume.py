@@ -121,7 +121,8 @@ class IncludeToggleTests(_Base):
         self._tx(self.panel, "depo", "50000", "50000", "D1", "p1", username="budi")
         self._tx(self.panel, "depo", "60000", "60000", "D2", "p2", username="andi")
         self._tx(self.bank, "depo", "50000", "50000", "", "k1", username="budi")
-        self._tx(self.gateway, "depo", "60000", "60000", "", "g1", username="andi")
+        self._tx(self.gateway, "depo", "60000", "60000", "D2", "g1", username="andi",
+                 raw={"Payment Status": "PAID"})
         include = {"panel_dp": True, "panel_wd": True, "bracket": False,
                    "bank": False, "gateway": True}
         batch = run_batch(self.lbs, self.tol, include=include)

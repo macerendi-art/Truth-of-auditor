@@ -17,6 +17,24 @@ from .models import MatchResult, MatchRun, ReconBatch, ToleranceProfile
 
 MONEY_SOURCES = ["bank", "gateway"]
 
+# Status gateway yang dianggap UANG SUDAH MASUK. Selain ini (UNPAID/FAILED/EXPIRED/
+# PENDING) = QR belum settle → tak boleh jadi padanan uang & tak masuk gross.
+SETTLED_STATUS = {"PAID", "SUCCESS", "SETTLED", "SETTLE", "SUKSES", "COMPLETED"}
+
+
+def _norm_key(s):
+    return (s or "").strip().upper()
+
+
+def _gw_status(t):
+    raw = t.raw or {}
+    return _norm_key(raw.get("Payment Status") or raw.get("Status"))
+
+
+def _gw_settled(t):
+    """Baris gateway sudah settle (uang benar-benar masuk)? Baca status dari raw."""
+    return _gw_status(t) in SETTLED_STATUS
+
 
 def _included_money_sources(include):
     """Sumber uang yang ikut run. include=None → semua (bank+gateway, perilaku lama).
@@ -191,13 +209,68 @@ class _MoneyMatcher:
 
     def match(self, run, left, right):
         tol = run.tolerance
-        bidx = {}
+        # --- Pisahkan pool sisi UANG per sumber ---
+        # GATEWAY (QR) punya kunci eksak immutable (TXN ID = ticket_no, Client Reference
+        # = reference) yang sama dengan sisi kredit → cocokkan EKSAK, kebal T+1 & kebal
+        # deposit berulang. BANK tak punya kunci → tetap fuzzy (nominal+tanggal+nama).
+        gw_all_ticket = {}   # semua gateway (incl belum settle) — deteksi "ini txn QR"
+        gw_ticket = {}       # gateway SETTLED, index by ticket_no
+        gw_ref = {}          # gateway SETTLED, index by reference
+        gw_settled = []      # untuk emit orphan (uang QR masuk tanpa deposit Panel)
+        bank_by_amt = {}     # bank, blocking by nominal (fuzzy)
         for b in right:
-            bidx.setdefault(int(abs(b.money_delta)), []).append(b)
+            if b.source_type.key == "gateway":
+                k = _norm_key(b.ticket_no)
+                if k:
+                    gw_all_ticket.setdefault(k, []).append(b)
+                if _gw_settled(b):
+                    gw_settled.append(b)
+                    if k:
+                        gw_ticket.setdefault(k, []).append(b)
+                    r = _norm_key(b.reference)
+                    if r:
+                        gw_ref.setdefault(r, []).append(b)
+            else:
+                bank_by_amt.setdefault(int(abs(b.money_delta)), []).append(b)
+
         used, out = set(), []
         for p in left:
+            # ===== Pass 1: gateway kunci EKSAK (TXN ID → Client Reference) =====
+            tk, rf = _norm_key(p.ticket_no), _norm_key(p.reference)
+            keytype = "gateway_ticket"
+            cand = [b for b in gw_ticket.get(tk, []) if b.id not in used] if tk else []
+            if not cand and rf:
+                cand = [b for b in gw_ref.get(rf, []) if b.id not in used]
+                keytype = "gateway_reference"
+            if cand:
+                if len(cand) >= 2:  # kunci tak unik → jangan tebak, auditor pilih
+                    ids = ", ".join(f"#{b.id}" for b in cand)
+                    out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=None,
+                                           score=0, reason_code="gateway_key_ambiguous",
+                                           reason_detail=f"{len(cand)} baris gateway kunci sama: {ids}"))
+                    continue
+                b = cand[0]
+                used.add(b.id)
+                ok, diff = amount_ok(p.amount, b.amount, tol)
+                if ok:
+                    out.append(MatchResult(run=run, bucket=MatchResult.Bucket.COCOK, left=p, right=b,
+                                           score=100, reason_code=keytype))
+                else:  # kunci cocok tapi nominal beda → TERMINAL (jangan jatuh ke bank)
+                    out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=b,
+                                           score=60, reason_code="gateway_amount_mismatch",
+                                           reason_detail=f"selisih {diff}: Panel {p.amount} vs Gateway {b.amount}"))
+                continue
+            if tk and tk in gw_all_ticket:
+                # Ticket QR ADA tapi tak ada yang settle (UNPAID/FAILED) → uang tak masuk.
+                # TERMINAL: jangan jatuh ke bank fuzzy (nanti nyasar ke uang orang lain).
+                out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=p, right=None,
+                                       score=0, reason_code="gateway_unpaid",
+                                       reason_detail=f"QR {p.ticket_no} belum settle (uang belum masuk)"))
+                continue
+
+            # ===== Pass 2: bank FUZZY (hanya panel yang belum kena gateway) =====
             scored = []
-            for b in bidx.get(int(abs(p.money_delta)), []):
+            for b in bank_by_amt.get(int(abs(p.money_delta)), []):
                 if b.id in used:
                     continue
                 if (p.money_delta > 0) != (b.money_delta > 0):
@@ -218,9 +291,7 @@ class _MoneyMatcher:
                 best, best_s = None, -1
             # Ambigu SEJATI: >=2 kandidat SERI di skor tertinggi DAN lolos ambang DAN
             # ber-IDENTITAS BERBEDA → tinjau, JANGAN konsumsi (auditor pilih). Deposit
-            # berulang oleh user SAMA (mis. QRIS nominal bulat: 1 player, N deposit
-            # nominal sama dalam window) BUKAN ambigu — identitas pasti & uang identik,
-            # jadi pasangkan greedy 1-1. Identitas = username, fallback ke nama.
+            # berulang oleh user SAMA BUKAN ambigu → pasangkan greedy 1-1.
             tied = [b for s, b in scored if s == best_s]
             tied_idents = {
                 (b.username or "").strip().lower() or (b.counterparty or "").strip().lower()
@@ -232,8 +303,7 @@ class _MoneyMatcher:
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=None,
                                        score=best_s, reason_code="ambiguous_multi",
                                        reason_detail=f"{len(tied)} kandidat seri (skor {best_s:.0f}): {names}"))
-                continue
-            if best is not None and best_s >= tol.fuzzy_threshold:
+            elif best is not None and best_s >= tol.fuzzy_threshold:
                 used.add(best.id)
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.COCOK, left=p, right=best,
                                        score=best_s, reason_code="amount+date+name"))
@@ -246,6 +316,14 @@ class _MoneyMatcher:
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=p, right=None,
                                        score=0, reason_code="no_money",
                                        reason_detail="Tak ada padanan nominal+tanggal di Bank/Gateway"))
+
+        # ===== Orphan: uang QR SETTLE tanpa deposit Panel (uang masuk, tak ada record) =====
+        # Sinyal audit paling penting. Hanya yang SETTLED — UNPAID tak dihitung uang.
+        for b in gw_settled:
+            if b.id not in used:
+                out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=None, right=b,
+                                       score=0, reason_code="gateway_no_panel",
+                                       reason_detail="Uang QR settle tanpa deposit Panel"))
         return out
 
 
@@ -346,6 +424,11 @@ def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None):
     # Baris fee BCA ('admin') dikecualikan dari uang WD (bukan WD nyata).
     # Hanya sumber uang yang dicentang ikut total gross.
     money = tx.filter(source_type__key__in=_included_money_sources(include)).exclude(jenis="admin")
+    # Gateway yang BELUM settle (UNPAID/FAILED) bukan uang masuk → keluarkan dari gross
+    # supaya tak menggelembungkan angka & selisih.
+    unsettled = [t.id for t in money.filter(source_type__key="gateway") if not _gw_settled(t)]
+    if unsettled:
+        money = money.exclude(id__in=unsettled)
     dp_panel = total(panel.filter(jenis="depo"), "amount")
     dp_gross = total(money.filter(money_delta__gt=0), "money_delta")
     wd_panel = total(panel.filter(jenis="wd"), "amount")

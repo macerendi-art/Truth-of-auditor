@@ -115,15 +115,17 @@ class PanelBankMatcherTests(TestCase):
         self.upg = Upload.objects.create(source_type=self.gw)
 
     def test_username_amount_date_match(self):
+        # Gateway (QR) dicocokkan via TXN ID (ticket_no) eksak + status settle, bukan fuzzy.
         Transaction.objects.create(
             upload=self.up, source_type=self.panel, row_hash="p1", jenis="depo",
-            amount=Decimal("57000"), money_delta=Decimal("57000"),
+            amount=Decimal("57000"), money_delta=Decimal("57000"), ticket_no="D57001",
             username="andysudrajat", occurred_at=datetime(2026, 6, 27, 0, 0),
         )
         Transaction.objects.create(
             upload=self.upg, source_type=self.gw, row_hash="g1", jenis="depo",
-            amount=Decimal("57000"), money_delta=Decimal("57000"),
+            amount=Decimal("57000"), money_delta=Decimal("57000"), ticket_no="D57001",
             username="andysudrajat", occurred_at=datetime(2026, 6, 27, 0, 2),
+            raw={"Payment Status": "PAID"},
         )
         run = run_match("panel_bank", self.tol)
         self.assertEqual(run.summary["cocok"], 1)
