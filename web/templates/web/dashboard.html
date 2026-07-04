@@ -53,7 +53,7 @@
     <a href="{% url 'run_detail' run.pk %}" style="display:block;padding:13px 0;border-bottom:1px solid var(--line)">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <b style="font-size:14px">{{ run.get_relation_display }}</b>
-        <span class="faint" style="font-size:12px">#{{ run.pk }}</span>
+        <span class="faint" style="font-size:12px">{{ run.created_at|date:"d/m H:i" }}</span>
       </div>
       {% if run.summary %}<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
         <span class="badge ok">{{ run.summary.cocok|intcomma }} cocok</span>

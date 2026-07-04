@@ -26,10 +26,10 @@ BUCKET_META = {
 }
 
 REL_LABELS = {
-    "panel_bracket": ("Panel", "Bracket"),
-    "panel_bank": ("Panel", "Bank/Gateway"),
-    "bracket_bank": ("Bracket", "Bank/Gateway"),
-    "saldo": ("Kiri", "Kanan"),
+    MatchRun.Relation.PANEL_BRACKET.value: ("Panel", "Bracket"),
+    MatchRun.Relation.PANEL_BANK.value: ("Panel", "Bank/Gateway"),
+    MatchRun.Relation.BRACKET_BANK.value: ("Bracket", "Bank/Gateway"),
+    MatchRun.Relation.SALDO.value: ("Kiri", "Kanan"),
 }
 
 

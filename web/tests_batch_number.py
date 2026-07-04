@@ -41,6 +41,15 @@ class BatchNumberTests(TestCase):
         r = self.client.get(reverse("batch_detail", args=[b1.pk]))
         self.assertContains(r, "Batch #1")
 
+    def test_lebih_dari_20_batch_nomor_slice_tetap_posisi_asli(self):
+        # Riwayat menampilkan 20 terbaru: #25..#6 (bukan restart #20..#1).
+        for _ in range(25):
+            ReconBatch.objects.create(toko=self.lbs, tolerance=self.tol)
+        r = self.client.get(reverse("reconcile"))
+        self.assertContains(r, ">#25</a>")
+        self.assertContains(r, ">#6</a>")
+        self.assertNotContains(r, ">#5</a>")  # di luar slice 20
+
     def test_scoping_per_toko_toko_lain_sudah_5_batch(self):
         lain = Toko.objects.exclude(key="lbs").first()
         for _ in range(5):
