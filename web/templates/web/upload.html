@@ -203,6 +203,14 @@
 </script>
 {% endif %}
 
+{% if saran %}
+<div class="card reveal" style="padding:14px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+  <span>Langkah berikutnya:</span>
+  <a class="btn sm primary" href="{% url 'reconcile' %}">Rekonsiliasi {{ saran_label }} →</a>
+  <span class="faint">tanggal terisi otomatis di halaman rekonsiliasi</span>
+</div>
+{% endif %}
+
 {% load humanize %}
 <div class="card reveal pad0">
   <div style="padding:18px 20px 6px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">

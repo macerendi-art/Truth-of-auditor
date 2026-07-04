@@ -1,5 +1,6 @@
 import os
 import zipfile
+from collections import Counter
 from datetime import date, timedelta
 
 from django.contrib import messages
@@ -384,6 +385,7 @@ def upload(request):
                 request,
                 f"{dilewati} file dilewati (tersembunyi / bukan xlsx·xls·csv·pdf).",
             )
+        saran = _saran_tanggal(active)
         return render(request, "web/upload.html", {
             "preview": preview, "parsers": sorted(PARSERS.keys()),
             "flows": ["", "dp", "wd"], "active_toko": active,
@@ -392,11 +394,16 @@ def upload(request):
             "n_pwd": sum(1 for p in preview if p["needs_password"]),
             "uploads": _uploads_for(active),
             "healing": request.session.pop("healing_report", None),
+            "saran": saran,
+            "saran_label": _window_label(saran, saran, with_year=True) if saran else "",
         })
+    saran = _saran_tanggal(active)
     return render(request, "web/upload.html", {
         "parsers": sorted(PARSERS.keys()), "active_toko": active,
         "uploads": _uploads_for(active),
         "healing": request.session.pop("healing_report", None),
+        "saran": saran,
+        "saran_label": _window_label(saran, saran, with_year=True) if saran else "",
     })
 
 
@@ -758,6 +765,31 @@ def run_detail(request, pk):
     return render(request, "web/run_detail.html", ctx)
 
 
+def _refresh_bucket_summaries(run):
+    """Sinkronkan hitungan bucket run.summary & batch.summary['buckets'] dari DB
+    setelah review manual — stat kartu tidak boleh menyimpang dari tabel."""
+    c = Counter(run.results.values_list("bucket", flat=True))
+    s = run.summary or {}
+    s["cocok"] = c.get("cocok", 0)
+    s["perlu_tinjau"] = c.get("perlu_tinjau", 0)
+    s["tidak_cocok"] = c.get("tidak_cocok", 0)
+    run.summary = s
+    run.save(update_fields=["summary"])
+    if run.batch_id:
+        batch = run.batch
+        cb = Counter(
+            MatchResult.objects.filter(run__batch=batch).values_list("bucket", flat=True)
+        )
+        bs = batch.summary or {}
+        buckets = bs.get("buckets", {})
+        buckets["cocok"] = cb.get("cocok", 0)
+        buckets["perlu_tinjau"] = cb.get("perlu_tinjau", 0)
+        buckets["tidak_cocok"] = cb.get("tidak_cocok", 0)
+        bs["buckets"] = buckets
+        batch.summary = bs
+        batch.save(update_fields=["summary"])
+
+
 @login_required
 @require_POST
 def review(request, pk):
@@ -775,6 +807,7 @@ def review(request, pk):
     r.reason_code = "manual_override"
     r.save(update_fields=["bucket", "reason_code"])
     ReviewAction.objects.create(result=r, action=action, reason=reason, reviewer=request.user)
+    _refresh_bucket_summaries(r.run)
     return render(request, "web/_result_row.html", {"r": r, "bucket_meta": BUCKET_META})
 
 
@@ -805,6 +838,9 @@ def review_bulk(request):
          for r in results],
         batch_size=500,
     )
+    runs_terdampak = {r.run_id: r.run for r in results}
+    for run in runs_terdampak.values():
+        _refresh_bucket_summaries(run)
     label = {"mark_matched": "cocok", "mark_review": "perlu ditinjau",
              "mark_unmatched": "tidak cocok"}[action]
     messages.success(request, f"{len(results)} baris ditandai {label}.")
