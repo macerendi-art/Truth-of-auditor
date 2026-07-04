@@ -37,10 +37,27 @@
 </div>
 {% endif %}
 
+{% comment %}
+Review massal: bar aksi muncul saat ada baris tercentang. Checkbox nempel di sel
+Aksi (bukan kolom baru). `action` dikirim lewat hidden input yang diisi saat klik
+tombol — modal konfirmasi memakai form.submit() yang MEMBUANG name/value tombol
+submit, jadi name di tombol tidak akan sampai ke server.
+{% endcomment %}
+<form id="bulkreview" method="post" action="{% url 'review_bulk' %}"
+      style="display:none;margin:0 0 12px;align-items:center;gap:10px"
+      data-confirm="Terapkan aksi ke {n} baris terpilih? Perubahan tercatat sebagai review manual." data-confirm-count=".rsel:checked">
+  {% csrf_token %}
+  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+  <input type="hidden" name="action" value="" id="rbact">
+  <span class="faint" style="font-size:13px" id="rselcount">0 terpilih</span>
+  <button class="btn sm" type="submit" data-act="mark_matched">✓ Tandai cocok</button>
+  <button class="btn sm ghost" type="submit" data-act="mark_unmatched">Tandai tidak cocok</button>
+</form>
+
 <div class="card pad0 reveal">
   <div class="table-wrap" style="border:none">
   <table>
-    <thead><tr><th>Status</th><th>{{ left_label }}</th><th class="num">Nominal</th><th>{{ right_label }}</th><th>Alasan</th><th style="text-align:center">Aksi</th></tr></thead>
+    <thead><tr><th>Status</th><th>{{ left_label }}</th><th class="num">Nominal</th><th>{{ right_label }}</th><th>Alasan</th><th style="text-align:center"><input type="checkbox" id="rall" aria-label="Pilih semua baris" style="width:auto;vertical-align:middle;margin-right:6px">Aksi</th></tr></thead>
     <tbody>
     {% for r in page %}{% include "web/_result_row.html" %}{% empty %}
       <tr><td colspan="6" class="muted" style="padding:28px;text-align:center">Tidak ada hasil pada bucket ini.</td></tr>{% endfor %}
@@ -48,6 +65,32 @@
   </table>
   </div>
 </div>
+
+<script>
+(function(){
+  var form=document.getElementById('bulkreview'), act=document.getElementById('rbact');
+  if(!form) return;
+  function sel(){ return [].slice.call(document.querySelectorAll('.rsel')); }
+  function update(){
+    var n=document.querySelectorAll('.rsel:checked').length;
+    form.style.display = n ? 'flex' : 'none';
+    var c=document.getElementById('rselcount'); if(c) c.textContent = n+' terpilih';
+    var all=document.getElementById('rall'), t=sel().length;
+    if(all) all.checked = t>0 && n===t;
+  }
+  // Delegasi di document: kebal baris yang di-swap htmx setelah review per-baris.
+  document.addEventListener('change', function(e){
+    var t=e.target; if(!t) return;
+    if(t.id==='rall'){ sel().forEach(function(c){ c.checked=t.checked; }); update(); }
+    else if(t.classList && t.classList.contains('rsel')){ update(); }
+  });
+  document.addEventListener('click', function(e){
+    var b=e.target && e.target.closest && e.target.closest('#bulkreview button[data-act]');
+    if(b) act.value=b.getAttribute('data-act');
+  });
+  update();
+})();
+</script>
 
 {% if page.has_other_pages %}
 <div class="pager">

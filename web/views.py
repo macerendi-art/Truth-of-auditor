@@ -461,12 +461,38 @@ def reconcile(request):
     return render(request, "web/reconcile.html", ctx)
 
 
+# Jam mulai "malam" untuk heuristik ekor T+1: transaksi >= jam ini di hari
+# terakhir window kemungkinan settle besok (file mutasinya belum terupload).
+_JAM_EKOR = 17
+
+
+def _pending_t1(result, date_to):
+    """True bila baris tidak_cocok ini kemungkinan EKOR T+1 (bukan selisih nyata):
+    no_money + transaksi malam di hari terakhir window → uangnya baru datang di
+    file besok, tertutup auto re-match."""
+    return bool(
+        date_to
+        and result.bucket == MatchResult.Bucket.TIDAK
+        and result.reason_code == "no_money"
+        and result.left_id
+        and result.left.occurred_at.date() == date_to
+        and result.left.occurred_at.hour >= _JAM_EKOR
+    )
+
+
 @login_required
 def batch_detail(request, pk):
     batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
     batch_no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
+    pending_t1 = 0
+    if batch.date_to:
+        pending_t1 = MatchResult.objects.filter(
+            run__batch=batch, bucket=MatchResult.Bucket.TIDAK, reason_code="no_money",
+            left__occurred_at__date=batch.date_to, left__occurred_at__hour__gte=_JAM_EKOR,
+        ).count()
     return render(request, "web/batch_detail.html", {
         "batch": batch, "batch_no": batch_no, "s": batch.summary or {}, "runs": batch.runs.all(),
+        "pending_t1": pending_t1,
     })
 
 
@@ -525,6 +551,11 @@ def run_detail(request, pk):
         qs = qs.filter(**{"left__raw__Player Bank__istartswith": channel + "|"})
 
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
+    # Tandai kemungkinan ekor T+1 (transaksi malam hari terakhir window) supaya
+    # auditor bisa membedakan "menunggu mutasi besok" dari selisih nyata.
+    dto = run.date_to or (run.batch.date_to if run.batch else None)
+    for r in page:
+        r.pending_t1 = _pending_t1(r, dto)
     left_label, right_label = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
     # Nomor batch per-toko (posisi urut, bukan pk global) — konsisten dgn batch_detail.
     batch = run.batch
@@ -558,6 +589,44 @@ def review(request, pk):
     r.save(update_fields=["bucket", "reason_code"])
     ReviewAction.objects.create(result=r, action=action, reason=reason, reviewer=request.user)
     return render(request, "web/_result_row.html", {"r": r, "bucket_meta": BUCKET_META})
+
+
+@login_required
+@require_POST
+def review_bulk(request):
+    """Review MASSAL — semantik sama persis dengan review per-baris (bucket +
+    reason_code=manual_override + jejak ReviewAction per baris), untuk banyak
+    hasil sekaligus: ratusan weak_name/hari tak mungkin diklik satu-satu."""
+    action = request.POST.get("action", "")
+    buckets = {
+        "mark_matched": MatchResult.Bucket.COCOK,
+        "mark_review": MatchResult.Bucket.TINJAU,
+        "mark_unmatched": MatchResult.Bucket.TIDAK,
+    }
+    if action not in buckets:
+        return HttpResponseBadRequest("Aksi tidak dikenal.")
+    ids = request.POST.getlist("result_ids")
+    results = list(
+        MatchResult.objects.filter(pk__in=ids, run__batch__toko__in=tokos_for(request.user))
+    )
+    for r in results:
+        r.bucket = buckets[action]
+        r.reason_code = "manual_override"
+    MatchResult.objects.bulk_update(results, ["bucket", "reason_code"], batch_size=500)
+    ReviewAction.objects.bulk_create(
+        [ReviewAction(result=r, action=action, reason="review massal", reviewer=request.user)
+         for r in results],
+        batch_size=500,
+    )
+    label = {"mark_matched": "cocok", "mark_review": "perlu ditinjau",
+             "mark_unmatched": "tidak cocok"}[action]
+    messages.success(request, f"{len(results)} baris ditandai {label}.")
+    next_url = request.POST.get("next", "")
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        return redirect(next_url)
+    if results:
+        return redirect("run_detail", pk=results[0].run_id)
+    return redirect("reconcile")
 
 
 @login_required

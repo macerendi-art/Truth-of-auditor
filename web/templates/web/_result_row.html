@@ -27,11 +27,14 @@
   {# ── Alasan: label ramah + skor + detail ── #}
   <td style="min-width:150px">
     <div style="font-size:12.5px">{{ r.reason_code|reason_label }}{% if r.score %} <span class="faint">· {{ r.score|floatformat:0 }}</span>{% endif %}</div>
+    {% if r.pending_t1 %}<div style="font-size:11px;color:var(--warn);font-weight:600">⏳ menunggu mutasi H+1 — kemungkinan pending settle, bukan selisih</div>{% endif %}
     {% if r.reason_detail %}<div class="faint" style="font-size:11.5px" title="{{ r.reason_detail }}">{{ r.reason_detail|truncatechars:64 }}</div>{% endif %}
   </td>
 
   <td>
-    <div style="display:flex;gap:6px;justify-content:center">
+    <div style="display:flex;gap:6px;justify-content:center;align-items:center">
+      <input type="checkbox" class="rsel" form="bulkreview" name="result_ids" value="{{ r.pk }}"
+             aria-label="Pilih baris {{ r.pk }}" style="width:auto;margin:0 2px 0 0">
       <button class="btn sm" title="Tandai Cocok" hx-post="{% url 'review' r.pk %}" hx-vals='{"action":"mark_matched"}' hx-target="#res-{{ r.pk }}" hx-swap="outerHTML" hx-headers='{"X-CSRFToken":"{{ csrf_token }}"}'>✓</button>
       <button class="btn sm ghost" title="Perlu Ditinjau" hx-post="{% url 'review' r.pk %}" hx-vals='{"action":"mark_review"}' hx-target="#res-{{ r.pk }}" hx-swap="outerHTML" hx-headers='{"X-CSRFToken":"{{ csrf_token }}"}'>⚑</button>
     </div>
