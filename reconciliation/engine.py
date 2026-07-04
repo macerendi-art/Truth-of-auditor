@@ -3,7 +3,8 @@
 Tiap relasi punya Matcher sendiri (pluggable lewat MATCHERS). Hasil = MatchResult
 dengan bucket cocok / tidak_cocok / perlu_tinjau + reason. Toleransi dari ToleranceProfile.
 """
-from collections import Counter
+import re
+from collections import Counter, defaultdict
 from datetime import timedelta
 
 from django.db import transaction as db_tx
@@ -16,6 +17,50 @@ from transactions.models import Transaction
 from .models import MatchResult, MatchRun, ReconBatch, ToleranceProfile
 
 MONEY_SOURCES = ["bank", "gateway"]
+
+# Nama korporat agregator e-wallet yang muncul di mutasi bank (riset 2026-07-05):
+# transfer dari/ke e-wallet tampil atas nama PT pengelolanya, bukan nama pemain.
+_AGGREGATORS = [
+    ("ESPAY", "DANA"), ("ANAK BANGSA", "GoPay"), ("DOMPET ANAK", "GoPay"),
+    ("AIRPAY", "ShopeePay"), ("VISIONET", "OVO"), ("FINARYA", "LinkAja"),
+    ("BIFAST", "BI-FAST"),
+]
+
+
+def _wallet_label(name):
+    """Label kanal e-wallet bila `name` adalah nama korporat agregator."""
+    up = (name or "").upper()
+    for token, label in _AGGREGATORS:
+        if token in up:
+            return label
+    return None
+
+
+_NORM_RE = re.compile(r"[^A-Z]")
+
+
+def _norm_owner(s):
+    return _NORM_RE.sub("", (s or "").upper())
+
+
+def _expected_owner(t):
+    """Pemilik rekening TUJUAN menurut panel: segmen tengah raw['Bank Title']
+    (mis. 'BCA|HENDI|712...' → 'HENDI'). Kosong bila tidak ada."""
+    bt = (t.raw or {}).get("Bank Title") or ""
+    parts = bt.split("|")
+    return _norm_owner(parts[1] if len(parts) > 1 else bt)
+
+
+def _route_ok(expected, owner, source_key):
+    """Apakah baris uang berada di rekening yang ditunjuk panel?
+    None = tak bisa dinilai (tanpa Bank Title / tanpa nama file)."""
+    if not expected or not owner:
+        return None
+    if source_key == "gateway":
+        for tok in ("FLYER", "NXPAY"):
+            if tok in expected and tok in owner:
+                return True
+    return fuzz.partial_ratio(expected, owner) >= 85
 
 # Detail baku hasil no_money — juga dipakai untuk MENGEMBALIKAN hasil yang
 # di-flip late settlement, jadi string ini harus tetap satu sumber kebenaran.
@@ -157,8 +202,16 @@ class PanelBracketMatcher:
 
 
 class _MoneyMatcher:
-    """Cocokkan sisi kredit (Panel/Bracket) ke sisi UANG (Bank/Gateway):
-    blocking by nominal, lalu tanggal-terarah + username/fuzzy nama."""
+    """Cocokkan sisi kredit (Panel/Bracket) ke sisi UANG (Bank/Gateway) — multi-pass:
+
+    pass 0  ticket-join gateway (kunci pasti; gateway ber-ticket asing TIDAK
+            pernah dipasangkan fuzzy — biar tampil sebagai uang tanpa pasangan),
+    pass 1  identitas kuat (skor >= threshold) di-assign GLOBAL urut skor —
+            baris lemah tidak bisa mencuri kandidat milik baris kuat,
+    pass 2  near-miss identitas kuat: nominal beda kecil (fee) / uang H-1,
+    pass 3  sisa berbasis nominal+tanggal → perlu_tinjau, prioritas rekening
+            yang ditunjuk panel (raw['Bank Title']) supaya tidak salah sanding.
+    """
 
     left_key = "panel"
 
@@ -182,45 +235,141 @@ class _MoneyMatcher:
                 toko,
             )),
             dfrom, dto,
-        )
+        ).select_related("source_type", "upload")
         return list(left), list(right)
+
+    @staticmethod
+    def _identity(p, b):
+        """Skor identitas: username persis menang; selain itu fuzzy nama."""
+        if p.username and b.username:
+            s = 100.0 if p.username.lower() == b.username.lower() else 40.0
+            if p.counterparty and b.counterparty:
+                s = max(s, _name_score(p.counterparty, b.counterparty))
+            return s
+        return _name_score(p.counterparty, b.counterparty)
 
     def match(self, run, left, right):
         tol = run.tolerance
-        bidx = {}
+        out, used, matched = [], set(), set()
+
+        bidx = defaultdict(list)
+        gw_ticket = defaultdict(list)
+        owners = {}
         for b in right:
-            bidx.setdefault(int(abs(b.money_delta)), []).append(b)
-        used, out = set(), []
+            bidx[(int(abs(b.money_delta)), b.money_delta > 0)].append(b)
+            if b.source_type.key == "gateway" and b.ticket_no:
+                gw_ticket[b.ticket_no].append(b)
+            if b.upload_id not in owners:
+                owners[b.upload_id] = _norm_owner(
+                    b.upload.original_name if b.upload else ""
+                )
+        panel_tickets = {p.ticket_no for p in left if p.ticket_no}
+
+        def emit(p, b, bucket, score, reason, detail=""):
+            matched.add(p.id)
+            if b is not None:
+                used.add(b.id)
+            out.append(MatchResult(run=run, bucket=bucket, left=p, right=b,
+                                   score=score, reason_code=reason, reason_detail=detail))
+
+        # --- pass 0: ticket-join gateway (seperti Panel↔Bracket) ---
         for p in left:
-            best, best_s = None, -1
-            for b in bidx.get(int(abs(p.money_delta)), []):
-                if b.id in used:
+            if not p.ticket_no:
+                continue
+            for b in gw_ticket.get(p.ticket_no, []):
+                if b.id in used or (p.money_delta > 0) != (b.money_delta > 0):
                     continue
-                if (p.money_delta > 0) != (b.money_delta > 0):
-                    continue  # arah uang harus sama
-                if not date_ok(p.occurred_at, b.occurred_at, tol):
-                    continue
-                if p.username and b.username:
-                    s = 100.0 if p.username.lower() == b.username.lower() else 40.0
-                    if p.counterparty and b.counterparty:
-                        s = max(s, _name_score(p.counterparty, b.counterparty))
+                diff = abs(int(abs(p.money_delta)) - int(abs(b.money_delta)))
+                if diff == 0:
+                    emit(p, b, MatchResult.Bucket.COCOK, 100, "ticket")
                 else:
-                    s = _name_score(p.counterparty, b.counterparty)
-                if s > best_s:
-                    best, best_s = b, s
-            if best is not None and best_s >= tol.fuzzy_threshold:
-                used.add(best.id)
-                out.append(MatchResult(run=run, bucket=MatchResult.Bucket.COCOK, left=p, right=best,
-                                       score=best_s, reason_code="amount+date+name"))
-            elif best is not None:
-                used.add(best.id)
-                out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=best,
-                                       score=best_s, reason_code="weak_name",
-                                       reason_detail=f"nominal+tanggal cocok, nama lemah (score {best_s:.0f})"))
+                    emit(p, b, MatchResult.Bucket.TINJAU, 90, "ticket_amount",
+                         f"ticket sama, selisih nominal {diff:,}")
+                break
+        # Gateway ber-ticket yang TAK dikenal panel bukan kandidat fuzzy siapa pun.
+        blocked = {
+            b.id for t, lst in gw_ticket.items() if t not in panel_tickets for b in lst
+        }
+
+        def kandidat(p, *, lo=0, hi=None, tol_amt=0):
+            hi = tol.date_window_days if hi is None else hi
+            d = p.occurred_at.date() if p.occurred_at else None
+            if d is None:
+                return
+            amt, pos = int(abs(p.money_delta)), p.money_delta > 0
+            if tol_amt:
+                keys = [(a, s) for (a, s) in bidx
+                        if s == pos and 0 < abs(a - amt) <= tol_amt]
             else:
-                out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=p, right=None,
-                                       score=0, reason_code="no_money",
-                                       reason_detail=NO_MONEY_DETAIL))
+                keys = [(amt, pos)]
+            for key in keys:
+                for b in bidx.get(key, []):
+                    if b.id in used or b.id in blocked or b.occurred_at is None:
+                        continue
+                    delta = (b.occurred_at.date() - d).days
+                    if lo <= delta <= hi:
+                        yield b, delta
+
+        # --- pass 1: identitas kuat, assignment global urut skor ---
+        pairs = []
+        for p in left:
+            if p.id in matched:
+                continue
+            expected = _expected_owner(p)
+            for b, delta in kandidat(p):
+                s = self._identity(p, b)
+                if s >= tol.fuzzy_threshold:
+                    route = _route_ok(expected, owners.get(b.upload_id), b.source_type.key)
+                    pairs.append((s, route is True, -delta, p, b))
+        pairs.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+        for s, _, _, p, b in pairs:
+            if p.id in matched or b.id in used:
+                continue
+            emit(p, b, MatchResult.Bucket.COCOK, s, "amount+date+name")
+
+        # --- pass 2: near-miss identitas kuat (fee kecil & uang H-1) ---
+        for p in left:
+            if p.id in matched:
+                continue
+            amt = int(abs(p.money_delta))
+            best = None
+            for b, delta in kandidat(p, tol_amt=max(2500, amt // 100)):
+                s = self._identity(p, b)
+                if s >= tol.fuzzy_threshold and (best is None or s > best[0]):
+                    best = (s, b)
+            if best:
+                s, b = best
+                diff = abs(int(abs(b.money_delta)) - amt)
+                emit(p, b, MatchResult.Bucket.TINJAU, s, "amount_fee",
+                     f"identitas cocok, selisih nominal {diff:,} (indikasi fee)")
+                continue
+            for b, delta in kandidat(p, lo=-1, hi=-1):
+                s = self._identity(p, b)
+                if s >= tol.fuzzy_threshold:
+                    emit(p, b, MatchResult.Bucket.TINJAU, s, "date_before",
+                         "uang tiba sehari SEBELUM tanggal panel")
+                    break
+
+        # --- pass 3: sisa berbasis nominal — prioritas rekening yang benar ---
+        for p in left:
+            if p.id in matched:
+                continue
+            expected = _expected_owner(p)
+            best = None
+            for b, delta in kandidat(p):
+                s = self._identity(p, b)
+                route = _route_ok(expected, owners.get(b.upload_id), b.source_type.key)
+                rank = (route is True, s, -delta)
+                if best is None or rank > best[0]:
+                    best = (rank, s, b)
+            if best is not None:
+                _, s, b = best
+                wallet = _wallet_label(b.counterparty)
+                extra = f" — kanal {wallet}" if wallet else ""
+                emit(p, b, MatchResult.Bucket.TINJAU, s, "weak_name",
+                     f"nominal+tanggal cocok, nama lemah (score {s:.0f}){extra}")
+            else:
+                emit(p, None, MatchResult.Bucket.TIDAK, 0, "no_money", NO_MONEY_DETAIL)
         return out
 
 
@@ -301,6 +450,9 @@ def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None,
     run.save(update_fields=["summary"])
     run.late_pairs = late_pairs
     run.retro_results = retro_results
+    # SEMUA uang yang terpakai pasangan hari ini (termasuk yang hasilnya milik
+    # batch lain via flip/susulan) — dipakai run_batch utk B1/B2.
+    run.used_right_ids = {r.right_id for r in results if r.right_id}
     return run
 
 
@@ -526,6 +678,35 @@ def revert_late_settlements(batch):
     return len(results)
 
 
+def classify_unmatched_money(t, recon_date, window, panel_tickets, operator_names):
+    """Kategori uang tanpa pasangan (satu sumber kebenaran — dipakai engine & web):
+    a = histori (di luar jangkauan window pasangan), b = gateway ber-ticket yang
+    tak dikenal panel, c = pindah dana internal (lawan = rekening operator),
+    d = dalam periode tanpa penjelasan → layak diperiksa manusia."""
+    d = t.occurred_at.date() if t.occurred_at else None
+    if d is None or d < recon_date - timedelta(days=window):
+        return "a"
+    if t.source_type.key == "gateway" and t.ticket_no and t.ticket_no not in panel_tickets:
+        return "b"
+    cp = _norm_owner(t.counterparty)
+    if len(cp) >= 5:  # nama terlalu pendek rawan nyangkut di nama file
+        for name in operator_names:
+            if name and fuzz.partial_ratio(cp, name) >= 85:
+                return "c"
+    return "d"
+
+
+def _operator_names(toko):
+    """Nama pemilik rekening operator — diambil dari nama file upload bank toko."""
+    from sources.models import Upload  # impor lokal: hindari siklus
+
+    return [
+        _norm_owner(n)
+        for n in Upload.objects.filter(toko=toko, source_type__key="bank")
+        .values_list("original_name", flat=True)
+    ]
+
+
 def _bracket_overlap_warning(runs):
     """Peringatan bila cocok Panel↔Bracket sangat rendah PADAHAL kedua sisi ada data —
     indikasi file Panel & Bracket beda periode / tidak sepasang (bukan mengubah join)."""
@@ -734,8 +915,68 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
         still_waiting = (
             (set(carried) - resolved_ids - expired_ids) | set(new_carry) | retro_waiting
         )
+        # B1 — carry-over sisi UANG: baris uang bertanggal > recon_date yang tidak
+        # menjadi pasangan hasil mana pun hari ini tetap AKTIF (milik run tanggalnya
+        # sendiri besok). Uang lintas-hari yang BERPASANGAN tetap dikonsumsi.
+        used_rights = set()
+        for r_ in runs:
+            used_rights |= getattr(r_, "used_right_ids", set())
+        money_keys = _included_money_sources(include)
+        cross_money = set(
+            _consume_scope(toko, date_from, date_to, include)
+            .filter(source_type__key__in=money_keys, occurred_at__date__gt=recon_date)
+            .exclude(id__in=used_rights)
+            .values_list("id", flat=True)
+        )
         _consume_scope(toko, date_from, date_to, include)\
-            .exclude(id__in=still_waiting).update(consumed_by_batch=batch)
+            .exclude(id__in=still_waiting | cross_money).update(consumed_by_batch=batch)
+
+        # B2 — uang tanpa pasangan: klasifikasi a/b/c/d; b & d dicatat sebagai
+        # hasil no_panel (bisa ditinjau/di-flag), a & c cukup dihitung.
+        pb_run = next(
+            (r_ for r_ in runs if r_.relation == MatchRun.Relation.PANEL_BANK), None
+        )
+        if pb_run is not None:
+            panel_ticket_set = set(
+                Transaction.objects.filter(toko=toko, source_type__key="panel")
+                .exclude(ticket_no="").values_list("ticket_no", flat=True)
+            )
+            ops = _operator_names(toko)
+            stats = {k: {"n": 0, "dp": 0.0, "wd": 0.0} for k in "abcd"}
+            new_results = []
+            um_qs = (
+                Transaction.objects.filter(
+                    consumed_by_batch=batch, source_type__key__in=money_keys
+                )
+                .exclude(jenis="admin").exclude(id__in=used_rights)
+                .select_related("source_type")
+            )
+            for t in um_qs:
+                k = classify_unmatched_money(t, recon_date, window, panel_ticket_set, ops)
+                st = stats[k]
+                st["n"] += 1
+                md = float(t.money_delta)
+                if md > 0:
+                    st["dp"] += md
+                else:
+                    st["wd"] += -md
+                if k in ("b", "d"):
+                    new_results.append(MatchResult(
+                        run=pb_run, bucket=MatchResult.Bucket.TIDAK, left=None, right=t,
+                        score=0, reason_code="no_panel",
+                        reason_detail=(
+                            "Ticket gateway tak dikenal panel" if k == "b"
+                            else "Uang dalam periode tanpa catatan panel"
+                        ),
+                    ))
+            if new_results:
+                MatchResult.objects.bulk_create(new_results, batch_size=2000)
+                s_ = dict(pb_run.summary or {})
+                s_["tidak_cocok"] = s_.get("tidak_cocok", 0) + len(new_results)
+                pb_run.summary = s_
+                pb_run.save(update_fields=["summary"])
+                summary["buckets"]["tidak_cocok"] += len(new_results)
+            summary["unmatched_money"] = stats
     else:
         _consume_scope(toko, date_from, date_to, include).update(consumed_by_batch=batch)
     batch.summary = summary

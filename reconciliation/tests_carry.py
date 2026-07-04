@@ -117,7 +117,14 @@ class LateSettlementTests(_Base):
         self.assertEqual(b27.summary["dp"]["money_matched"], 50000.0)
         self.assertEqual(b27.summary["dp"]["selisih"], 0.0)
         self.assertEqual(b27.summary["buckets"]["cocok"], 1)
-        self.assertEqual(b27.summary["buckets"]["tidak_cocok"], 0)
+        # B2: bank 70k tanpa panel kini tercatat sebagai no_panel (uang tanpa
+        # pasangan kategori d) — dulu tak terlihat sama sekali.
+        self.assertEqual(b27.summary["buckets"]["tidak_cocok"], 1)
+        self.assertTrue(
+            MatchResult.objects.filter(
+                run__batch=b27, reason_code="no_panel", left__isnull=True
+            ).exists()
+        )
 
     def test_batch_baru_tanpa_dobel_hitung(self):
         p, b27 = self._carry_day27()
