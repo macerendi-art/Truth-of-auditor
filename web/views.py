@@ -1,10 +1,12 @@
 from django.contrib import messages
+from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
@@ -29,6 +31,18 @@ REL_LABELS = {
     "bracket_bank": ("Bracket", "Bank/Gateway"),
     "saldo": ("Kiri", "Kanan"),
 }
+
+
+def csrf_failure(request, reason=""):
+    """Token CSRF basi (tab lama / setelah redeploy) — jangan 403 mentah.
+
+    Logout: risiko CSRF-nya sepele (paling banter dipaksa keluar), jadi
+    selesaikan saja logout-nya. Selain itu: halaman ramah + link masuk.
+    """
+    if request.path == reverse("logout"):
+        auth_logout(request)
+        return redirect("login")
+    return render(request, "web/csrf_failure.html", status=403)
 
 
 def _active_toko(request):

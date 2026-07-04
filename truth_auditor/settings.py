@@ -159,6 +159,9 @@ LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = 'login'
 
+# Token CSRF basi (tab lama/redeploy): logout diselesaikan, lainnya halaman ramah.
+CSRF_FAILURE_VIEW = 'web.views.csrf_failure'
+
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
