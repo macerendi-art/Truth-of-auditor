@@ -54,20 +54,14 @@ Baris panel in-window yang datang belakangan jadi semi-orphan (menggeser gross r
 - [ ] Implement di `rematch_batch` (fase adopsi sebelum matching); laporkan di stats (`diadopsi`).
 - [ ] Guard: hanya sumber yang di-include; jangan adopsi baris milik batch lain.
 
-### Task B3: Workflow review massal untuk perlu_tinjau
+### Task B3: Workflow review massal untuk perlu_tinjau — SELESAI sebagian
 
-Mayoritas hasil re-match = `weak_name` (mutasi bank nama-doang); 400–800 baris/hari tak mungkin diklik satu-satu.
-
-**Steps:**
-- [ ] Test + UI: checkbox multi-baris di run_detail (bucket tinjau) + aksi "Tandai cocok terpilih"/"Tandai tidak cocok terpilih" (POST bulk, RBAC, log `ReviewAction` per baris).
+- [x] Checkbox per baris (nempel sel Aksi, bukan kolom baru — index kolom test aman) + master "pilih semua" + bar aksi massal `review_bulk` (POST, RBAC `tokos_for`, `manual_override`, `ReviewAction` per baris, modal konfirmasi {n}). GOTCHA: modal pakai `form.submit()` yang membuang name/value tombol → `action` via hidden input diisi saat klik.
 - [ ] Saran heuristik: kelompokkan tinjau by (identitas, pola nominal) — "setujui semua pasangan nama X (n baris)".
 
-### Task B4: Label ekor vs selisih beneran
+### Task B4: Label ekor vs selisih beneran — SELESAI sebagian
 
-`tidak_cocok` campur dua makna: menunggu settlement besok vs discrepancy nyata.
-
-**Steps:**
-- [ ] Derivasi status di run_detail/batch_detail: `no_money` dengan `occurred_at` malam di tepi window → badge "menunggu mutasi H+1" (informasional); sisanya "selisih".
+- [x] Derivasi `_pending_t1` (no_money + occurred_at == date_to window + jam ≥ 17): badge "⏳ menunggu mutasi H+1" per baris di run_detail + banner hitungan di batch_detail. UI-derived, TANPA perubahan skema summary.
 - [ ] Dashboard: pisahkan "money at risk" dari "menunggu settlement".
 
 ### Task B5: Background job untuk run besar

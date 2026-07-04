@@ -39,6 +39,14 @@
 </div>
 {% endif %}
 
+{% if pending_t1 %}
+{# Ekor T+1: bedakan "nunggu file besok" dari selisih nyata — anti panik pagi. #}
+<div class="msg warning reveal" style="margin-bottom:16px">
+  ⏳ {{ pending_t1 }} baris tidak cocok adalah transaksi malam di hari terakhir window —
+  kemungkinan <b>menunggu mutasi H+1</b>, bukan selisih. Upload file besoknya, auto re-match akan menutupnya.
+</div>
+{% endif %}
+
 <div class="grid cols-2">
   {% with dp=s.dp %}
   <div class="card reveal">
