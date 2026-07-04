@@ -67,11 +67,10 @@ class PanelFieldsRunDetailTests(TestCase):
         )
         resp = self.client.get(reverse("run_detail", args=[self.run.pk]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "<th>Player Bank</th>")
+        # Tabel layar ringkas (tanpa scroll horizontal): Player Bank / Bank Title /
+        # Handler ditumpuk di sel Panel (satu baris meta), nilainya tetap tampil.
         self.assertContains(resp, "DANA|fajar Pratama |083822153879")
-        self.assertContains(resp, "<th>Bank Title</th>")
         self.assertContains(resp, "BCA|HENDI|7126201591")
-        self.assertContains(resp, "<th>Handler</th>")
         self.assertContains(resp, "Mozart K25")
 
     def test_no_panel_fields_values_when_raw_empty(self):

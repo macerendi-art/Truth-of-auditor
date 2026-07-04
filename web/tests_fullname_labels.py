@@ -29,7 +29,9 @@ class MoneyMatcherFullNameBoostTests(TestCase):
         self.batch = ReconBatch.objects.create(toko=self.lbs, tolerance=self.tol)
 
     def test_username_beda_tapi_counterparty_identik_tetap_cocok(self):
-        """RED di kode lama: username beda -> skor 40 -> perlu_tinjau, walau Full Name identik."""
+        """Boost Full Name di jalur BANK fuzzy: username beda -> skor 40 -> tapi Full Name
+        identik naikkan skor -> cocok. (Gateway kini via TXN ID eksak, jadi boost fuzzy
+        ini berlaku untuk BANK yang tak punya kunci.)"""
         Transaction.objects.create(
             upload=self.up, source_type=self.panel, toko=self.lbs, jenis="depo",
             amount=Decimal("50000"), money_delta=Decimal("50000"),
@@ -38,7 +40,7 @@ class MoneyMatcherFullNameBoostTests(TestCase):
             row_hash="fn1",
         )
         Transaction.objects.create(
-            upload=self.up, source_type=self.gateway, toko=self.lbs, jenis="lainnya",
+            upload=self.up, source_type=self.bank, toko=self.lbs, jenis="lainnya",
             amount=Decimal("50000"), money_delta=Decimal("50000"),
             occurred_at=datetime(2026, 6, 27, 10, 30),
             username="nx_9981", counterparty="BUDI SANTOSO",

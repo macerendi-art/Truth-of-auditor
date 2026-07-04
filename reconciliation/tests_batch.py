@@ -258,3 +258,141 @@ class T1SettlementTests(TestCase):
         res = pb.results.get()
         self.assertEqual(res.reason_code, "weak_name")
         self.assertEqual(pb.summary["perlu_tinjau"], 1)
+
+
+class GatewayTicketMatchTests(TestCase):
+    """QR gateway punya TXN ID immutable (ticket_no `D…`) yang == panel.ticket_no.
+    Match QR via kunci eksak (bukan fuzzy) — kebal T+1, kebal deposit berulang.
+    Bank tetap fuzzy (tak punya ticket). Waterfall: gateway dulu, sisanya ke bank."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.tol = ToleranceProfile.objects.get_or_create(name="Default")[0]
+        self.tol.date_window_days = 1
+        self.tol.fuzzy_threshold = 85
+        self.tol.save()
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        self.gw = SourceType.objects.get_or_create(key="gateway", defaults={"name": "Gateway"})[0]
+        self.up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+
+    def _tx(self, st, jenis, money, rh, day=27, status=None, **kw):
+        raw = dict(kw.pop("raw", {}))
+        if status is not None:
+            raw["Payment Status"] = status
+        return Transaction.objects.create(
+            upload=self.up, source_type=st, toko=self.lbs, jenis=jenis,
+            amount=Decimal(abs(int(money))), money_delta=Decimal(money),
+            occurred_at=datetime(2026, 6, day, 21, 0), row_hash=rh, raw=raw, **kw,
+        )
+
+    def _run(self):
+        return run_batch(self.lbs, self.tol)  # from=to=None → seluruh rentang
+
+    def _pb(self, batch):
+        return batch.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+
+    def test_gateway_ticket_exact_match(self):
+        # Ticket sama → COCOK walau username beda (kunci eksak kalahkan fuzzy).
+        self._tx(self.panel, "depo", "50000", "p1", ticket_no="D1758731", username="playerA")
+        self._tx(self.gw, "depo", "50000", "g1", ticket_no="D1758731", status="PAID", username="beda")
+        b = self._run()
+        r = self._pb(b).results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+        self.assertEqual(r.reason_code, "gateway_ticket")
+        self.assertEqual(b.summary["dp"]["money_matched"], 50000.0)
+
+    def test_gateway_reference_fallback(self):
+        # Ticket tak ketemu, Client Reference ketemu → COCOK gateway_reference.
+        self._tx(self.panel, "depo", "50000", "p1", ticket_no="D999", reference="D2606001")
+        self._tx(self.gw, "depo", "50000", "g1", ticket_no="UUID-abc", reference="D2606001", status="PAID")
+        r = self._pb(self._run()).results.get(left__isnull=False)
+        self.assertEqual(r.reason_code, "gateway_reference")
+        self.assertEqual(r.bucket, "cocok")
+
+    def test_repeat_same_user_all_matched_by_ticket(self):
+        # BUG asli QRIS: 1 player deposit nominal bulat berkali. Dgn ticket unik → semua
+        # COCOK, NOL ambigu (ticket bedakan tiap deposit walau username+nominal sama).
+        for i in range(3):
+            self._tx(self.panel, "depo", "20000", f"p{i}", ticket_no=f"D100{i}", username="nono")
+            self._tx(self.gw, "depo", "20000", f"g{i}", ticket_no=f"D100{i}", status="PAID", username="nono")
+        pb = self._pb(self._run())
+        self.assertEqual(pb.summary["cocok"], 3)
+        self.assertEqual(pb.summary["perlu_tinjau"], 0)
+
+    def test_gateway_unpaid_becomes_discrepancy(self):
+        # Ticket ADA tapi QR UNPAID → uang tak masuk → tidak_cocok gateway_unpaid, tak dihitung.
+        self._tx(self.panel, "depo", "50000", "p1", ticket_no="D1", username="a")
+        self._tx(self.gw, "depo", "50000", "g1", ticket_no="D1", status="UNPAID", username="a")
+        b = self._run()
+        r = self._pb(b).results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "tidak_cocok")
+        self.assertEqual(r.reason_code, "gateway_unpaid")
+        self.assertEqual(b.summary["dp"]["money_matched"], 0.0)
+
+    def test_unpaid_panel_does_not_fall_to_bank(self):
+        # Panel yang ticketnya cuma ada sbg UNPAID → JANGAN nyasar match ke bank sewarna.
+        self._tx(self.panel, "depo", "50000", "p1", ticket_no="D1", username="a", counterparty="BUDI")
+        self._tx(self.gw, "depo", "50000", "g1", ticket_no="D1", status="UNPAID", username="a")
+        self._tx(self.bank, "depo", "50000", "kb", counterparty="BUDI")
+        b = self._run()
+        pb = self._pb(b)
+        self.assertEqual(pb.results.get(left__isnull=False).reason_code, "gateway_unpaid")
+        self.assertFalse(pb.results.filter(left__row_hash="p1", right__isnull=False).exists())
+        self.assertEqual(b.summary["dp"]["money_matched"], 0.0)
+
+    def test_gateway_amount_mismatch_terminal(self):
+        # Ticket cocok tapi NOMINAL beda → gateway_amount_mismatch, TERMINAL (tak jatuh ke bank).
+        self._tx(self.panel, "depo", "50000", "p1", ticket_no="D1", username="a", counterparty="BUDI")
+        self._tx(self.gw, "depo", "40000", "g1", ticket_no="D1", status="PAID", username="a")
+        self._tx(self.bank, "depo", "50000", "kb", counterparty="BUDI")
+        pb = self._pb(self._run())
+        r = pb.results.get(left__isnull=False)
+        self.assertEqual(r.reason_code, "gateway_amount_mismatch")
+        self.assertEqual(r.bucket, "perlu_tinjau")
+        self.assertFalse(pb.results.filter(right__row_hash="kb", bucket="cocok").exists())
+
+    def test_bank_fuzzy_when_no_gateway_ticket(self):
+        # Panel tanpa padanan gateway → pass 2 bank fuzzy tetap jalan.
+        self._tx(self.panel, "depo", "50000", "p1", ticket_no="Dxxx", username="budi")
+        self._tx(self.bank, "depo", "50000", "kb", username="budi")
+        r = self._pb(self._run()).results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+        self.assertEqual(r.reason_code, "amount+date+name")
+
+    def test_gateway_ticket_no_double_count_with_bank(self):
+        # Panel match gateway by ticket; bank sewarna JANGAN ikut dihitung (no double count).
+        self._tx(self.panel, "depo", "50000", "p1", ticket_no="D1", username="budi")
+        self._tx(self.gw, "depo", "50000", "g1", ticket_no="D1", status="PAID", username="budi")
+        self._tx(self.bank, "depo", "50000", "kb", username="budi")
+        b = self._run()
+        pb = self._pb(b)
+        self.assertEqual(b.summary["dp"]["money_matched"], 50000.0)  # sekali, bukan 100000
+        self.assertFalse(pb.results.filter(right__row_hash="kb", bucket="cocok").exists())
+
+    def test_unmatched_settled_gateway_flagged(self):
+        # Uang QR settle (PAID) tanpa deposit Panel → tidak_cocok gateway_no_panel.
+        self._tx(self.panel, "depo", "50000", "p1", ticket_no="D1", username="a")
+        self._tx(self.gw, "depo", "50000", "g1", ticket_no="D1", status="PAID", username="a")
+        self._tx(self.gw, "depo", "77000", "g2", ticket_no="D2", status="PAID", username="b")
+        pb = self._pb(self._run())
+        r = pb.results.get(right__row_hash="g2")
+        self.assertIsNone(r.left_id)
+        self.assertEqual(r.bucket, "tidak_cocok")
+        self.assertEqual(r.reason_code, "gateway_no_panel")
+
+    def test_unmatched_unpaid_gateway_not_flagged(self):
+        # Orphan UNPAID gateway BUKAN discrepancy uang (uang tak pernah masuk) → tak di-emit.
+        self._tx(self.panel, "depo", "50000", "p1", ticket_no="D1", username="a")
+        self._tx(self.gw, "depo", "50000", "g1", ticket_no="D1", status="PAID", username="a")
+        self._tx(self.gw, "depo", "99000", "g2", ticket_no="UUIDX", status="UNPAID", username="z")
+        pb = self._pb(self._run())
+        self.assertFalse(pb.results.filter(right__row_hash="g2").exists())
+
+    def test_money_gross_excludes_unpaid(self):
+        # money_gross hanya uang yang settle — UNPAID tak menggelembungkan gross.
+        self._tx(self.panel, "depo", "50000", "p1", ticket_no="D1", username="a")
+        self._tx(self.gw, "depo", "50000", "g1", ticket_no="D1", status="PAID", username="a")
+        self._tx(self.gw, "depo", "88000", "g2", ticket_no="UUIDY", status="UNPAID", username="z")
+        b = self._run()
+        self.assertEqual(b.summary["dp"]["money_gross"], 50000.0)
