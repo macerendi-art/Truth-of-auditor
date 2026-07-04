@@ -3,6 +3,12 @@
 {% block title %}Run #{{ run.pk }}{% if batch %} · Batch #{{ batch_no }}{% endif %} · Truth of Auditor{% endblock %}
 {% block crumb %}Rekonsiliasi{% if batch %} · <a href="{% url 'batch_detail' batch.pk %}">Batch #{{ batch_no }}</a>{% endif %} · {{ run.get_relation_display }} (Run #{{ run.pk }}){% endblock %}
 {% block content %}
+{% if rusak %}
+<div class="msg error reveal" style="margin-bottom:16px">
+  ⚠ Bukti hasil ini sudah dihapus (upload sumbernya di-delete). Angka ringkasan di bawah
+  TIDAK BISA diverifikasi — hapus batch ini dan rekonsiliasi ulang setelah file diupload kembali.
+</div>
+{% endif %}
 <div class="page-head reveal" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
   <div>
     <h1>{{ run.get_relation_display }}</h1>

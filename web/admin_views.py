@@ -2,10 +2,10 @@
 from django.contrib import messages
 from django.contrib.auth import get_user_model, update_session_auth_hash
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 
-from reconciliation.models import ReconBatch
+from reconciliation.models import MatchResult, ReconBatch
 from sources.models import Toko, Upload
 from transactions.models import Transaction
 from web.access import admin_required
@@ -13,6 +13,32 @@ from web.views import _active_toko
 
 
 VALID_ROLES = ("admin", "supervisor", "auditor")
+
+
+def _batch_no(batch):
+    """Nomor batch per-toko posisional (bukan pk) — konsisten dgn view lain."""
+    return ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
+
+
+def _locking_batches(upload):
+    """Batch yang buktinya bergantung pada upload ini.
+
+    Menghapus upload meng-cascade transaksinya → MatchResult (left/right CASCADE)
+    ikut mati, tapi ReconBatch/MatchRun selamat dengan summary basi ("Balanced ✓"
+    palsu). Dua jejak dependensi: (a) transaksi direferensi MatchResult sebagai
+    left ATAU right, (b) transaksi dikonsumsi batch (membentuk gross-nya).
+    Kembalikan daftar batch terdampak (unik, urut id) utk diblokir + dilaporkan.
+    """
+    batch_ids = set(
+        MatchResult.objects.filter(Q(left__upload=upload) | Q(right__upload=upload))
+        .exclude(run__batch__isnull=True)
+        .values_list("run__batch", flat=True)
+    )
+    batch_ids |= set(
+        upload.transactions.filter(consumed_by_batch__isnull=False)
+        .values_list("consumed_by_batch", flat=True)
+    )
+    return list(ReconBatch.objects.filter(id__in=batch_ids).order_by("id"))
 
 
 @admin_required
@@ -144,6 +170,18 @@ def delete_upload(request, pk):
     up = get_object_or_404(Upload, pk=pk, toko=_active_toko(request))
     if request.method == "POST":
         name = up.original_name or f"Upload #{up.pk}"
+        # Guard integritas: upload yang buktinya dipakai hasil rekon tak boleh
+        # hilang — hapus batch-nya dulu (tanpa file ini hasilnya memang tak sah).
+        locked = _locking_batches(up)
+        if locked:
+            n_tx = up.transactions.count()
+            nomor = ", ".join(f"#{_batch_no(b)}" for b in locked)
+            messages.error(
+                request,
+                f"{name} tidak bisa dihapus — {n_tx} transaksinya dipakai Batch {nomor}. "
+                f"Hapus batch itu dulu (tanpa file ini hasilnya tidak sah).",
+            )
+            return redirect("upload")
         n_tx = up.transactions.count()
         if up.file:
             up.file.delete(save=False)
@@ -166,16 +204,27 @@ def bulk_delete_uploads(request):
         active = _active_toko(request)
         ids = [i for i in request.POST.getlist("upload_ids") if i.isdecimal()]
         ups = list(Upload.objects.filter(pk__in=ids, toko=active)) if active else []
-        n_file = len(ups)
+        n_file = 0
         n_tx = 0
+        dilewati = []  # terkunci guard integritas — dilaporkan, bukan dihapus diam-diam
         for up in ups:
+            if _locking_batches(up):
+                dilewati.append(up.original_name or f"Upload #{up.pk}")
+                continue
             n_tx += up.transactions.count()
             if up.file:
                 up.file.delete(save=False)
             up.delete()
+            n_file += 1
         if n_file:
             messages.success(
                 request, f"{n_file} file dihapus — {n_tx} transaksi ikut terhapus."
+            )
+        if dilewati:
+            messages.error(
+                request,
+                f"{len(dilewati)} file dilewati karena dipakai hasil rekonsiliasi: "
+                f"{', '.join(dilewati)}. Hapus batch terkait dulu.",
             )
     return redirect("upload")
 

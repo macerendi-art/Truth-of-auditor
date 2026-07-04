@@ -3,6 +3,12 @@
 {% block title %}Batch #{{ batch_no }} · Rekonsiliasi{% endblock %}
 {% block crumb %}Rekonsiliasi · Batch #{{ batch_no }}{% endblock %}
 {% block content %}
+{% if rusak %}
+<div class="msg error reveal" style="margin-bottom:16px">
+  ⚠ Bukti hasil ini sudah dihapus (upload sumbernya di-delete). Angka ringkasan di bawah
+  TIDAK BISA diverifikasi — hapus batch ini dan rekonsiliasi ulang setelah file diupload kembali.
+</div>
+{% endif %}
 {% include "web/_healing_card.html" %}
 <div class="page-head reveal" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
   <div>

@@ -8,7 +8,7 @@ from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
-from django.db.models import Count, Max, Min, Q, Sum
+from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max, Min, OuterRef, Q, Sum
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -277,6 +277,26 @@ def _analyze_file(name, fileobj):
     }
 
 
+def _uploads_for(toko, limit=20):
+    """Riwayat upload toko, dianotasi `locked` (buktinya dipakai hasil rekon:
+    direferensi MatchResult left/right ATAU dikonsumsi batch). Tombol Hapus
+    per-baris dinonaktifkan; server (`_locking_batches`) tetap penjaga terakhir."""
+    ref = MatchResult.objects.filter(
+        Q(left__upload=OuterRef("pk")) | Q(right__upload=OuterRef("pk"))
+    )
+    consumed = Transaction.objects.filter(
+        upload=OuterRef("pk"), consumed_by_batch__isnull=False
+    )
+    return (
+        Upload.objects.filter(toko=toko)
+        .select_related("source_type")
+        .annotate(locked=ExpressionWrapper(
+            Exists(ref) | Exists(consumed), output_field=BooleanField(),
+        ))
+        .order_by("-id")[:limit]
+    )
+
+
 def _saran_tanggal(toko):
     """Saran tanggal reconcile berikutnya: hari setelah window batch terakhir; bila
     belum ada batch berjendela, tanggal transaksi AKTIF tertua (data yang belum
@@ -370,12 +390,12 @@ def upload(request):
             "n_siap": sum(1 for p in preview if not p["needs_confirm"] and not p["needs_password"]),
             "n_cek": sum(1 for p in preview if p["needs_confirm"]),
             "n_pwd": sum(1 for p in preview if p["needs_password"]),
-            "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
+            "uploads": _uploads_for(active),
             "healing": request.session.pop("healing_report", None),
         })
     return render(request, "web/upload.html", {
         "parsers": sorted(PARSERS.keys()), "active_toko": active,
-        "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
+        "uploads": _uploads_for(active),
         "healing": request.session.pop("healing_report", None),
     })
 
@@ -617,6 +637,9 @@ def batch_detail(request, pk):
         "tidak_cocok": raw_bk.get("tidak_cocok") or 0,
     }
     bk["total"] = bk["cocok"] + bk["perlu_tinjau"] + bk["tidak_cocok"]
+    # Deteksi cangkang: summary bilang ada hasil tapi MatchResult-nya sudah hilang
+    # (upload sumber di-delete → tx cascade → MatchResult cascade, summary basi).
+    rusak = bk["total"] > 0 and not MatchResult.objects.filter(run__batch=batch).exists()
     # Ekor T+1 dalam RUPIAH per arah (F5) — pertanyaan pagi auditor bukan
     # "berapa baris" tapi "berapa rupiah yang tinggal nunggu file besok, berapa
     # yang beneran harus dikejar". sisa = selisih summary − rupiah ekor.
@@ -643,6 +666,7 @@ def batch_detail(request, pk):
         "healing": request.session.pop("healing_report", None),
         "pending_t1": pending_t1,
         "window_label": _window_label(batch.date_from, batch.date_to, with_year=True),
+        "rusak": rusak,
     })
 
 
@@ -716,11 +740,17 @@ def run_detail(request, pk):
     batch_no = (
         ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count() if batch else None
     )
+    # Deteksi cangkang: summary run berisi tapi hasil DB-nya sudah tersapu cascade
+    # hapus upload → stat kartu tak bisa diverifikasi, kasih banner (bukan disembunyikan).
+    rsum = run.summary or {}
+    total_summary = sum(rsum.get(k) or 0 for k in ("cocok", "perlu_tinjau", "tidak_cocok"))
+    rusak = total_summary > 0 and not run.results.exists()
     ctx = {
         "run": run, "page": page, "bucket": bucket, "bucket_meta": BUCKET_META,
         "left_label": left_label, "right_label": right_label,
         "batch": batch, "batch_no": batch_no,
         "channels": channels, "channel": channel,
+        "rusak": rusak,
     }
     # Request htmx (filter tab / pager) → cukup fragmen tabel, tanpa shell.
     if request.headers.get("HX-Request"):
