@@ -1,16 +1,25 @@
+from datetime import timedelta
+
 from django.contrib import messages
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Max, Min, Q, Sum
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from reconciliation.engine import MATCHERS, check_completeness, run_batch, run_match
+from reconciliation.engine import (
+    MATCHERS,
+    MONEY_SOURCES,
+    check_completeness,
+    rematch_batch,
+    run_batch,
+    run_match,
+)
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
 from sources.detect import detect_source
 from sources.management.commands.ingest import detect_flow
@@ -91,6 +100,49 @@ def dashboard(request):
     return render(request, "web/dashboard.html", ctx)
 
 
+def _rematch_hint(toko, money_uploads):
+    """Setelah upload sumber UANG, cari batch lama yang berpotensi ditutup oleh mutasi
+    baru ini (ekor malam T+1 / statement BNI bulanan) → saran klik Re-match.
+
+    Batch kandidat: toko sama, punya baris tidak_cocok, dan window-nya overlap dengan
+    rentang tanggal transaksi baru (batch.date_from <= max & batch.date_to >= min-1hari).
+    Kembalikan satu kalimat (maks 3 batch) atau '' bila tak ada.
+    """
+    if not money_uploads:
+        return ""
+    agg = Transaction.objects.filter(upload__in=money_uploads).aggregate(
+        lo=Min("occurred_at"), hi=Max("occurred_at")
+    )
+    lo, hi = agg["lo"], agg["hi"]
+    if lo is None or hi is None:
+        return ""
+    lo_d, hi_d = lo.date(), hi.date()
+    lo_slack = lo_d - timedelta(days=1)  # aproksimasi window toleransi 1 hari
+
+    recent = list(ReconBatch.objects.filter(toko=toko).order_by("-id")[:30])
+    hits = []
+    for b in recent:
+        if (b.summary or {}).get("buckets", {}).get("tidak_cocok", 0) <= 0:
+            continue
+        # Tanpa batas tanggal (None) = seluruh rentang → selalu overlap.
+        if b.date_from is not None and b.date_from > hi_d:
+            continue
+        if b.date_to is not None and b.date_to < lo_slack:
+            continue
+        no = ReconBatch.objects.filter(toko=toko, id__lte=b.id).count()
+        label = b.date_from.strftime("%d/%m") if b.date_from else "—"
+        hits.append(f"#{no} ({label})")
+        if len(hits) == 3:
+            break
+    if not hits:
+        return ""
+    return (
+        "File ini berpotensi menutup baris tidak cocok di Batch "
+        + ", ".join(hits)
+        + " — buka batch lalu klik Re-match."
+    )
+
+
 @login_required
 def upload(request):
     active = _active_toko(request)
@@ -103,6 +155,7 @@ def upload(request):
         passwords = request.POST.getlist("password")
         provider = request.POST.get("provider", "")
         n_ok = n_err = 0
+        money_uploads = []  # upload sumber uang → cek batch lama yg bisa di-re-match
         for i, (path_rel, key, flow) in enumerate(zip(staged, keys, flows)):
             if not path_rel.startswith("staging/") or ".." in path_rel:
                 n_err += 1
@@ -111,11 +164,13 @@ def upload(request):
                 n_err += 1
                 continue
             try:
-                ingest(
+                up, _created, _dup = ingest(
                     key, default_storage.path(path_rel), flow=flow,
                     user=request.user, toko=active, provider=provider,
                     password=(passwords[i] if i < len(passwords) else ""),
                 )
+                if up.source_type.key in MONEY_SOURCES:
+                    money_uploads.append(up)
                 n_ok += 1
             except Exception as e:  # noqa: BLE001 - tampilkan error parse ke user
                 messages.error(request, f"{path_rel}: {e}")
@@ -123,7 +178,11 @@ def upload(request):
             finally:
                 if default_storage.exists(path_rel):
                     default_storage.delete(path_rel)
-        messages.success(request, f"{n_ok} file diproses, {n_err} gagal.")
+        msg = f"{n_ok} file diproses, {n_err} gagal."
+        hint = _rematch_hint(active, money_uploads)
+        if hint:
+            msg += " " + hint
+        messages.success(request, msg)
         return redirect("upload")
     if request.method == "POST" and request.POST.get("action") == "analyze":
         preview = []
@@ -294,6 +353,25 @@ def batch_detail(request, pk):
     return render(request, "web/batch_detail.html", {
         "batch": batch, "batch_no": batch_no, "s": batch.summary or {}, "runs": batch.runs.all(),
     })
+
+
+@login_required
+@require_POST
+def rematch(request, pk):
+    """Re-match batch: pasangkan mutasi uang susulan ke baris tidak_cocok batch ini
+    (ekor malam T+1 / statement BNI bulanan) — tanpa hapus batch."""
+    batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
+    stats = rematch_batch(batch, user=request.user)
+    if stats["terpasang"]:
+        messages.success(
+            request,
+            f"Re-match: {stats['terpasang']} baris terpasang "
+            f"({stats['cocok']} cocok, {stats['perlu_tinjau']} perlu ditinjau) "
+            f"dari {stats['diperiksa']} diperiksa.",
+        )
+    else:
+        messages.info(request, "Tidak ada baris baru yang bisa dipasangkan.")
+    return redirect("batch_detail", pk=batch.pk)
 
 
 @login_required

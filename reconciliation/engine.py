@@ -424,8 +424,18 @@ def _bracket_overlap_warning(runs):
     return None
 
 
-def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None):
-    tx = _date_filter(_active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko)), date_from, date_to)
+def _batch_active(qs, batch):
+    """Pool 'aktif' untuk agregasi batch. Saat run asli (batch belum konsumsi) sama
+    dengan _active. Saat re-match (batch sudah konsumsi barisnya sendiri) baris milik
+    batch INI tetap ikut — kalau tidak, gross-nya kolaps ke ~0. Baris yang dikonsumsi
+    batch LAIN tetap dikecualikan."""
+    if batch is None:
+        return _active(qs)
+    return qs.filter(Q(consumed_by_batch__isnull=True) | Q(consumed_by_batch=batch))
+
+
+def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None, batch=None):
+    tx = _date_filter(_batch_active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko), batch), date_from, date_to)
 
     def total(qs, field):
         return float(qs.aggregate(x=Sum(field))["x"] or 0)
@@ -510,7 +520,7 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
     comp = check_completeness(toko, date_from, date_to, tol=tolerance)
     batch = ReconBatch.objects.create(
         toko=toko, tolerance=tolerance, date_from=date_from, date_to=date_to,
-        created_by=user, completeness=comp,
+        created_by=user, completeness=comp, include=include,
     )
     relations, skipped = [], []
     # PANEL_BRACKET hanya jika bracket ADA dan dicentang.
@@ -528,7 +538,7 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
         run_match(rel, tolerance, date_from, date_to, user=user, toko=toko, batch=batch, include=include)
         for rel in relations
     ]
-    batch.summary = _aggregate_batch(toko, date_from, date_to, runs, skipped, include=include)
+    batch.summary = _aggregate_batch(toko, date_from, date_to, runs, skipped, include=include, batch=batch)
     batch.save(update_fields=["summary"])
     # KONSUMSI-SAAT-SUKSES: langkah TERAKHIR. Bila ada exception di atas, tidak
     # tercapai → transaksi tetap aktif (gagal = tidak dibersihkan). Hanya sumber
@@ -548,3 +558,100 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
     if spill:
         Transaction.objects.filter(id__in=spill).update(consumed_by_batch=batch)
     return batch
+
+
+def rematch_batch(batch, user=None):
+    """Pasangkan mutasi UANG susulan ke baris tidak_cocok batch LAMA — tanpa hapus batch.
+
+    Kasus: ekor malam T+1 (bank/gateway lag semalam) & statement BNI bulanan. Baris
+    Panel tidak_cocok di batch lama dipasangkan ke pool uang AKTIF di window yang SAMA
+    dengan run asli; yang berpasangan dikonsumsi ke batch INI; summary/selisih dihitung
+    ulang. TIDAK mencuri baris yang dikonsumsi batch lain. Idempoten. PANEL_BANK saja.
+    Lihat docs/superpowers/specs/rematch-batch.md.
+    """
+    n_targets = n_paired = n_cocok = n_tinjau = 0
+    with db_tx.atomic():
+        for run in batch.runs.filter(relation=MatchRun.Relation.PANEL_BANK):
+            matcher = MATCHERS[run.relation]()
+            # Target = baris tidak_cocok yang PUNYA sisi kiri (skip orphan/gateway_no_panel).
+            targets = list(
+                run.results.filter(bucket=MatchResult.Bucket.TIDAK, left__isnull=False)
+                .select_related("left")
+            )
+            n_targets += len(targets)
+            if not targets:
+                continue
+            left_txs = [t.left for t in targets]
+            by_left = {}
+            for t in targets:
+                by_left.setdefault(t.left_id, []).append(t)
+
+            # Pool kandidat = uang AKTIF di window run asli (widen sama), hormati include.
+            _, right_pool = matcher.sides(
+                batch.date_from, batch.date_to, batch.toko,
+                include=batch.include, tol=batch.tolerance,
+            )
+            # Matcher jalan pakai run yang ADA (bukan run baru). Hasil ini SCRATCH —
+            # jangan bulk_create; kita hanya baca verdict-nya untuk update in-place.
+            fresh = matcher.match(run, left_txs, right_pool)
+            by_left_fresh = {f.left_id: f for f in fresh if f.left_id is not None}
+
+            to_consume = []
+            for left_id, tgt_list in by_left.items():
+                f = by_left_fresh.get(left_id)
+                if f is None:
+                    continue
+                paired = f.right is not None
+                changed = paired or f.bucket != MatchResult.Bucket.TIDAK
+                if not changed:
+                    # Masih tidak_cocok/no_money → jangan churn reason_detail.
+                    continue
+                for tgt in tgt_list:
+                    tgt.bucket = f.bucket
+                    tgt.right = f.right
+                    tgt.score = f.score
+                    tgt.reason_code = f.reason_code
+                    tgt.reason_detail = (f.reason_detail or "") + " (re-match)"
+                    tgt.save(update_fields=["bucket", "right", "score", "reason_code", "reason_detail"])
+                    if f.right is not None:
+                        to_consume.append(f.right_id)
+                        n_paired += 1
+                        if f.bucket == MatchResult.Bucket.COCOK:
+                            n_cocok += 1
+                        elif f.bucket == MatchResult.Bucket.TINJAU:
+                            n_tinjau += 1
+
+            if to_consume:
+                # Pool aktif-saja → tak ada konflik; tetap guard isnull utk keamanan race.
+                Transaction.objects.filter(
+                    id__in=to_consume, consumed_by_batch__isnull=True
+                ).update(consumed_by_batch=batch)
+
+            # Recompute hitungan bucket per-run dari MatchResult aktual (left/right pool
+            # historis dibiarkan apa adanya).
+            c = Counter(
+                run.results.values_list("bucket", flat=True)
+            )
+            s = run.summary or {}
+            s["cocok"] = c.get("cocok", 0)
+            s["perlu_tinjau"] = c.get("perlu_tinjau", 0)
+            s["tidak_cocok"] = c.get("tidak_cocok", 0)
+            run.summary = s
+            run.save(update_fields=["summary"])
+
+        # Recompute summary batch — pakai batch-param supaya baris yang DIKONSUMSI batch
+        # ini tetap masuk gross (jangan kolaps ke 0).
+        batch.summary = _aggregate_batch(
+            batch.toko, batch.date_from, batch.date_to,
+            runs=list(batch.runs.all()),
+            skipped=(batch.summary or {}).get("skipped", []),
+            include=batch.include, batch=batch,
+        )
+        batch.save(update_fields=["summary"])
+
+    return {
+        "diperiksa": n_targets,
+        "terpasang": n_paired,
+        "cocok": n_cocok,
+        "perlu_tinjau": n_tinjau,
+    }
