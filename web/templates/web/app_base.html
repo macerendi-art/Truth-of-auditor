@@ -326,6 +326,12 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
     </button>
     <span class="crumb">{% block crumb %}Truth of Auditor{% endblock %}</span>
     <span class="spacer"></span>
+    {# Cari global: username / ticket / referensi / nama / nominal → halaman transaksi #}
+    <form method="get" action="{% url 'transactions' %}" class="toko-pick" role="search" style="margin-right:8px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input name="q" placeholder="Cari transaksi…" aria-label="Cari transaksi" value="{{ request.GET.q|default:'' }}"
+             style="border:none;background:transparent;outline:none;min-width:120px;color:inherit;font:inherit">
+    </form>
     <form method="post" action="{% url 'set_toko' %}" class="toko-pick">
       {% csrf_token %}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M3 9h18"/></svg>

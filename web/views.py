@@ -391,12 +391,17 @@ def transactions(request):
     if jenis:
         qs = qs.filter(jenis=jenis)
     if q:
-        qs = qs.filter(
+        cond = (
             Q(username__icontains=q)
             | Q(ticket_no__icontains=q)
             | Q(reference__icontains=q)
             | Q(counterparty__icontains=q)
         )
+        # Angka (boleh berformat "50.000" / "50,000") → cari juga nominal persis.
+        digits = q.replace(".", "").replace(",", "")
+        if digits.isdigit():
+            cond |= Q(amount=digits)
+        qs = qs.filter(cond)
     carry = request.GET.get("carry") == "1"
     if carry:
         from reconciliation.engine import _carried_results
