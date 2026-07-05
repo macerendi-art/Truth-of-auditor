@@ -263,6 +263,29 @@ def _extract_zip(f):
     return out, dilewati, None
 
 
+# File staging lebih tua dari ini = yatim (analyze tanpa commit) → disapu.
+_STAGING_TTL = 24 * 3600
+
+
+def _sweep_staging():
+    """Bersihkan file staging yatim. Dipanggil tiap analyze — murah (satu
+    listdir), dan berjalan tepat saat volume dipakai lagi."""
+    import time
+
+    try:
+        _dirs, files = default_storage.listdir("staging")
+    except FileNotFoundError:
+        return
+    batas = time.time() - _STAGING_TTL
+    for nama in files:
+        rel = f"staging/{nama}"
+        try:
+            if os.path.getmtime(default_storage.path(rel)) < batas:
+                default_storage.delete(rel)
+        except OSError:
+            continue
+
+
 def _analyze_file(name, fileobj):
     """Satu file → baris preview (simpan ke staging + deteksi parser).
     Dipakai upload langsung maupun hasil ekstrak zip."""
@@ -370,6 +393,7 @@ def upload(request):
             request.session["healing_report"] = sukses
         return redirect("upload")
     if request.method == "POST" and request.POST.get("action") == "analyze":
+        _sweep_staging()
         preview = []
         dilewati = 0
         berkas = request.FILES.getlist("files")

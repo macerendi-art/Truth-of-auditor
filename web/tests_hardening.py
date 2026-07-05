@@ -78,6 +78,36 @@ class SessionHardeningTests(TestCase):
         self.assertGreaterEqual(settings.DATA_UPLOAD_MAX_NUMBER_FILES, 300)
 
 
+class StagingSweepTests(TestCase):
+    """File staging yatim (analyze tanpa commit) tidak boleh menumpuk di volume."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.adm = User.objects.create_user("adm", password="pw123456", role="admin")
+        self.client.login(username="adm", password="pw123456")
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
+
+    def test_file_lama_disapu_file_baru_selamat(self):
+        import os
+        import time
+
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+
+        lama = default_storage.save("staging/yatim-lama.csv", ContentFile(b"a,b"))
+        baru = default_storage.save("staging/baru.csv", ContentFile(b"a,b"))
+        kemarin = time.time() - 25 * 3600
+        os.utime(default_storage.path(lama), (kemarin, kemarin))
+        try:
+            self.client.post(reverse("upload"), {"action": "analyze"})
+            self.assertFalse(default_storage.exists(lama))
+            self.assertTrue(default_storage.exists(baru))
+        finally:
+            for p in (lama, baru):
+                if default_storage.exists(p):
+                    default_storage.delete(p)
+
+
 class UploadCapTests(TestCase):
     def setUp(self):
         self.lbs = Toko.objects.get(key="lbs")
