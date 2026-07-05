@@ -720,6 +720,40 @@ class AliasHistoryTests(TestCase):
         self.assertNotEqual(r.reason_code, "alias_history")
 
 
+class DefaultWindowTests(TestCase):
+    """Profil Default window 2 hari: WD Sabtu settle Senin (bukti staging 27-29
+    Jun — 27=Sabtu, uangnya baru muncul di mutasi Senin 29; window 1 hari buta
+    weekend). Konsumsi in-window tetap [from,to] — hanya pool kandidat melebar,
+    dan tie-break tanggal menjaga uang hari terdekat yang diambil dulu."""
+
+    def test_default_window_dua_hari(self):
+        tol = ToleranceProfile.objects.get(name="Default")
+        self.assertEqual(tol.date_window_days, 2)
+
+    def test_wd_sabtu_settle_senin_match(self):
+        lbs = Toko.objects.get(key="lbs")
+        tol = ToleranceProfile.objects.get(name="Default")
+        panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        up = Upload.objects.create(source_type=panel, toko=lbs)
+
+        def tx(st, money, rh, day, **kw):
+            return Transaction.objects.create(
+                upload=up, source_type=st, toko=lbs, jenis="wd",
+                amount=Decimal(abs(int(money))), money_delta=Decimal(money),
+                occurred_at=datetime(2026, 6, day, 21, 0), row_hash=rh, **kw,
+            )
+
+        tx(panel, "-50000", "p1", 27, counterparty="BUDI SANTOSO")   # Sabtu
+        uang = tx(bank, "-50000", "k1", 29, counterparty="BUDI SANTOSO")  # Senin
+        b = run_batch(lbs, tol, date_from=date(2026, 6, 27), date_to=date(2026, 6, 27))
+        r = b.runs.get(relation=MatchRun.Relation.PANEL_BANK).results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+        self.assertEqual(r.right_id, uang.id)
+        uang.refresh_from_db()
+        self.assertEqual(uang.consumed_by_batch_id, b.id)  # spillover ikut terkunci
+
+
 class DateProximityTieTests(TestCase):
     """Skor seri → pilih kandidat tanggal TERDEKAT ke panel. Tanpa preferensi ini
     greedy memilih urutan DB: batch hari-H bisa nyomot settlement H+1 padahal uang
