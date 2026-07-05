@@ -1,8 +1,11 @@
+import os
+import zipfile
 from datetime import date as date_cls
 
 from django.contrib import messages
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
+from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
@@ -191,6 +194,100 @@ def dashboard(request):
     return render(request, "web/dashboard.html", ctx)
 
 
+# Upload folder/zip: hanya ekstensi yang punya parser; sisanya junk OS/temp.
+_UPLOAD_EXTS = {".xlsx", ".xls", ".csv", ".pdf"}
+_ZIP_MAX_FILES = 200
+_ZIP_MAX_BYTES = 200 * 1024 * 1024
+# Cap ukuran: per-file dan total satu request analyze — volume staging jangan
+# bisa dipenuhi satu upload liar (export mutasi riil terbesar masih < 20MB).
+_FILE_MAX_BYTES = 50 * 1024 * 1024
+_REQ_MAX_BYTES = 300 * 1024 * 1024
+
+
+def _is_junk_name(name):
+    """File yang tak layak dianalisis: dotfile/.DS_Store, lock Office (~$),
+    artefak __MACOSX, atau ekstensi tanpa parser. Berlaku untuk upload langsung,
+    isi folder (webkitdirectory), dan isi zip."""
+    path = str(name).replace("\\", "/")
+    if "__MACOSX" in path:
+        return True
+    base = os.path.basename(path)
+    if not base or base.startswith(".") or base.startswith("~$"):
+        return True
+    return os.path.splitext(base)[1].lower() not in _UPLOAD_EXTS
+
+
+def _extract_zip(f):
+    """Ekstrak arsip zip upload → (list[(nama, bytes)], n_dilewati, error|None).
+    Guard: jumlah file & total ukuran terkompresi-buka (anti zip-bomb); zip
+    berpassword/rusak → error berpesan jelas. xlsx TIDAK lewat sini (dicek
+    berdasarkan ekstensi .zip, bukan magic PK — xlsx juga arsip zip)."""
+    try:
+        zf = zipfile.ZipFile(f)
+    except zipfile.BadZipFile:
+        return [], 0, "bukan file zip yang valid"
+    infos = [i for i in zf.infolist() if not i.is_dir()]
+    if len(infos) > _ZIP_MAX_FILES:
+        return [], 0, f"terlalu banyak file di dalam zip (>{_ZIP_MAX_FILES})"
+    if sum(i.file_size for i in infos) > _ZIP_MAX_BYTES:
+        return [], 0, "isi zip terlalu besar (>200MB)"
+    out, dilewati = [], 0
+    for i in infos:
+        if _is_junk_name(i.filename):
+            dilewati += 1
+            continue
+        try:
+            data = zf.read(i)
+        except RuntimeError:
+            return [], 0, "zip berpassword tidak didukung — ekstrak dulu lalu upload isinya"
+        out.append((os.path.basename(i.filename.replace("\\", "/")), data))
+    return out, dilewati, None
+
+
+# File staging lebih tua dari ini = yatim (analyze tanpa commit) → disapu.
+_STAGING_TTL = 24 * 3600
+
+
+def _sweep_staging():
+    """Bersihkan file staging yatim. Dipanggil tiap analyze — murah (satu
+    listdir), dan berjalan tepat saat volume dipakai lagi."""
+    import time
+
+    try:
+        _dirs, files = default_storage.listdir("staging")
+    except FileNotFoundError:
+        return
+    batas = time.time() - _STAGING_TTL
+    for nama in files:
+        rel = f"staging/{nama}"
+        try:
+            if os.path.getmtime(default_storage.path(rel)) < batas:
+                default_storage.delete(rel)
+        except OSError:
+            continue
+
+
+def _analyze_file(name, fileobj):
+    """Satu file → baris preview (simpan ke staging + deteksi parser).
+    Dipakai upload langsung maupun hasil ekstrak zip."""
+    saved = default_storage.save(f"staging/{name}", fileobj)
+    needs_password = is_encrypted_xlsx(default_storage.path(saved))
+    cands = detect_source(default_storage.path(saved), name)
+    top = cands[0] if cands else None
+    parser_key = top["parser_key"] if top else ""
+    if not parser_key and needs_password:
+        parser_key = "mandiri"
+    return {
+        "name": name,
+        "staged": saved,
+        "parser_key": parser_key,
+        "confidence": round(top["confidence"] * 100) if top else 0,
+        "needs_confirm": (top is None) or top["confidence"] < 0.8,
+        "needs_password": needs_password,
+        "flow": detect_flow(name),
+    }
+
+
 @login_required
 def upload(request):
     active = _active_toko(request)
@@ -226,24 +323,38 @@ def upload(request):
         messages.success(request, f"{n_ok} file diproses, {n_err} gagal.")
         return redirect("upload")
     if request.method == "POST" and request.POST.get("action") == "analyze":
-        preview = []
-        for f in request.FILES.getlist("files"):
-            saved = default_storage.save(f"staging/{f.name}", f)
-            needs_password = is_encrypted_xlsx(default_storage.path(saved))
-            cands = detect_source(default_storage.path(saved), f.name)
-            top = cands[0] if cands else None
-            parser_key = top["parser_key"] if top else ""
-            if not parser_key and needs_password:
-                parser_key = "mandiri"
-            preview.append({
-                "name": f.name,
-                "staged": saved,
-                "parser_key": parser_key,
-                "confidence": round(top["confidence"] * 100) if top else 0,
-                "needs_confirm": (top is None) or top["confidence"] < 0.8,
-                "needs_password": needs_password,
-                "flow": detect_flow(f.name),
-            })
+        _sweep_staging()
+        uploaded = request.FILES.getlist("files")
+        if sum(f.size for f in uploaded) > _REQ_MAX_BYTES:
+            messages.error(request, "Total upload melebihi 300MB — pecah jadi beberapa kali.")
+            uploaded = []
+        preview, dilewati, diekstrak = [], 0, 0
+        for f in uploaded:
+            if f.size > _FILE_MAX_BYTES:
+                messages.error(request, f"{f.name}: melebihi 50MB per file, dilewati.")
+                dilewati += 1
+                continue
+            if f.name.lower().endswith(".zip"):
+                isi, n_lewat, err = _extract_zip(f)
+                if err:
+                    messages.error(request, f"{f.name}: {err}")
+                    continue
+                dilewati += n_lewat
+                for nama, data in isi:
+                    preview.append(_analyze_file(nama, ContentFile(data)))
+                    diekstrak += 1
+                continue
+            if _is_junk_name(f.name):
+                dilewati += 1
+                continue
+            preview.append(_analyze_file(f.name, f))
+        if dilewati or diekstrak:
+            messages.info(
+                request,
+                f"{len(preview)} file dianalisa, {dilewati} dilewati"
+                + (f", {diekstrak} diekstrak dari zip" if diekstrak else "")
+                + ".",
+            )
         return render(request, "web/upload.html", {
             "preview": preview, "parsers": sorted(PARSERS.keys()),
             "flows": ["", "dp", "wd"], "active_toko": active,

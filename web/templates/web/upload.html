@@ -27,19 +27,141 @@
   <form method="post" enctype="multipart/form-data" id="upform" data-busy>
     {% csrf_token %}
     <input type="hidden" name="action" value="analyze">
-    <label class="dz" for="fileInput">
+    <label class="dz" for="fileInput" id="dropzone">
       <div class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></div>
-      <div style="font-weight:600">Lepas file di sini atau klik untuk pilih</div>
-      <div class="faint" style="font-size:13px;margin-top:4px">xlsx · csv · pdf — bisa banyak sekaligus</div>
-      <div id="flist" class="faint" style="font-size:13px;margin-top:8px"></div>
-      <input id="fileInput" type="file" name="files" multiple required accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF" style="display:none">
+      <div style="font-weight:600" id="dzcopy" data-idle="Lepas file atau folder di sini, atau klik untuk pilih" data-over="Lepas untuk menambahkan">Lepas file atau folder di sini, atau klik untuk pilih</div>
+      <div class="faint" style="font-size:13px;margin-top:4px">xlsx · csv · pdf · zip — pilihan menumpuk, zip diekstrak otomatis</div>
+      <input id="fileInput" type="file" name="files" multiple accept=".xlsx,.xls,.csv,.pdf,.CSV,.PDF,.zip,.ZIP" style="display:none">
     </label>
-    <button class="btn primary" type="submit" style="margin-top:16px">Analisa File →</button>
+    <div id="flist" class="file-list"></div>
+    <input id="folderInput" type="file" multiple webkitdirectory style="display:none">
+    <div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap">
+      <button class="btn primary" type="submit" id="analyzeBtn">Analisa File →</button>
+      <label class="btn ghost" for="folderInput" style="cursor:pointer;margin:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h5l2 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg> Pilih Folder</label>
+      <button class="btn ghost" type="button" id="fclear" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg> Bersihkan pilihan</button>
+    </div>
   </form>
 </div>
+<style>
+  .dz.dz-over{border-color:var(--brand);background:#f2f6ff}
+  .file-list{display:flex;flex-direction:column;gap:6px;margin-top:14px}
+  .file-list:empty{display:none}
+  .file-row{display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel-2);font-size:13px}
+  .file-row.skip{opacity:.6}
+  .file-chip{display:grid;place-items:center;width:26px;height:26px;border-radius:8px;flex:0 0 auto;color:var(--brand);background:var(--info-bg)}
+  .file-chip.t-csv{color:var(--ok);background:var(--ok-bg)}
+  .file-chip.t-pdf{color:var(--bad);background:var(--bad-bg)}
+  .file-chip.t-zip{color:var(--warn);background:var(--warn-bg)}
+  .file-chip.t-skip{color:var(--faint);background:var(--panel-2)}
+  .file-chip svg{width:15px;height:15px}
+  .file-row .fname{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+  .file-row .fname .n{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .file-row .fname .p{color:var(--faint);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .file-row .fsize{color:var(--muted);flex:0 0 auto}
+  .file-row .frm{border:none;background:none;color:var(--faint);cursor:pointer;padding:2px;display:grid;place-items:center;border-radius:6px}
+  .file-row .frm:hover{color:var(--bad);background:var(--bad-bg)}
+  .file-row .frm svg{width:15px;height:15px}
+</style>
 <script>
-(function(){var i=document.getElementById('fileInput'),l=document.getElementById('flist');
-  if(i)i.addEventListener('change',function(){l.textContent=i.files.length?[].map.call(i.files,function(f){return f.name;}).join(' · '):'';});})();
+(function(){
+  var i=document.getElementById('fileInput'), d=document.getElementById('folderInput'),
+      l=document.getElementById('flist'), dz=document.getElementById('dropzone'),
+      copyEl=document.getElementById('dzcopy'),
+      clearBtn=document.getElementById('fclear'),
+      analyzeBtn=document.getElementById('analyzeBtn');
+  if(!i||!dz) return;
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Akumulator: pilihan MENUMPUK lintas dialog/drop — tidak di-reset tiap tambah.
+  var store=new DataTransfer();
+  var XSVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+  var FSVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>';
+  var CHIP={xlsx:'t-xlsx',xls:'t-xlsx',csv:'t-csv',pdf:'t-pdf',zip:'t-zip'};
+
+  function sudahAda(f){
+    for(var k=0;k<store.files.length;k++){var g=store.files[k];
+      if(g.name===f.name && g.size===f.size) return true;}
+    return false;
+  }
+  function ukur(n){ return n>=1048576 ? (n/1048576).toFixed(1)+' MB' : Math.max(1,Math.round(n/1024))+' KB'; }
+  function baris(f,idx){
+    var ext=(f.name.split('.').pop()||'').toLowerCase(),
+        cls=CHIP[ext]||'t-skip',
+        row=document.createElement('div');
+    row.className='file-row'+(cls==='t-skip'?' skip':'');
+    var path=(f.webkitRelativePath||'').replace(/\/[^/]*$/,'');
+    row.innerHTML=
+      '<span class="file-chip '+cls+'">'+FSVG+'</span>'+
+      '<span class="fname"><span class="n"></span>'+(path?'<span class="p"></span>':'')+'</span>'+
+      (cls==='t-zip'?'<span class="badge warn plain">diekstrak</span>':'')+
+      (cls==='t-skip'?'<span class="badge plain" style="color:var(--faint)">dilewati</span>':'')+
+      '<span class="fsize num">'+ukur(f.size)+'</span>'+
+      '<button type="button" class="frm" title="Hapus dari pilihan" data-idx="'+idx+'">'+XSVG+'</button>';
+    row.querySelector('.fname .n').textContent=f.name;
+    if(path) row.querySelector('.fname .p').textContent=path;
+    return row;
+  }
+  function render(){
+    i.files=store.files; // input inilah yang tersubmit
+    var n=store.files.length;
+    clearBtn.hidden=!n;
+    analyzeBtn.textContent = n ? 'Analisa '+n+' File →' : 'Analisa File →';
+    l.innerHTML='';
+    [].forEach.call(store.files,function(f,idx){ l.appendChild(baris(f,idx)); });
+  }
+  function tambah(files){
+    var baru=[];
+    [].forEach.call(files,function(f){ if(!sudahAda(f)){ store.items.add(f); baru.push(f.name); } });
+    render();
+    if(baru.length && window.gsap && !reduce){
+      gsap.from(l.children, {y:-6, opacity:0, duration:.28, ease:'power2.out', stagger:.03, clearProps:'all'});
+    }
+  }
+  // Hapus per-baris: DataTransfer tak punya remove-at — rebuild.
+  l.addEventListener('click',function(e){
+    var btn=e.target.closest('.frm'); if(!btn) return;
+    var idx=parseInt(btn.getAttribute('data-idx'),10),
+        keep=new DataTransfer();
+    [].forEach.call(store.files,function(f,k){ if(k!==idx) keep.items.add(f); });
+    store=keep; render();
+  });
+
+  i.addEventListener('change',function(){ tambah(i.files); });
+  d.addEventListener('change',function(){ tambah(d.files); d.value=''; });
+  clearBtn.addEventListener('click',function(){ store=new DataTransfer(); render(); });
+
+  // Drag & drop — termasuk FOLDER (traversal webkitGetAsEntry, batch readEntries).
+  ['dragover','dragenter'].forEach(function(ev){
+    dz.addEventListener(ev,function(e){ e.preventDefault(); dz.classList.add('dz-over'); copyEl.textContent=copyEl.getAttribute('data-over'); });
+  });
+  ['dragleave','drop'].forEach(function(ev){
+    dz.addEventListener(ev,function(e){ e.preventDefault(); dz.classList.remove('dz-over'); copyEl.textContent=copyEl.getAttribute('data-idle'); });
+  });
+  function bacaEntry(entry,done){
+    if(entry.isFile){
+      entry.file(function(f){ if(!sudahAda(f)) store.items.add(f); done(); },done);
+    }else if(entry.isDirectory){
+      var rd=entry.createReader();
+      (function baca(){
+        rd.readEntries(function(es){
+          if(!es.length){ done(); return; }
+          var sisa=es.length;
+          es.forEach(function(en){ bacaEntry(en,function(){ if(--sisa===0) baca(); }); });
+        },done);
+      })();
+    }else done();
+  }
+  dz.addEventListener('drop',function(e){
+    var items=e.dataTransfer.items, entries=[];
+    if(items&&items.length&&items[0].webkitGetAsEntry){
+      for(var k=0;k<items.length;k++){ // getAsEntry WAJIB sinkron di handler
+        var en=items[k].webkitGetAsEntry(); if(en) entries.push(en);
+      }
+    }
+    if(!entries.length){ tambah(e.dataTransfer.files); return; }
+    var left=entries.length;
+    entries.forEach(function(en){ bacaEntry(en,function(){ if(--left===0) render(); }); });
+  });
+})();
 </script>
 
 {% if preview %}
