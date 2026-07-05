@@ -24,6 +24,8 @@ from reconciliation.engine import (
     run_batch,
     run_match,
 )
+from core.audit import catat
+from core.models import AuditLog
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
 from sources.detect import detect_source
 from sources.management.commands.ingest import detect_flow
@@ -584,6 +586,12 @@ def reconcile(request):
             include=include,
         )
         no = ReconBatch.objects.filter(toko=active).count()
+        catat(
+            request.user, "reconcile", f"Batch #{no}", toko=active,
+            batch_pk=batch.pk,
+            date_from=request.POST.get("date_from") or "",
+            date_to=request.POST.get("date_to") or "",
+        )
         messages.success(request, f"Rekonsiliasi selesai (Batch #{no}).")
         return redirect("batch_detail", pk=batch.pk)
 
@@ -688,12 +696,18 @@ def batch_detail(request, pk):
                 "dp_sisa": max(((s.get("dp") or {}).get("selisih") or 0) - dp_amt, 0),
                 "wd_sisa": max(((s.get("wd") or {}).get("selisih") or 0) - wd_amt, 0),
             }
+    # Riwayat aksi batch ini (reconcile/re-match/review/…) — jejak akuntabilitas.
+    riwayat_aksi = (
+        AuditLog.objects.filter(detail__batch_pk=batch.pk)
+        .select_related("user")[:20]
+    )
     return render(request, "web/batch_detail.html", {
         "batch": batch, "batch_no": batch_no, "s": s, "bk": bk, "runs": batch.runs.all(),
         "healing": request.session.pop("healing_report", None),
         "pending_t1": pending_t1,
         "window_label": _window_label(batch.date_from, batch.date_to, with_year=True),
         "rusak": rusak,
+        "riwayat_aksi": riwayat_aksi,
     })
 
 
@@ -705,6 +719,10 @@ def rematch(request, pk):
     batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
     before = _selisih_abs(batch)
     stats = rematch_batch(batch, user=request.user)
+    catat(
+        request.user, "rematch", f"Batch #{pk}", toko=batch.toko,
+        batch_pk=batch.pk, terpasang=stats["terpasang"],
+    )
     if stats["terpasang"]:
         batch.refresh_from_db()
         no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
@@ -827,6 +845,11 @@ def review(request, pk):
     r.reason_code = "manual_override"
     r.save(update_fields=["bucket", "reason_code"])
     ReviewAction.objects.create(result=r, action=action, reason=reason, reviewer=request.user)
+    catat(
+        request.user, "review", f"Hasil #{r.pk} → {action}",
+        toko=r.run.batch.toko if r.run.batch_id else None,
+        result_pk=r.pk, action=action, batch_pk=r.run.batch_id,
+    )
     _refresh_bucket_summaries(r.run)
     return render(request, "web/_result_row.html", {"r": r, "bucket_meta": BUCKET_META})
 
@@ -861,6 +884,13 @@ def review_bulk(request):
     runs_terdampak = {r.run_id: r.run for r in results}
     for run in runs_terdampak.values():
         _refresh_bucket_summaries(run)
+    if results:
+        first_run = results[0].run
+        catat(
+            request.user, "review_massal", f"{len(results)} baris → {action}",
+            toko=first_run.batch.toko if first_run.batch_id else None,
+            n=len(results), action=action, batch_pk=first_run.batch_id,
+        )
     label = {"mark_matched": "cocok", "mark_review": "perlu ditinjau",
              "mark_unmatched": "tidak cocok"}[action]
     messages.success(request, f"{len(results)} baris ditandai {label}.")

@@ -5,6 +5,7 @@ from django.db import transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 
+from core.audit import catat
 from reconciliation.models import MatchResult, ReconBatch
 from sources.models import Toko, Upload
 from transactions.models import Transaction
@@ -186,6 +187,7 @@ def delete_upload(request, pk):
         if up.file:
             up.file.delete(save=False)
         up.delete()
+        catat(request.user, "hapus_upload", name, toko=up.toko, upload_pk=pk, n_tx=n_tx)
         messages.success(request, f"{name} dihapus — {n_tx} transaksi ikut terhapus.")
     return redirect("upload")
 
@@ -217,6 +219,10 @@ def bulk_delete_uploads(request):
             up.delete()
             n_file += 1
         if n_file:
+            catat(
+                request.user, "hapus_upload_massal", f"{n_file} file",
+                toko=active, n_file=n_file, n_tx=n_tx,
+            )
             messages.success(
                 request, f"{n_file} file dihapus — {n_tx} transaksi ikut terhapus."
             )
@@ -237,6 +243,10 @@ def delete_batch(request, pk):
         no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
         n_runs = batch.runs.count()
         batch.delete()
+        catat(
+            request.user, "hapus_batch", f"Batch #{no}", toko=batch.toko,
+            batch_pk=pk, n_runs=n_runs,
+        )
         messages.success(request, f"Batch #{no} dihapus — {n_runs} run ikut terhapus. Transaksi tetap utuh.")
     return redirect("reconcile")
 
@@ -259,6 +269,10 @@ def delete_toko(request, pk):
             Upload.objects.filter(toko=t).delete()
             Transaction.objects.filter(toko=t).delete()
             t.delete()
+        catat(
+            request.user, "hapus_toko", name,
+            n_tx=n_tx, n_upload=n_up, n_batch=n_batch,
+        )
         messages.success(
             request,
             f"Toko {name} dihapus permanen — {n_tx} transaksi, {n_up} upload, {n_batch} batch ikut terhapus.",
@@ -276,5 +290,6 @@ def delete_user(request, pk):
         else:
             username = target.username
             target.delete()
+            catat(request.user, "hapus_user", username)
             messages.success(request, f"Pengguna {username} dihapus permanen.")
     return redirect("kelola_user")

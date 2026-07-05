@@ -117,4 +117,20 @@
   </table>
   </div>
 </div>
+
+{% if riwayat_aksi %}
+<div class="card reveal">
+  <h3 style="margin:0 0 12px">Riwayat aksi</h3>
+  <table class="flush">
+    {% for a in riwayat_aksi %}
+    <tr>
+      <td class="faint" style="white-space:nowrap">{{ a.created_at|date:"j M H:i" }}</td>
+      <td><b>{{ a.user.username|default:"—" }}</b></td>
+      <td>{{ a.aksi }}</td>
+      <td class="faint">{{ a.objek }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
 {% endblock %}
