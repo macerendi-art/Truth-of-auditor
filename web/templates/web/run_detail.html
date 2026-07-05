@@ -1,5 +1,6 @@
 {% extends "web/app_base.html" %}
 {% load humanize %}
+{% load web_extras %}
 {% block title %}Run #{{ run.pk }}{% if batch %} · Batch #{{ batch_no }}{% endif %} · Truth of Auditor{% endblock %}
 {% block crumb %}Rekonsiliasi{% if batch %} · <a href="{% url 'batch_detail' batch.pk %}">Batch #{{ batch_no }}</a>{% endif %} · {{ run.get_relation_display }} (Run #{{ run.pk }}){% endblock %}
 {% block content %}
@@ -38,7 +39,7 @@
   <a href="?bucket={{ bucket }}" class="{% if not reason %}active{% endif %}">semua alasan</a>
   {% for rc in reasons %}
   <a href="?bucket={{ bucket }}&reason={{ rc.reason_code }}" class="{% if reason == rc.reason_code %}active{% endif %}">
-    {{ rc.reason_code }}<span class="n">{{ rc.n|intcomma }}</span></a>
+    {{ rc.reason_code|reason_label }}<span class="n">{{ rc.n|intcomma }}</span></a>
   {% endfor %}
 </div>
 {% endif %}

@@ -488,6 +488,12 @@ def transactions(request):
     params_page = request.GET.copy()
     params_page.pop("page", None)
     qpage = params_page.urlencode()
+    # Basis untuk tombol cepat Deposit/Withdraw: pertahankan filter lain,
+    # tapi buang jenis/sort/dir/page agar tombol yang mengatur jenis.
+    params_flt = request.GET.copy()
+    for k in ("jenis", "sort", "dir", "page"):
+        params_flt.pop(k, None)
+    qflt = params_flt.urlencode()
 
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
 
@@ -524,7 +530,7 @@ def transactions(request):
         "total": page.paginator.count,
         "date_from": date_from, "date_to": date_to,
         "sort": sort, "dir": sort_dir,
-        "qbase": qbase, "qpage": qpage,
+        "qbase": qbase, "qpage": qpage, "qflt": qflt,
         "carry": carry,
     }
     return render(request, "web/transactions.html", ctx)

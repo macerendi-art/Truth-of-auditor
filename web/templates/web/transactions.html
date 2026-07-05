@@ -20,6 +20,14 @@
     <a class="btn sm ghost" href="{% url 'transactions' %}">✕ hapus filter</a>
   </div>
   {% endif %}
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+    <span class="faint" style="font-size:12px;font-weight:600;letter-spacing:.02em">PILAH CEPAT</span>
+    <div class="seg">
+      <a href="?{{ qflt }}" class="{% if not jenis %}active{% endif %}">Semua</a>
+      <a href="?{% if qflt %}{{ qflt }}&{% endif %}jenis=depo" class="dp {% if jenis == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit · D…</a>
+      <a href="?{% if qflt %}{{ qflt }}&{% endif %}jenis=wd" class="wd {% if jenis == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw · W…</a>
+    </div>
+  </div>
   <form method="get" class="row">
     <div class="field"><label>Sumber</label>
       <select name="source"><option value="">Semua</option>

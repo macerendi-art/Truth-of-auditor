@@ -116,6 +116,15 @@ a.card.stat.click{display:flex;flex-direction:column;gap:8px}
 .badge.ok{color:var(--ok);background:var(--ok-bg)} .badge.warn{color:var(--warn);background:var(--warn-bg)} .badge.bad{color:var(--bad);background:var(--bad-bg)}
 .badge.src{color:var(--info);background:var(--info-bg)}
 .badge.muted{color:var(--muted);background:var(--panel-2);border:1px solid var(--line)}
+/* segmented control (mis. pemilah Deposit / Withdraw) */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:11px;background:var(--panel-2);padding:3px;gap:3px}
+.seg a{display:inline-flex;align-items:center;gap:7px;padding:6px 14px;border-radius:8px;font-size:13px;
+  font-weight:600;color:var(--muted);text-decoration:none;transition:background .12s,color .12s,box-shadow .12s;white-space:nowrap}
+.seg a:hover{color:var(--ink)}
+.seg a .dot{width:8px;height:8px;border-radius:50%;background:currentColor;opacity:.85}
+.seg a.dp{color:var(--ok)} .seg a.wd{color:var(--bad)}
+.seg a.active{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+.seg a.dp.active{color:var(--ok)} .seg a.wd.active{color:var(--bad)}
 .avatar-ini{width:28px;height:28px;border-radius:50%;background:var(--info-bg);color:var(--brand);
   display:inline-grid;place-items:center;font-weight:700;font-size:12px;flex-shrink:0}
 
