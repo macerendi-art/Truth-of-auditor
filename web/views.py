@@ -311,21 +311,37 @@ def _analyze_file(name, fileobj):
 def _uploads_for(toko, limit=20):
     """Riwayat upload toko, dianotasi `locked` (buktinya dipakai hasil rekon:
     direferensi MatchResult left/right ATAU dikonsumsi batch). Tombol Hapus
-    per-baris dinonaktifkan; server (`_locking_batches`) tetap penjaga terakhir."""
+    per-baris dinonaktifkan; server (`_locking_batches`) tetap penjaga terakhir.
+    limit=None = tanpa cap (?semua=1)."""
     ref = MatchResult.objects.filter(
         Q(left__upload=OuterRef("pk")) | Q(right__upload=OuterRef("pk"))
     )
     consumed = Transaction.objects.filter(
         upload=OuterRef("pk"), consumed_by_batch__isnull=False
     )
-    return (
+    qs = (
         Upload.objects.filter(toko=toko)
         .select_related("source_type")
         .annotate(locked=ExpressionWrapper(
             Exists(ref) | Exists(consumed), output_field=BooleanField(),
         ))
-        .order_by("-id")[:limit]
+        .order_by("-id")
     )
+    return qs if limit is None else qs[:limit]
+
+
+def _uploads_ctx(request, toko, cap=20):
+    """Konteks riwayat upload utk template: daftar (cap 20 kecuali ?semua=1) +
+    total sebenarnya — header harus jujur bahwa baris lama masih ada, cuma tak
+    tampil (user pernah panik 'file lama hilang')."""
+    semua = request.GET.get("semua") == "1"
+    total = Upload.objects.filter(toko=toko).count()
+    return {
+        "uploads": _uploads_for(toko, limit=None if semua else cap),
+        "uploads_total": total,
+        "uploads_semua": semua,
+        "uploads_cap": cap,
+    }
 
 
 def _saran_tanggal(toko):
@@ -444,7 +460,7 @@ def upload(request):
             "n_siap": sum(1 for p in preview if not p["needs_confirm"] and not p["needs_password"]),
             "n_cek": sum(1 for p in preview if p["needs_confirm"]),
             "n_pwd": sum(1 for p in preview if p["needs_password"]),
-            "uploads": _uploads_for(active),
+            **_uploads_ctx(request, active),
             "healing": request.session.pop("healing_report", None),
             "saran": saran,
             "saran_label": _window_label(saran, saran, with_year=True) if saran else "",
@@ -452,7 +468,7 @@ def upload(request):
     saran = _saran_tanggal(active)
     return render(request, "web/upload.html", {
         "parsers": sorted(PARSERS.keys()), "active_toko": active,
-        "uploads": _uploads_for(active),
+        **_uploads_ctx(request, active),
         "healing": request.session.pop("healing_report", None),
         "saran": saran,
         "saran_label": _window_label(saran, saran, with_year=True) if saran else "",

@@ -214,7 +214,7 @@
 {% load humanize %}
 <div class="card reveal pad0">
   <div style="padding:18px 20px 6px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-    <h3 style="margin:0">Riwayat Upload — {{ active_toko.name }}</h3>
+    <h3 style="margin:0">Riwayat Upload — {{ active_toko.name }}{% if not uploads_semua and uploads_total > uploads_cap %} <span class="faint" style="font-weight:400;font-size:.82rem">({{ uploads_cap }} terbaru dari {{ uploads_total }} — <a href="?semua=1">Tampilkan semua</a>)</span>{% endif %}</h3>
     {% if is_admin_user and uploads %}
     {# Form massal berdiri sendiri; checkbox baris menautkan diri via atribut form="bulkform" #}
     {# supaya tak ada <form> bersarang di dalam tabel. #}
