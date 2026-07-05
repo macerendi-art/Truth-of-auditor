@@ -43,8 +43,12 @@ class ReconcileCheckboxTests(_LoggedIn):
         html = r.content.decode()
         self.assertIn('name="inc_panel_dp"', html)
         self.assertIn('name="inc_bank"', html)
-        # bracket kosong → checkbox disabled.
-        self.assertRegex(html, r'name="inc_bracket"[^>]*disabled')
+        # Bracket kosong → checkbox TETAP enabled+checked (badge yang bilang kosong).
+        # Disabled = tak ikut POST; kalau user ganti tanggal di form, sumber hilang
+        # diam-diam dari batch (bug batch-16 K25). Engine yang melewati relasi
+        # bila sumber benar-benar kosong pada tanggal yang disubmit.
+        self.assertRegex(html, r'name="inc_bracket"[^>]*checked')
+        self.assertNotRegex(html, r'name="inc_bracket"[^>]*disabled')
 
     def test_post_with_unchecked_bank_not_consumed(self):
         self._tx(self.panel, "depo", "50000", "50000", "D1", "p1")
