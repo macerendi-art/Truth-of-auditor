@@ -175,6 +175,11 @@ AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
 ]
 AXES_ENABLED = 'test' not in sys.argv
+# Di belakang proxy Railway REMOTE_ADDR = IP internal yang berganti-ganti;
+# tanpa ini kombo username+IP tak pernah mencapai limit (lockout mati).
+from truth_auditor.security import client_ip  # noqa: E402
+
+AXES_CLIENT_IP_CALLABLE = client_ip
 AXES_FAILURE_LIMIT = 5
 AXES_COOLOFF_TIME = 1  # jam; lockout lepas sendiri
 AXES_RESET_ON_SUCCESS = True

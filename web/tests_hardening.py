@@ -59,6 +59,33 @@ class BruteForceTests(TestCase):
         self.assertEqual(r.status_code, 302)  # sukses → redirect
 
 
+class ClientIpTests(TestCase):
+    """Di belakang proxy Railway REMOTE_ADDR = IP internal load balancer yang
+    berganti-ganti — lockout kombo username+IP tak pernah akumulasi. IP klien
+    diambil dari hop TERAKHIR X-Forwarded-For (ditulis edge Railway; entri
+    kiriman penyerang berada di depannya dan tidak dipercaya)."""
+
+    def _req(self, **meta):
+        from django.test import RequestFactory
+
+        r = RequestFactory().get("/")
+        r.META.update(meta)
+        return r
+
+    def test_xff_spoof_diabaikan_ambil_hop_terakhir(self):
+        from truth_auditor.security import client_ip
+
+        r = self._req(HTTP_X_FORWARDED_FOR="6.6.6.6, 203.0.113.9",
+                      REMOTE_ADDR="100.64.0.3")
+        self.assertEqual(client_ip(r), "203.0.113.9")
+
+    def test_tanpa_xff_pakai_remote_addr(self):
+        from truth_auditor.security import client_ip
+
+        r = self._req(REMOTE_ADDR="127.0.0.1")
+        self.assertEqual(client_ip(r), "127.0.0.1")
+
+
 class CspHeaderTests(TestCase):
     def test_csp_header_terpasang(self):
         r = self.client.get(reverse("login"))
