@@ -8,6 +8,12 @@
       "port": 8000
     },
     {
+      "name": "auditor-ui",
+      "runtimeExecutable": "/Users/macads/Truth-of-auditor/.venv/bin/python",
+      "runtimeArgs": ["manage.py", "runserver", "127.0.0.1:8802", "--noreload"],
+      "port": 8802
+    },
+    {
       "name": "trial",
       "runtimeExecutable": "env",
       "runtimeArgs": [
