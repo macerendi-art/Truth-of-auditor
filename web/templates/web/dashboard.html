@@ -30,12 +30,12 @@
     <div class="v {% if pending %}a{% endif %}">{{ pending|intcomma }}</div>
     <div class="sub">kredit menunggu uang tiba di run berikutnya</div>
   </a>
-  <div class="card stat">
+  <a class="card stat click" href="{% url 'review_queue' %}">
     <div class="top"><span class="k">Antrean tinjau</span>
       <span class="ic {% if pending_review_count %}a{% else %}g{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span></div>
     <div class="v {% if pending_review_count %}a{% else %}g{% endif %}">{{ pending_review_count|intcomma }}</div>
     <div class="sub">hasil perlu mata manusia</div>
-  </div>
+  </a>
   <div class="card stat">
     <div class="top"><span class="k">Uang periksa (D)</span>
       <span class="ic {% if um_d.n %}r{% else %}g{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span></div>

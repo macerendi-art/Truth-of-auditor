@@ -1,0 +1,33 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% block title %}Antrean Tinjau · Truth of Auditor{% endblock %}
+{% block crumb %}Rekonsiliasi · Antrean Tinjau{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Antrean Tinjau</h1>
+    <p>Semua hasil perlu ditinjau untuk <b>{{ active_toko.name }}</b> — lintas batch, satu tempat.</p>
+  </div>
+</div>
+
+<form id="bulk-form">{% csrf_token %}</form>
+<div class="card pad0 reveal">
+  <div class="table-wrap tall" style="border:none">
+  <table>
+    <thead><tr><th style="width:28px"></th><th>Status</th><th>Panel</th><th>User ID</th><th>Full Name</th><th>Player Bank</th><th>Bank Title</th><th>Handler</th><th class="num">Amount</th><th>Bank/Gateway</th><th class="num">Amount</th><th>Alasan</th><th>Batch/Run</th><th style="text-align:center">Aksi</th></tr></thead>
+    <tbody>
+    {% for r in page %}{% include "web/_result_row.html" with show_run_col=1 %}{% empty %}
+      <tr><td colspan="14" class="cell-empty">Antrean kosong — semua hasil sudah ditinjau. ✓</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+{% if page.has_other_pages %}
+<div class="pager">
+  {% if page.has_previous %}<a class="btn sm" href="?page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
+  <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
+  {% if page.has_next %}<a class="btn sm" href="?page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

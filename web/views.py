@@ -744,6 +744,31 @@ def run_detail(request, pk):
 
 
 @login_required
+def review_queue(request):
+    """Antrean semua hasil perlu-tinjau toko aktif, lintas batch/run."""
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    qs = (
+        MatchResult.objects.filter(
+            run__batch__toko=active, bucket=MatchResult.Bucket.TINJAU
+        )
+        .select_related("left", "right", "run", "run__batch")
+        .order_by("-run__batch__recon_date", "-score", "id")
+    )
+    page = Paginator(qs, 40).get_page(request.GET.get("page"))
+    # nomor batch per-toko untuk tiap hasil di halaman ini
+    for r in page.object_list:
+        b = r.run.batch
+        r.home_no = (
+            ReconBatch.objects.filter(toko=active, id__lte=b.id).count() if b else None
+        )
+    return render(request, "web/review_queue.html", {
+        "page": page, "active_toko": active,
+    })
+
+
+@login_required
 @require_POST
 def bulk_review(request, pk):
     """Setujui / tandai-tinjau banyak hasil sekaligus (per halaman terfilter).
@@ -793,7 +818,14 @@ def review(request, pk):
     r.reason_code = "manual_override"
     r.save(update_fields=["bucket", "reason_code"])
     ReviewAction.objects.create(result=r, action=action, reason=reason, reviewer=request.user)
-    return render(request, "web/_result_row.html", {"r": r, "bucket_meta": BUCKET_META})
+    show_run_col = request.POST.get("show_run_col") == "1"
+    if show_run_col and r.run.batch:
+        r.home_no = ReconBatch.objects.filter(
+            toko=r.run.batch.toko, id__lte=r.run.batch_id
+        ).count()
+    return render(request, "web/_result_row.html", {
+        "r": r, "bucket_meta": BUCKET_META, "show_run_col": show_run_col,
+    })
 
 
 @login_required

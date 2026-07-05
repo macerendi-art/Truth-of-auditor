@@ -294,6 +294,10 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
   <a class="link {% if '/reconcile' in p or '/batch' in p or '/run' in p %}active{% endif %}" href="{% url 'reconcile' %}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v16a2 2 0 0 0 2 2h12"/><path d="M18 8l-4-4 4-4"/><path d="M2 12h13a4 4 0 0 1 4 4v4"/></svg>Rekonsiliasi
     {% if pending_review_count %}<span class="cnt {% if pending_review_count > 200 %}hot{% endif %}">{{ pending_review_count }}</span>{% endif %}</a>
+  {% if pending_review_count %}
+  <a class="link {% if '/tinjau' in p %}active{% endif %}" href="{% url 'review_queue' %}" style="padding-left:38px;font-size:12.5px">
+    Antrean tinjau <span class="cnt {% if pending_review_count > 200 %}hot{% endif %}">{{ pending_review_count }}</span></a>
+  {% endif %}
   {% if is_admin_user %}
   <div class="sec">Admin</div>
   <a class="link {% if '/kelola/user' in p %}active{% endif %}" href="{% url 'kelola_user' %}">
