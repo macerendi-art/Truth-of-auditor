@@ -12,7 +12,7 @@
 <style>
 :root{
   --bg:#f4f6f9; --panel:#fff; --panel-2:#f9fafc;
-  --ink:#0f1729; --muted:#5b6577; --faint:#8a93a3;
+  --ink:#0f1729; --muted:#5b6577; --faint:#6d7688;
   --line:#e6eaf0; --line-2:#d7dde6;
   --side:#0c1322; --side-2:#101b31; --side-ink:#dce6f2; --side-muted:#8593a9;
   --brand:#2563eb; --brand-2:#22d3ee; --grad:linear-gradient(135deg,#2563eb,#22d3ee);
@@ -73,7 +73,7 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .topbar .crumb a:hover{color:var(--ink);text-decoration:underline}
 .topbar .spacer{flex:1}
 .toko-pick{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line-2);
-  border-radius:11px;padding:6px 10px;box-shadow:var(--shadow);flex-shrink:0}
+  border-radius:10px;padding:6px 10px;box-shadow:var(--shadow);flex-shrink:0}
 .toko-pick svg{width:15px;height:15px;color:var(--brand)}
 .toko-pick .lbl{font-size:10.5px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
 .toko-pick select{border:none;background:none;font-family:inherit;font-weight:600;font-size:13.5px;color:var(--ink);cursor:pointer;padding:0 2px;max-width:110px}
@@ -129,18 +129,19 @@ a.card.stat.click{display:flex;flex-direction:column;gap:8px}
   display:inline-grid;place-items:center;font-weight:700;font-size:12px;flex-shrink:0}
 
 /* ---- BUTTON ---- */
-.btn{display:inline-flex;align-items:center;gap:8px;padding:9px 15px;border-radius:11px;font-family:inherit;
+.btn{display:inline-flex;align-items:center;gap:8px;padding:9px 15px;border-radius:10px;font-family:inherit;
   font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid var(--line-2);background:var(--panel);color:var(--ink);
   box-shadow:var(--shadow);transition:background .14s,box-shadow .14s}
 .btn svg{width:15px;height:15px}
 .btn:hover{background:var(--panel-2)}
-.btn.primary{border:none;background:var(--brand);color:#fff;box-shadow:0 8px 20px -8px rgba(37,99,235,.65)}
+.btn.primary{border:none;background:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(15,23,42,.2)}
 .btn.primary:hover{background:#1d4fd7}
-.btn.sm{padding:5px 11px;font-size:12.5px;border-radius:9px}
+.btn.sm{padding:5px 11px;font-size:12.5px;border-radius:10px}
 .btn.ghost{background:transparent;box-shadow:none;border-color:transparent}
 .btn.ghost:hover{background:var(--panel-2)}
 .btn.danger{color:var(--bad)}
 .btn.danger:hover{background:var(--bad-bg);border-color:#f4c6c6}
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .btn:focus-visible,.tabs a:focus-visible,.side a.link:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 /* status sibuk: form[data-busy] menandai tombol submit saat dikirim */
 .btn.is-busy{opacity:.65;pointer-events:none}
@@ -179,7 +180,7 @@ th.num,td.num{text-align:right}
 .th-sort:hover{color:var(--ink)}
 .twrap.tall,.table-wrap.tall{max-height:72vh;overflow:auto}
 table.dense tbody td{padding:6px 14px;font-size:12.5px}
-td.cell-empty{text-align:center;padding:30px 16px;color:var(--muted);font-size:13.5px}
+td.cell-empty{text-align:center;padding:42px 16px;color:var(--muted);font-size:13.5px}
 /* tabel ringkasan label→nilai (batch DP/WD) */
 table.kv td{padding:9px 2px;font-size:13.5px}
 table.kv td:first-child{color:var(--muted)}
@@ -278,8 +279,25 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
   .content{padding-top:16px}
   .stat .v{font-size:21px}
   thead th{position:static}
-  .twrap.tall,.table-wrap.tall{max-height:none}
+  /* header tabel tinggi tetap menempel saat digulir di HP */
+  .twrap.tall thead th,.table-wrap.tall thead th{position:sticky;top:0}
   .cal a{width:40px}
+}
+@media(max-width:760px){
+  .col-hide{display:none!important}
+  /* target sentuh lebih besar untuk tombol aksi di tabel */
+  td .btn.sm{min-height:38px;min-width:38px;justify-content:center}
+  .grid .mob-first{order:-1}
+}
+@media(max-width:640px){
+  .topbar .crumb{display:none}
+  .topbar form[role="search"]{display:none}
+  .toko-pick .lbl{display:none}
+  .toko-pick select{max-width:92px}
+  .row>.btn{width:100%;justify-content:center}
+  .page-head{flex-wrap:wrap}
+  .seg{max-width:100%;overflow-x:auto}
+  .seg .seg-sub{display:none}
 }
 @media(prefers-reduced-motion:reduce){.side{transition:none}.scrim{transition:none}}
 </style>

@@ -9,7 +9,7 @@
     <p>{{ total|intcomma }} baris kanonik untuk <b>{{ active_toko.name }}</b>.</p>
   </div>
   <div class="actions">
-    <a class="btn" href="?{{ qpage }}&export=1">⬇ Export Excel</a>
+    <a class="btn" href="?{{ qpage }}&export=1"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export Excel</a>
   </div>
 </div>
 
@@ -17,15 +17,15 @@
   {% if carry %}
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
     <span class="badge warn">Menunggu settlement</span>
-    <a class="btn sm ghost" href="{% url 'transactions' %}">✕ hapus filter</a>
+    <a class="btn sm ghost" href="{% url 'transactions' %}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>hapus filter</a>
   </div>
   {% endif %}
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
     <span class="faint" style="font-size:12px;font-weight:600;letter-spacing:.02em">PILAH CEPAT</span>
     <div class="seg">
       <a href="?{{ qflt }}" class="{% if not jenis %}active{% endif %}">Semua</a>
-      <a href="?{% if qflt %}{{ qflt }}&{% endif %}jenis=depo" class="dp {% if jenis == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit · D…</a>
-      <a href="?{% if qflt %}{{ qflt }}&{% endif %}jenis=wd" class="wd {% if jenis == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw · W…</a>
+      <a href="?{% if qflt %}{{ qflt }}&{% endif %}jenis=depo" class="dp {% if jenis == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit<span class="seg-sub"> · D…</span></a>
+      <a href="?{% if qflt %}{{ qflt }}&{% endif %}jenis=wd" class="wd {% if jenis == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw<span class="seg-sub"> · W…</span></a>
     </div>
   </div>
   <form method="get" class="row">
@@ -64,12 +64,12 @@
   <div class="table-wrap tall" style="border:none">
   <table id="tx-table">
     <thead><tr>
-      <th><a class="th-sort" href="?{{ qbase }}&sort=waktu&dir={% if sort == 'waktu' and dir == 'asc' %}desc{% else %}asc{% endif %}">Waktu{% if sort == 'waktu' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
-      <th><a class="th-sort" href="?{{ qbase }}&sort=sumber&dir={% if sort == 'sumber' and dir == 'asc' %}desc{% else %}asc{% endif %}">Sumber{% if sort == 'sumber' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
-      <th><a class="th-sort" href="?{{ qbase }}&sort=jenis&dir={% if sort == 'jenis' and dir == 'asc' %}desc{% else %}asc{% endif %}">Jenis{% if sort == 'jenis' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
-      <th class="num"><a class="th-sort" href="?{{ qbase }}&sort=amount&dir={% if sort == 'amount' and dir == 'asc' %}desc{% else %}asc{% endif %}">Amount{% if sort == 'amount' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
-      <th class="num"><a class="th-sort" href="?{{ qbase }}&sort=delta&dir={% if sort == 'delta' and dir == 'asc' %}desc{% else %}asc{% endif %}">Δ Uang{% if sort == 'delta' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
-      <th>Ticket</th><th>Username</th><th>Nama Lengkap</th><th>Counterparty</th>
+      <th><a class="th-sort" href="?{{ qbase }}&sort=waktu&dir={% if sort == 'waktu' and dir == 'asc' %}desc{% else %}asc{% endif %}">Waktu{% if sort == 'waktu' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
+      <th><a class="th-sort" href="?{{ qbase }}&sort=sumber&dir={% if sort == 'sumber' and dir == 'asc' %}desc{% else %}asc{% endif %}">Sumber{% if sort == 'sumber' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
+      <th><a class="th-sort" href="?{{ qbase }}&sort=jenis&dir={% if sort == 'jenis' and dir == 'asc' %}desc{% else %}asc{% endif %}">Jenis{% if sort == 'jenis' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
+      <th class="num"><a class="th-sort" href="?{{ qbase }}&sort=amount&dir={% if sort == 'amount' and dir == 'asc' %}desc{% else %}asc{% endif %}">Nominal{% if sort == 'amount' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
+      <th class="num"><a class="th-sort" href="?{{ qbase }}&sort=delta&dir={% if sort == 'delta' and dir == 'asc' %}desc{% else %}asc{% endif %}">Δ Uang{% if sort == 'delta' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
+      <th>Ticket</th><th>Username</th><th>Nama Lengkap</th><th>Nama di Bank</th>
     </tr></thead>
     <tbody>
     {% for t in page %}
@@ -92,9 +92,9 @@
 
 {% if page.has_other_pages %}
 <div class="pager">
-  {% if page.has_previous %}<a class="btn sm" href="?{{ qpage }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
+  {% if page.has_previous %}<a class="btn sm" href="?{{ qpage }}&page={{ page.previous_page_number }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>Sebelumnya</a>{% endif %}
   <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
-  {% if page.has_next %}<a class="btn sm" href="?{{ qpage }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
+  {% if page.has_next %}<a class="btn sm" href="?{{ qpage }}&page={{ page.next_page_number }}">Berikutnya<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}

@@ -76,16 +76,16 @@
   <div class="card reveal">
     <h3>Kerjakan hari ini</h3>
     <table class="flush">
-      <tr><td style="width:34px">{% if comp.minimum_met %}<span class="badge ok plain">✓</span>{% else %}<span class="badge warn plain">•</span>{% endif %}</td>
+      <tr><td style="width:34px">{% if comp.minimum_met %}<span class="badge ok"></span>{% else %}<span class="badge warn"></span>{% endif %}</td>
         <td>Kelengkapan sumber aktif</td>
         <td class="r"><a class="btn sm" href="{% url 'upload' %}">{% if comp.minimum_met %}lengkap{% else %}upload{% endif %}</a></td></tr>
-      <tr><td><span class="badge {% if pending %}warn{% else %}ok{% endif %} plain">{% if pending %}{{ pending }}{% else %}✓{% endif %}</span></td>
+      <tr><td><span class="badge {% if pending %}warn{% else %}ok{% endif %}">{% if pending %}{{ pending }}{% endif %}</span></td>
         <td>Rekonsiliasi tanggal berikutnya ({{ next_date|date:"d/m" }})</td>
         <td class="r"><a class="btn sm" href="{% url 'reconcile' %}">jalankan</a></td></tr>
-      <tr><td><span class="badge {% if pending_review_count %}warn{% else %}ok{% endif %} plain">{% if pending_review_count %}{{ pending_review_count }}{% else %}✓{% endif %}</span></td>
+      <tr><td><span class="badge {% if pending_review_count %}warn{% else %}ok{% endif %}">{% if pending_review_count %}{{ pending_review_count }}{% endif %}</span></td>
         <td>Tinjau hasil lemah</td>
         <td class="r">{% if last %}<a class="btn sm" href="{% url 'batch_detail' last.pk %}">buka batch</a>{% else %}<span class="faint">—</span>{% endif %}</td></tr>
-      <tr><td><span class="badge {% if um_d.n %}bad{% else %}ok{% endif %} plain">{% if um_d.n %}{{ um_d.n }}{% else %}✓{% endif %}</span></td>
+      <tr><td><span class="badge {% if um_d.n %}bad{% else %}ok{% endif %}">{% if um_d.n %}{{ um_d.n }}{% endif %}</span></td>
         <td>Periksa uang tanpa pasangan (D)</td>
         <td class="r">{% if last %}<a class="btn sm" href="{% url 'batch_uang' last.pk %}?k=d">periksa</a>{% else %}<span class="faint">—</span>{% endif %}</td></tr>
     </table>
@@ -152,7 +152,8 @@
     var htot=Math.max(1, r[5]*0.86);
     html+='<g><rect x="'+(x+3)+'" y="'+(H-9-hdp)+'" width="'+bw+'" height="'+hdp+'" rx="2" style="fill:var(--brand)" opacity=".9"><title>'+r[0]+' · DP '+Number(r[3]).toLocaleString('id-ID')+'</title></rect>';
     html+='<rect x="'+(x+5+bw)+'" y="'+(H-9-hwd)+'" width="'+bw+'" height="'+hwd+'" rx="2" style="fill:var(--warn)" opacity=".85"><title>'+r[0]+' · WD '+Number(r[4]).toLocaleString('id-ID')+'</title></rect>';
-    html+='<text x="'+(x+gw/2)+'" y="'+(H-1)+'" font-size="7" text-anchor="middle" style="fill:var(--faint)">'+r[0]+'</text></g>';
+    if(i%2===0){ html+='<text x="'+(x+gw/2)+'" y="'+(H-1)+'" font-size="9" text-anchor="middle" style="fill:var(--faint)">'+r[0]+'</text>'; }
+    html+='</g>';
     pts.push((x+gw/2)+','+(H-9-htot));
   });
   if(pts.length > 1){

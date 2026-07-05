@@ -34,6 +34,7 @@ from sources.models import SourceType, Upload
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
 from web.access import tokos_for
+from web.templatetags.web_extras import reason_label
 
 BUCKET_META = {
     "cocok": {"label": "Cocok", "cls": "ok"},
@@ -568,8 +569,8 @@ def _export_transactions(qs, active):
         return c
 
     ws.append([hcell(h) for h in [
-        "Waktu", "Sumber", "Jenis", "Amount", "Δ Uang", "Ticket",
-        "Username", "Nama Lengkap", "Counterparty",
+        "Waktu", "Sumber", "Jenis", "Nominal", "Δ Uang", "Ticket",
+        "Username", "Nama Lengkap", "Nama di Bank",
     ]])
     for t in rows:
         mp = best.get(t.id, (None, None))[1]
@@ -887,7 +888,14 @@ def run_detail(request, pk):
     bucket = request.GET.get("bucket", "")
     if bucket:
         qs = qs.filter(bucket=bucket)
-    # Chip filter per alasan — dihitung DALAM bucket terpilih supaya angkanya jujur.
+    # Filter arus Deposit/Withdraw: pakai jenis sisi kiri; hasil tanpa kiri
+    # (mis. no_panel) dinilai dari sisi uangnya.
+    flow = request.GET.get("flow", "")
+    if flow not in ("depo", "wd"):
+        flow = ""
+    if flow:
+        qs = qs.filter(Q(left__jenis=flow) | Q(left__isnull=True, right__jenis=flow))
+    # Chip filter per alasan — dihitung DALAM bucket+flow terpilih supaya angkanya jujur.
     reasons = list(
         qs.values("reason_code").annotate(n=Count("id")).order_by("-n")
     )
@@ -914,7 +922,7 @@ def run_detail(request, pk):
         "run": run, "page": page, "bucket": bucket, "bucket_meta": BUCKET_META,
         "left_label": left_label, "right_label": right_label,
         "batch": batch, "batch_no": batch_no,
-        "reasons": reasons, "reason": reason,
+        "reasons": reasons, "reason": reason, "flow": flow,
         "sort": sort, "dir": sort_dir, "is_hollow": is_hollow,
     }
     return render(request, "web/run_detail.html", ctx)
@@ -1074,9 +1082,9 @@ def export_run(request, pk):
 
     d = wb.create_sheet("Hasil")
     L, R = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
-    headers = ["Bucket", f"{L} Ticket", f"{L} Amount", f"{L} User", f"{L} Nama Lengkap",
+    headers = ["Status", f"{L} Ticket", f"{L} Nominal", f"{L} Username", f"{L} Nama Lengkap",
                f"{L} Player Bank", f"{L} Bank Title", f"{L} Handler", f"{L} Waktu",
-               R, f"{R} Sumber", f"{R} Amount", f"{R} Waktu", "Skor", "Alasan", "Detail"]
+               R, f"{R} Sumber", f"{R} Nominal", f"{R} Waktu", "Skor", "Alasan", "Detail"]
     d.append(headers)
     for c in d[1]:
         c.font = Font(bold=True)
@@ -1098,7 +1106,7 @@ def export_run(request, pk):
             float(right.amount) if right else "",
             right.occurred_at.strftime("%d/%m %H:%M") if right and right.occurred_at else "",
             round(r.score or 0),
-            r.reason_code,
+            reason_label(r.reason_code),
             r.reason_detail,
         ])
 

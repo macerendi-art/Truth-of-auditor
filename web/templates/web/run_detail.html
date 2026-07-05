@@ -9,12 +9,16 @@
     <h1>{{ run.get_relation_display }}</h1>
     <p>{% if batch %}<a href="{% url 'batch_detail' batch.pk %}">Batch #{{ batch_no }}</a> · {% endif %}{{ run.get_relation_display }} (Run #{{ run.pk }}) · toleransi <b>{{ run.tolerance.name }}</b> (±{{ run.tolerance.date_window_days }} hari) · {{ run.created_at|date:"d/m/Y H:i" }}</p>
   </div>
-  <div class="actions"><a class="btn" href="{% url 'export_run' run.pk %}">⬇ Export Excel</a></div>
+  <div class="actions">
+    {% if batch %}<a class="btn ghost" href="{% url 'batch_detail' batch.pk %}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>Kembali ke Batch #{{ batch_no }}</a>
+    {% else %}<a class="btn ghost" href="{% url 'reconcile' %}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>Kembali ke Rekonsiliasi</a>{% endif %}
+    <a class="btn" href="{% url 'export_run' run.pk %}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export Excel</a>
+  </div>
 </div>
 
 {% if is_hollow %}
 <div class="msg error reveal" style="margin-bottom:16px;border-left:4px solid var(--bad)">
-  <b>⚠ Run cangkang — hasil TIDAK BISA diverifikasi.</b> Ringkasan menyebut hasil, tapi bukti transaksinya sudah terhapus (cascade). Angka di bawah tidak sah — buat ulang dari data yang lengkap.
+  <b><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:6px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Run cangkang — hasil TIDAK BISA diverifikasi.</b> Ringkasan menyebut hasil, tapi bukti transaksinya sudah terhapus (cascade). Angka di bawah tidak sah — buat ulang dari data yang lengkap.
 </div>
 {% endif %}
 
@@ -27,18 +31,25 @@
 </div>
 {% endif %}
 
-<div class="tabs reveal" style="margin-top:24px">
-  <a href="?" class="{% if not bucket %}active{% endif %}">Semua</a>
-  <a href="?bucket=cocok" class="{% if bucket == 'cocok' %}active{% endif %}">Cocok</a>
-  <a href="?bucket=perlu_tinjau" class="{% if bucket == 'perlu_tinjau' %}active{% endif %}">Perlu Ditinjau</a>
-  <a href="?bucket=tidak_cocok" class="{% if bucket == 'tidak_cocok' %}active{% endif %}">Tidak Cocok</a>
+<div class="reveal" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:24px">
+  <div class="tabs" style="margin-bottom:0">
+    <a href="?flow={{ flow }}" class="{% if not bucket %}active{% endif %}">Semua</a>
+    <a href="?bucket=cocok&flow={{ flow }}" class="{% if bucket == 'cocok' %}active{% endif %}">Cocok</a>
+    <a href="?bucket=perlu_tinjau&flow={{ flow }}" class="{% if bucket == 'perlu_tinjau' %}active{% endif %}">Perlu Ditinjau</a>
+    <a href="?bucket=tidak_cocok&flow={{ flow }}" class="{% if bucket == 'tidak_cocok' %}active{% endif %}">Tidak Cocok</a>
+  </div>
+  <div class="seg" role="group" aria-label="Pilah arus Deposit atau Withdraw">
+    <a href="?bucket={{ bucket }}" class="{% if not flow %}active{% endif %}">Semua</a>
+    <a href="?bucket={{ bucket }}&flow=depo" class="dp {% if flow == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit</a>
+    <a href="?bucket={{ bucket }}&flow=wd" class="wd {% if flow == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw</a>
+  </div>
 </div>
 
 {% if reasons|length > 1 %}
-<div class="tabs sub reveal" style="margin-top:-6px">
-  <a href="?bucket={{ bucket }}" class="{% if not reason %}active{% endif %}">semua alasan</a>
+<div class="tabs sub reveal" style="margin-top:12px;margin-bottom:0">
+  <a href="?bucket={{ bucket }}&flow={{ flow }}" class="{% if not reason %}active{% endif %}">semua alasan</a>
   {% for rc in reasons %}
-  <a href="?bucket={{ bucket }}&reason={{ rc.reason_code }}" class="{% if reason == rc.reason_code %}active{% endif %}">
+  <a href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ rc.reason_code|urlencode }}" class="{% if reason == rc.reason_code %}active{% endif %}">
     {{ rc.reason_code|reason_label }}<span class="n">{{ rc.n|intcomma }}</span></a>
   {% endfor %}
 </div>
@@ -47,24 +58,24 @@
 <form id="bulk-form" method="post" action="{% url 'bulk_review' run.pk %}">
   {% csrf_token %}
   <input type="hidden" name="next" value="{{ request.get_full_path }}">
-  <div class="card reveal" style="padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+  <div class="card reveal" style="padding:10px 14px;margin-top:16px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;font-size:13px;font-weight:500">
       <input type="checkbox" id="checkAll"> pilih semua di halaman ini</label>
     <span style="flex:1"></span>
     <button class="btn sm" type="button" data-dense="#hasil-table" title="Perkecil tinggi baris">Padat</button>
     <button class="btn sm" type="submit" name="action" value="mark_matched"
-      onclick="return confirm('Tandai COCOK semua baris terpilih?')">✓ Setujui terpilih</button>
+      onclick="return confirm('Tandai COCOK semua baris terpilih?')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Setujui terpilih</button>
     <button class="btn sm ghost" type="submit" name="action" value="mark_review"
-      onclick="return confirm('Tandai PERLU TINJAU semua baris terpilih?')">⚑ Tinjau terpilih</button>
+      onclick="return confirm('Tandai PERLU TINJAU semua baris terpilih?')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>Tinjau terpilih</button>
   </div>
 
 <div class="card pad0 reveal">
   <div class="table-wrap tall" style="border:none">
   <table id="hasil-table">
-    <thead><tr><th style="width:28px"></th><th>Status</th><th>{{ left_label }}</th><th>User ID</th><th>Full Name</th><th>Player Bank</th><th>Bank Title</th><th>Handler</th>
-      <th class="num"><a class="th-sort" href="?bucket={{ bucket }}&reason={{ reason }}&sort=amount&dir={% if sort == 'amount' and dir == 'asc' %}desc{% else %}asc{% endif %}">Amount{% if sort == 'amount' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
-      <th>{{ right_label }}</th><th class="num">Amount</th>
-      <th><a class="th-sort" href="?bucket={{ bucket }}&reason={{ reason }}&sort=skor&dir={% if sort == 'skor' and dir == 'asc' %}desc{% else %}asc{% endif %}">Alasan{% if sort == 'skor' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
+    <thead><tr><th style="width:28px"></th><th>Status</th><th>{{ left_label }}</th><th>Username</th><th>Nama Lengkap</th><th class="col-hide">Player Bank</th><th class="col-hide">Bank Title</th><th class="col-hide">Handler</th>
+      <th class="num"><a class="th-sort" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort=amount&dir={% if sort == 'amount' and dir == 'asc' %}desc{% else %}asc{% endif %}">Nominal{% if sort == 'amount' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
+      <th>{{ right_label }}</th><th class="num">Nominal</th>
+      <th><a class="th-sort" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort=skor&dir={% if sort == 'skor' and dir == 'asc' %}desc{% else %}asc{% endif %}">Alasan{% if sort == 'skor' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
       <th style="text-align:center">Aksi</th></tr></thead>
     <tbody>
     {% for r in page %}{% include "web/_result_row.html" %}{% empty %}
@@ -77,9 +88,9 @@
 
 {% if page.has_other_pages %}
 <div class="pager">
-  {% if page.has_previous %}<a class="btn sm" href="?bucket={{ bucket }}&reason={{ reason }}&sort={{ sort }}&dir={{ dir }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
+  {% if page.has_previous %}<a class="btn sm" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort={{ sort }}&dir={{ dir }}&page={{ page.previous_page_number }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>Sebelumnya</a>{% endif %}
   <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
-  {% if page.has_next %}<a class="btn sm" href="?bucket={{ bucket }}&reason={{ reason }}&sort={{ sort }}&dir={{ dir }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
+  {% if page.has_next %}<a class="btn sm" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort={{ sort }}&dir={{ dir }}&page={{ page.next_page_number }}">Berikutnya<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}

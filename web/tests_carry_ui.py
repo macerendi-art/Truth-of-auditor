@@ -112,7 +112,7 @@ class SettlementDisplayTests(_LoggedIn):
         p, b27, b28 = self._flow_27_28()
         r = self.client.get(reverse("batch_detail", args=[b28.pk]))
         self.assertContains(r, "Settlement tertunda")
-        self.assertContains(r, "50,000")  # intcomma, konsisten dgn tampilan lain
+        self.assertContains(r, "50.000")  # intcomma lokal id — pemisah ribuan titik
 
     def test_batch_asal_menampilkan_catatan_di_settle(self):
         p, b27, b28 = self._flow_27_28()

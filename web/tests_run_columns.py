@@ -64,8 +64,8 @@ class SplitPanelColumnsTests(_Base):
     def test_header_kolom_baru_ada(self):
         resp = self.client.get(reverse("run_detail", args=[self.run.pk]))
         self.assertEqual(resp.status_code, 200)
-        for th in ("<th>User ID</th>", "<th>Full Name</th>", "<th>Player Bank</th>",
-                   "<th>Bank Title</th>", "<th>Handler</th>"):
+        for th in ("<th>Username</th>", "<th>Nama Lengkap</th>", '<th class="col-hide">Player Bank</th>',
+                   '<th class="col-hide">Bank Title</th>', '<th class="col-hide">Handler</th>'):
             self.assertContains(resp, th)
 
     def test_nilai_terpisah_per_sel_dan_sel_panel_hanya_ticket_tanggal(self):
@@ -184,14 +184,14 @@ class ExportRunPanelColumnsTests(_Base):
         wb = load_workbook(io.BytesIO(resp.content))
         ws = wb["Hasil"]
         headers = [c.value for c in ws[1]]
-        for h in ("Panel User", "Panel Nama Lengkap", "Panel Player Bank",
+        for h in ("Panel Username", "Panel Nama Lengkap", "Panel Player Bank",
                   "Panel Bank Title", "Panel Handler"):
             self.assertIn(h, headers)
-        # Amount tidak duplikat di sisi kiri.
-        self.assertEqual(headers.count("Panel Amount"), 1)
+        # Nominal tidak duplikat di sisi kiri.
+        self.assertEqual(headers.count("Panel Nominal"), 1)
         row2 = [c.value for c in ws[2]]
         self.assertEqual(row2[headers.index("Panel Player Bank")],
                          "DANA|fajar Pratama |083822153879")
         self.assertEqual(row2[headers.index("Panel Bank Title")], "BCA|HENDI|7126201591")
         self.assertEqual(row2[headers.index("Panel Handler")], "Mozart K25")
-        self.assertEqual(row2[headers.index("Panel User")], "budi123")
+        self.assertEqual(row2[headers.index("Panel Username")], "budi123")

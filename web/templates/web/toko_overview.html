@@ -26,7 +26,7 @@
         </td>
         <td class="num mono">
           {% if not r.has_batch %}<span class="faint">—</span>
-          {% elif r.selisih == 0 %}<span class="badge ok plain">0 ✓</span>
+          {% elif r.selisih == 0 %}<span class="badge ok">0</span>
           {% else %}<span class="badge {{ r.status }} plain">{{ r.selisih|floatformat:0|intcomma }}</span>{% endif %}
         </td>
         <td class="num mono">{{ r.tinjau|intcomma }}</td>

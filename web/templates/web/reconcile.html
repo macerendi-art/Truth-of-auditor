@@ -99,7 +99,7 @@ details.adv .adv-body{padding:2px 14px 14px}
   </div>
 
   {# ---- JALANKAN ---- #}
-  <div class="card reveal">
+  <div class="card reveal mob-first">
     <h3 style="margin:0 0 14px">Jalankan Rekonsiliasi</h3>
     <form method="post" id="jalankan-form" data-busy>
       {% csrf_token %}
@@ -161,8 +161,8 @@ details.adv .adv-body{padding:2px 14px 14px}
         <td><a class="grad-text" style="font-weight:600" href="{% url 'batch_detail' b.pk %}">#{{ b.no }}</a>
           <span class="faint" style="font-size:11px;display:block">{{ b.created_at|date:"d/m H:i" }}</span></td>
         <td>{{ b.recon_date|date:"d/m/Y"|default:"—" }}</td>
-        <td class="num">{% if b.summary.dp.selisih == 0 %}<span class="badge ok plain">0 ✓</span>{% else %}{{ b.summary.dp.selisih|default:0|floatformat:0|intcomma }}{% endif %}</td>
-        <td class="num">{% if b.summary.wd.selisih == 0 %}<span class="badge ok plain">0 ✓</span>{% else %}{{ b.summary.wd.selisih|default:0|floatformat:0|intcomma }}{% endif %}</td>
+        <td class="num">{% if b.summary.dp.selisih == 0 %}<span class="badge ok">0</span>{% else %}{{ b.summary.dp.selisih|default:0|floatformat:0|intcomma }}{% endif %}</td>
+        <td class="num">{% if b.summary.wd.selisih == 0 %}<span class="badge ok">0</span>{% else %}{{ b.summary.wd.selisih|default:0|floatformat:0|intcomma }}{% endif %}</td>
         <td class="r num" style="color:var(--ok);font-weight:600">{{ b.summary.buckets.cocok|default:0|intcomma }}</td>
         <td class="r num" style="color:var(--warn)">{{ b.summary.buckets.perlu_tinjau|default:0|intcomma }}</td>
         {% if is_admin_user %}

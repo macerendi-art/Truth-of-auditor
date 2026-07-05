@@ -8,7 +8,10 @@
     <h1>Uang Tanpa Pasangan</h1>
     <p><a href="{% url 'batch_detail' batch.pk %}">Batch #{{ batch_no }}</a> — {{ batch.toko.name }}{% if batch.recon_date %} · Tanggal {{ batch.recon_date|date:"d/m/Y" }}{% endif %} — mutasi bank/gateway yang tidak berpasangan dengan catatan panel mana pun.</p>
   </div>
-  <a class="btn" href="?export=1{% if kat %}&k={{ kat }}{% endif %}">⬇ Export Excel</a>
+  <div class="actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <a class="btn ghost" href="{% url 'batch_detail' batch.pk %}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>Kembali ke Batch #{{ batch_no }}</a>
+    <a class="btn" href="?export=1{% if kat %}&k={{ kat }}{% endif %}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export Excel</a>
+  </div>
 </div>
 
 <div class="grid cols-4 reveal">
@@ -33,9 +36,9 @@
   <table>
     <thead>
       <tr><th>Kat</th>
-        <th><a class="th-sort" href="?k={{ kat }}&sort=tanggal&dir={% if sort == 'tanggal' and dir == 'asc' %}desc{% else %}asc{% endif %}">Tanggal{% if sort == 'tanggal' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
+        <th><a class="th-sort" href="?k={{ kat }}&sort=tanggal&dir={% if sort == 'tanggal' and dir == 'asc' %}desc{% else %}asc{% endif %}">Tanggal{% if sort == 'tanggal' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
         <th>Sumber</th><th>File/Rekening</th><th>Ticket</th><th>Username</th><th>Pengirim/Penerima</th>
-        <th class="num"><a class="th-sort" href="?k={{ kat }}&sort=nominal&dir={% if sort == 'nominal' and dir == 'asc' %}desc{% else %}asc{% endif %}">Nominal{% if sort == 'nominal' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th></tr>
+        <th class="num"><a class="th-sort" href="?k={{ kat }}&sort=nominal&dir={% if sort == 'nominal' and dir == 'asc' %}desc{% else %}asc{% endif %}">Nominal{% if sort == 'nominal' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th></tr>
     </thead>
     <tbody>
       {% for t in page.object_list %}
@@ -50,7 +53,7 @@
         <td class="num mono" {% if t.money_delta < 0 %}style="color:var(--bad)"{% endif %}>{{ t.money_delta|floatformat:0|intcomma }}</td>
       </tr>
       {% empty %}
-      <tr><td colspan="8" class="cell-empty">Tidak ada — semua uang batch ini berpasangan. ✓</td></tr>
+      <tr><td colspan="8" class="cell-empty">Tidak ada — semua uang batch ini berpasangan.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -59,9 +62,9 @@
 
 {% if page.has_other_pages %}
 <div class="pager reveal">
-  {% if page.has_previous %}<a class="btn sm" href="?k={{ kat }}&sort={{ sort }}&dir={{ dir }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
+  {% if page.has_previous %}<a class="btn sm" href="?k={{ kat }}&sort={{ sort }}&dir={{ dir }}&page={{ page.previous_page_number }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>Sebelumnya</a>{% endif %}
   <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
-  {% if page.has_next %}<a class="btn sm" href="?k={{ kat }}&sort={{ sort }}&dir={{ dir }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
+  {% if page.has_next %}<a class="btn sm" href="?k={{ kat }}&sort={{ sort }}&dir={{ dir }}&page={{ page.next_page_number }}">Berikutnya<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}

@@ -55,8 +55,8 @@ class TxExportTests(TestCase):
         header = [c.value for c in ws[1]]
         self.assertEqual(
             header,
-            ["Waktu", "Sumber", "Jenis", "Amount", "Δ Uang", "Ticket",
-             "Username", "Nama Lengkap", "Counterparty"],
+            ["Waktu", "Sumber", "Jenis", "Nominal", "Δ Uang", "Ticket",
+             "Username", "Nama Lengkap", "Nama di Bank"],
         )
 
     def test_export_kosong_hanya_header(self):
