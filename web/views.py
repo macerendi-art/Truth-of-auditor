@@ -609,6 +609,29 @@ def _status_batches(batches):
         }
 
 
+def _rentang_sumber(toko):
+    """Rentang tanggal data AKTIF per sumber (kunci = kunci kelengkapan engine).
+    Dipakai kartu kelengkapan: sumber yang 'kosong' di window terpilih diberi
+    petunjuk di tanggal mana dia PUNYA data — biar user tidak mengira upload
+    hilang padahal cuma windownya yang tidak pas."""
+    base = Transaction.objects.filter(
+        toko=toko, is_duplicate=False, consumed_by_batch__isnull=True
+    )
+    spec = {
+        "panel_dp": {"source_type__key": "panel", "jenis": "depo"},
+        "panel_wd": {"source_type__key": "panel", "jenis": "wd"},
+        "bracket": {"source_type__key": "bracket"},
+        "bank": {"source_type__key": "bank"},
+        "gateway": {"source_type__key": "gateway"},
+    }
+    out = {}
+    for key, f in spec.items():
+        agg = base.filter(**f).aggregate(lo=Min("occurred_at"), hi=Max("occurred_at"))
+        if agg["lo"]:
+            out[key] = _window_label(agg["lo"].date(), agg["hi"].date())
+    return out
+
+
 # Di atas ambang baris aktif ini, reconcile jalan di THREAD background —
 # request kembali seketika, worker gunicorn tidak dibunuh timeout 120s.
 _BG_THRESHOLD = 20000
@@ -735,6 +758,14 @@ def reconcile(request):
         all_batches = [b for b in all_batches if (b.completeness or {}).get(bank)]
     batches = all_batches[:20]
     _status_batches(batches)  # chip status + label tanggal data, hanya utk yg tampil
+    # Konteks tanggal kartu kelengkapan: label window + rentang data aktif per
+    # sumber (buat baris "kosong" — kosong DI TANGGAL INI, bukan datanya hilang).
+    kelengkapan_label = ""
+    try:
+        if df and dt:
+            kelengkapan_label = _window_label(date.fromisoformat(df), date.fromisoformat(dt))
+    except ValueError:
+        pass
     ctx = {
         "active_toko": active,
         "completeness": check_completeness(active, df, dt),
@@ -744,6 +775,8 @@ def reconcile(request):
         "date_from": df or "", "date_to": dt or "",
         "tanggal_disarankan": tanggal_disarankan,
         "saran_iso": saran.isoformat() if saran else "",
+        "kelengkapan_label": kelengkapan_label,
+        "rentang_sumber": _rentang_sumber(active),
     }
     return render(request, "web/reconcile.html", ctx)
 
