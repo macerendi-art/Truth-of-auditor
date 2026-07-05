@@ -473,12 +473,23 @@ def transactions(request):
     if jenis:
         qs = qs.filter(jenis=jenis)
     if q:
-        qs = qs.filter(
+        cond = (
             Q(username__icontains=q)
             | Q(ticket_no__icontains=q)
             | Q(reference__icontains=q)
             | Q(counterparty__icontains=q)
         )
+        # Angka (boleh berformat "50.000" / "50,000") → cari juga nominal persis.
+        digits = q.replace(".", "").replace(",", "")
+        if digits.isdigit():
+            cond |= Q(amount=digits)
+        qs = qs.filter(cond)
+    tgl_dari = request.GET.get("date_from", "").strip()
+    tgl_sampai = request.GET.get("date_to", "").strip()
+    if tgl_dari:
+        qs = qs.filter(occurred_at__date__gte=tgl_dari)
+    if tgl_sampai:
+        qs = qs.filter(occurred_at__date__lte=tgl_sampai)
 
     # Tombol filter per-bank: label diturunkan dari data upload toko ini
     # (account.provider / provider / nama file) — bukan daftar hardcode.
@@ -530,6 +541,8 @@ def transactions(request):
         "bank": bank,
         "bank_options": bank_options,
         "total": page.paginator.count,
+        "date_from": tgl_dari,
+        "date_to": tgl_sampai,
     }
     return render(request, "web/transactions.html", ctx)
 

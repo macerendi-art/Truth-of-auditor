@@ -44,6 +44,12 @@
   <div class="topbar">
     <span class="crumb">{% block crumb %}Truth of Auditor{% endblock %}</span>
     <span class="spacer"></span>
+    {# Cari global: username / ticket / referensi / nama / nominal → halaman transaksi #}
+    <form method="get" action="{% url 'transactions' %}" class="toko-pick" style="margin-right:8px">
+      <svg width="16" height="16"><use href="#i-search"/></svg>
+      <input name="q" placeholder="Cari transaksi…" aria-label="Cari transaksi"
+             style="border:none;background:transparent;outline:none;min-width:130px;color:inherit;font:inherit">
+    </form>
     <form method="post" action="{% url 'set_toko' %}" class="toko-pick">
       {% csrf_token %}
       <svg width="16" height="16"><use href="#i-store"/></svg>

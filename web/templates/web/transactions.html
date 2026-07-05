@@ -16,8 +16,12 @@
     <div class="field"><label>Jenis</label>
       <select name="jenis"><option value="">Semua</option>
       {% for val,lbl in jenis_choices %}<option value="{{ val }}" {% if jenis == val %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></div>
-    <div class="field" style="flex:2"><label>Cari (username / ticket / referensi / nama)</label>
-      <input name="q" value="{{ q }}" placeholder="mis. Wacor20 atau D1757153"></div>
+    <div class="field" style="flex:2"><label>Cari (username / ticket / referensi / nama / nominal)</label>
+      <input name="q" value="{{ q }}" placeholder="mis. Wacor20, D1757153, atau 50.000"></div>
+    <div class="field"><label>Dari tanggal</label>
+      <input type="date" name="date_from" value="{{ date_from }}"></div>
+    <div class="field"><label>Sampai</label>
+      <input type="date" name="date_to" value="{{ date_to }}"></div>
     {% if bank %}<input type="hidden" name="bank" value="{{ bank }}">{% endif %}
     <button class="btn primary" type="submit" style="flex:0 0 auto;align-self:flex-end;margin-bottom:15px">Filter</button>
   </form>
