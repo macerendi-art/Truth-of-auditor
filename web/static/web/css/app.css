@@ -72,6 +72,13 @@
     display:flex;min-height:100vh;-webkit-font-smoothing:antialiased;
     font-size:14px;letter-spacing:.1px;
   }
+  /* Lapisan gambar latar dekoratif — opacity diatur via --bg-img-opacity,
+     z-index:-1 menaruhnya di atas warna kanvas tapi di bawah semua konten. */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:url("../img/bg-topo.webp") center/cover no-repeat;
+    opacity:var(--bg-img-opacity,.5);
+  }
   a{color:inherit;text-decoration:none}
   h1,h2,.disp{font-family:var(--font-display);letter-spacing:-.02em}
   h3{letter-spacing:-.005em}
