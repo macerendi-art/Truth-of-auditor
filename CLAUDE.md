@@ -17,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The virtualenv is at `.venv`. Activate it first: `source .venv/bin/activate`.
 
 ```bash
-python manage.py test                         # run all tests (~428)
+python manage.py test                         # run all tests (~462)
 python manage.py test web.tests_reconcile     # one module
 python manage.py test web.tests_reconcile.SomeTestCase.test_x   # one test
 python manage.py runserver                     # dev server (sqlite, DEBUG=True)
@@ -81,6 +81,19 @@ All money is normalized to **rupiah** on the canonical `Transaction`. Sign and s
 - **Riwayat batch day-centric**: identitas batch = tanggal DATA (`_window_label`, bulan Indonesia), bukan created_at. Chip status per baris (`_status_batches`): ✓ final / ⏳ n ekor / ⚠ n selisih real / ⚑ tinjau / bukti dihapus. Heuristik ekor = `_pending_t1` (no_money + malam ≥ jam `_JAM_EKOR` di date_to window); banner batch_detail memuat RUPIAH ekor per arah + sisa di luar ekor.
 - **Guard urutan**: form reconcile membawa `data-saran`; pilih date_from > saran → modal konfirmasi (salah urut = batch baru bisa mengonsumsi uang hari sebelumnya, permanen). Guard tanggal-kosong tetap prioritas.
 - **Review manual menyinkronkan summary**: `review`/`review_bulk` memanggil `_refresh_bucket_summaries(run)` — hitungan bucket `run.summary` & `batch.summary["buckets"]` di-recompute dari DB (kunci lain tidak disentuh). Stat kartu tidak boleh menyimpang dari tabel.
+- **Audit trail**: aksi bermakna (reconcile/rematch/review/semua hapus) dicatat via `core.audit.catat()` → `core.AuditLog` (FK SET_NULL — riwayat hidup lebih lama dari objeknya; konteks di `detail` JSON, mis. `batch_pk`). Batch detail merender kartu "Riwayat aksi" (filter `detail__batch_pk`). Aksi destruktif/tulis BARU wajib ikut dicatat.
+- **B5 background reconcile**: `ReconBatch.status` (`berjalan`/`selesai`/`gagal` + `error_note`). View reconcile: > `_BG_THRESHOLD` (20k) baris aktif di window → placeholder + `_spawn_bg` (thread daemon → `engine.run_batch_into`), batch_detail auto-refresh 3s. Gagal = rollback total isi, batch ditandai GAGAL. `run_batch` juga atomic + `select_for_update` baris Toko (serialisasi per toko).
+- **Ekspor**: `export_run` (satu relasi, semua bucket — bukti kerja) vs `reports.views.export_batch` (`/batch/<pk>/export/` — ringkasan + hanya baris terbuka lintas relasi, laporan siap setor; tombol hanya utk batch `selesai`).
+- **Quick-search**: `q` di transaksi mencari username/ticket/reference/counterparty + nominal persis bila numerik (format `50.000` dinormalisasi); filter `date_from`/`date_to`; kotak cari global di topbar semua halaman → `/transactions/?q=…`.
+- **Reminder ritual**: dashboard banner "Ritual tertunda" bila `health.hari_tertunda >= 2` (saran < hari ini). Mobile ≤820px: sidebar jadi nav horizontal (breakpoint di akhir `app.css`).
+
+## Keamanan (hardening yang sudah terpasang — jangan dilonggarkan)
+
+- `SECRET_KEY` wajib env saat `DEBUG=False` (`truth_auditor/security.py`, fail-hard saat boot); `DEBUG` default False di Railway (deteksi `RAILWAY_*`), True hanya lokal.
+- **django-axes**: 5x gagal login = lockout user+IP 1 jam (HTTP 429). `AXES_ENABLED = 'test' not in sys.argv` — suite tes pakai `client.login()` yang tak kompatibel dgn backend axes; tes lockout menyalakannya via `override_settings`.
+- CSP ketat via `core.middleware.ContentSecurityPolicyMiddleware` (aset 100% vendored; origin eksternal terblokir — vendorkan aset baru, jangan tambah CDN).
+- Sesi 8 jam rolling + expire saat browser tutup. Cap upload: 50MB/file, 300MB/request (`_FILE_MAX_BYTES`/`_REQ_MAX_BYTES`), zip 200 file/200MB. File staging yatim >24 jam disapu tiap analyze (`_sweep_staging`).
+- `/healthz` (tanpa auth, cek DB) = healthcheck Railway; LOGGING ke stdout. CI GitHub Actions (`.github/workflows/test.yml`) menjalankan full suite per push/PR.
 
 ## Deployment
 
@@ -93,6 +106,7 @@ Railway (Nixpacks), config in `railway.json` / `Procfile`. Production is trigger
 - JSON keys with spaces (`raw["Player Bank"]`) break `values_list("left__raw__Player Bank")` — "Column aliases cannot contain whitespace". Use `annotate(x=KeyTextTransform("Player Bank", "left__raw"))`; `filter(**{"left__raw__Player Bank__istartswith": ...})` is fine.
 - A CSS rule like `.overlay{display:flex}` overrides the `[hidden]` attribute — pair it with `.overlay[hidden]{display:none}` or the invisible overlay eats all clicks.
 - Engine date params arrive as strings from the web — already coerced at entry (`_as_date`), keep it that way for new entry points.
+- `_status_batches` mengisi atribut **`b.chip`** (dict chip riwayat) — JANGAN pakai nama `b.status`: itu field model `ReconBatch.status` (background run) dan pernah tertimpa.
 
 ## Working notes
 

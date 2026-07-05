@@ -9,8 +9,8 @@
   <p>Kesehatan audit &amp; ringkasan data untuk <b>{{ active_toko.name }}</b>.</p>
 </div>
 
-{# ── Reminder ritual: saran < hari ini = data hari itu sudah lengkap tapi belum
-     direkonsiliasi. (saran == hari ini normal — mutasinya baru lengkap besok.) ── #}
+{% comment %}Reminder ritual: saran < hari ini = data hari itu sudah lengkap tapi
+belum direkonsiliasi. (saran == hari ini normal — mutasinya baru lengkap besok.){% endcomment %}
 {% if health.hari_tertunda >= 2 %}
 <div class="msg error reveal" style="margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
   <span>⏰ <b>Ritual tertunda</b> — data {{ health.saran_tanggal|date:"j/n" }} sudah lengkap
