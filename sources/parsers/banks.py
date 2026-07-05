@@ -171,6 +171,27 @@ def extract_mandiri_name(text):
     return " ".join(toks).strip(" -.,:/")
 
 
+# Norek/HP tujuan Mandiri: run digit >=9 di EKOR Keterangan ('Transfer ke BANK
+# MANDIRI TRIYONO 1680000099422' -> norek penerima; 'Pembayaran GoPay Customer
+# 085822815507' -> HP e-wallet). HP ternormalisasi (62/0 dibuang) konvergen dgn
+# Panel — DANA/GoPay match via NOMOR, nama sering kosong di kedua sisi.
+MANDIRI_DEST_TAIL_RE = re.compile(r"(\d{9,})\s*$")
+
+
+def is_mandiri_fee(text):
+    """Baris biaya admin Mandiri ('Biaya transfer BI Fast', 'Biaya transaksi bank')."""
+    return str(text or "").strip().lower().startswith("biaya")
+
+
+def extract_mandiri_dest(text):
+    """Nomor tujuan Mandiri dari Keterangan -> ternormalisasi, atau ''."""
+    s = re.sub(r"\s+", " ", str(text or "")).strip()
+    if is_mandiri_fee(s):
+        return ""
+    m = MANDIRI_DEST_TAIL_RE.search(s)
+    return normalize_dest(m.group(1)) if m else ""
+
+
 class BRIParser(BaseParser):
     source_key = "bank"
 
@@ -333,7 +354,7 @@ class MandiriParser(BaseParser):
                 "source_type": "bank",
                 "occurred_at": occurred,
                 "posted_date": occurred.date() if occurred else None,
-                "jenis": _jenis_from_money(money),
+                "jenis": "admin" if is_mandiri_fee(ket) else _jenis_from_money(money),
                 "amount": abs(money),
                 "credit_delta": Decimal("0"),
                 "money_delta": money,
@@ -344,6 +365,7 @@ class MandiriParser(BaseParser):
                 "username": "",
                 "reference": "",
                 "counterparty": extract_mandiri_name(ket.replace("\n", " ")),
+                "dest_account": extract_mandiri_dest(ket.replace("\n", " ")),
                 "description": ket.replace("\n", " "),
                 "raw": {"Tanggal": datestr, "Jam": timestr, "Keterangan": ket.replace("\n", " "),
                         "Masuk": str(masuk), "Keluar": str(keluar), "Saldo": str(saldo)},

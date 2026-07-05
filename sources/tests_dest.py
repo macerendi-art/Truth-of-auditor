@@ -11,8 +11,11 @@ from django.test import SimpleTestCase
 from sources.parsers.banks import (
     BCACSVParser,
     BRIParser,
+    MandiriParser,
     extract_bca_dest,
     extract_bri_dest,
+    extract_mandiri_dest,
+    is_mandiri_fee,
 )
 from sources.parsers.base import normalize_dest
 from sources.parsers.panel import extract_panel_dest
@@ -119,6 +122,76 @@ class ExtractBRIDestTests(SimpleTestCase):
 
     def test_kosong(self):
         self.assertEqual(extract_bri_dest(""), "")
+
+
+class ExtractMandiriDestTests(SimpleTestCase):
+    """Mandiri e-statement: norek/HP tujuan = run digit >=9 di EKOR Keterangan.
+    'Transfer ke BANK MANDIRI TRIYONO 1680000099422' -> norek penerima;
+    'Pembayaran GoPay Customer 085822815507' -> HP e-wallet (DANA/GoPay match
+    via NOMOR — nama sering kosong); baris 'Biaya ...' bukan tujuan."""
+
+    def test_transfer_ke_norek_di_ekor(self):
+        self.assertEqual(
+            extract_mandiri_dest("Transfer ke BANK MANDIRI TRIYONO 1680000099422"),
+            "1680000099422",
+        )
+
+    def test_pembayaran_ewallet_hp_ternormalisasi(self):
+        self.assertEqual(
+            extract_mandiri_dest("Pembayaran GoPay Customer 085822815507"),
+            "85822815507",
+        )
+
+    def test_biaya_tanpa_dest(self):
+        self.assertEqual(extract_mandiri_dest("Biaya transfer BI Fast"), "")
+        self.assertEqual(extract_mandiri_dest("Biaya transaksi bank 123456789012"), "")
+
+    def test_tanpa_nomor_kosong(self):
+        self.assertEqual(extract_mandiri_dest("Transfer BI Fast"), "")
+        self.assertEqual(extract_mandiri_dest(""), "")
+        self.assertEqual(extract_mandiri_dest(None), "")
+
+
+class MandiriFeeTests(SimpleTestCase):
+    def test_baris_biaya(self):
+        self.assertTrue(is_mandiri_fee("Biaya transfer BI Fast"))
+        self.assertTrue(is_mandiri_fee("Biaya transaksi bank"))
+        self.assertFalse(is_mandiri_fee("Transfer ke BANK MANDIRI TRIYONO 168000"))
+        self.assertFalse(is_mandiri_fee(""))
+
+
+class MandiriParserDestFeeTests(SimpleTestCase):
+    """Parser Mandiri mengisi dest_account + menandai baris 'Biaya ...' jenis=admin
+    (analog fee BCA — biaya bukan WD nyata, jangan menggelembungkan total uang)."""
+
+    def _parse(self, rows):
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["No", "Tanggal", "Keterangan",
+                   "Dana Masuk (IDR)", "Dana Keluar (IDR)", "Saldo (IDR)"])
+        for r in rows:
+            ws.append(r)
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        wb.save(path)
+        return MandiriParser().parse(path)
+
+    def test_dest_terisi_dan_fee_admin(self):
+        rows = self._parse([
+            ["1", "27 Jun 2026", "Transfer ke BANK MANDIRI TRIYONO 1680000099422",
+             0, 50000.00, 1791693.00],
+            ["2", "27 Jun 2026", "Biaya transfer BI Fast", 0, 2500.00, 1789193.00],
+            ["3", "27 Jun 2026", "Pembayaran GoPay Customer 085822815507",
+             0, 50000.00, 1738693.00],
+        ])
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["dest_account"], "1680000099422")
+        self.assertEqual(rows[0]["jenis"], "wd")
+        self.assertEqual(rows[1]["jenis"], "admin")
+        self.assertEqual(rows[1]["dest_account"], "")
+        self.assertEqual(rows[2]["dest_account"], "85822815507")
 
 
 class ExtractPanelDestTests(SimpleTestCase):
