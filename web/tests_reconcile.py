@@ -58,13 +58,21 @@ class ReconcileViewTests(TestCase):
         self.assertEqual(ReconBatch.objects.count(), n)  # tak ada batch dibuat
 
     def test_post_blokir_uang_yatim_tak_bikin_batch(self):
-        # Bank tanggal 30 tanpa panel penutup (window 1) → run ditolak, 0 batch.
+        # Panel 27 (setUp) & 30 = rentang; bank 29 DALAM rentang tanpa panel penutup
+        # (window 1) → run ditolak, 0 batch.
+        panel = SourceType.objects.get(key="panel")
         bank = SourceType.objects.get(key="bank")
-        up = Upload.objects.create(source_type=bank, toko=self.lbs)
+        up = Upload.objects.create(source_type=panel, toko=self.lbs)
+        for st, rh in [(panel, "p30"), (bank, "b30")]:
+            Transaction.objects.create(
+                upload=up, source_type=st, toko=self.lbs, jenis="depo",
+                amount=Decimal("80000"), money_delta=Decimal("80000"),
+                occurred_at=datetime(2026, 6, 30, 10, 0), row_hash=rh,
+            )
         Transaction.objects.create(
             upload=up, source_type=bank, toko=self.lbs, jenis="depo",
             amount=Decimal("90000"), money_delta=Decimal("90000"),
-            occurred_at=datetime(2026, 6, 30, 10, 0), row_hash="r9",
+            occurred_at=datetime(2026, 6, 29, 10, 0), row_hash="b29",
         )
         n = ReconBatch.objects.count()
         r = self.client.post(
@@ -74,7 +82,7 @@ class ReconcileViewTests(TestCase):
         )
         self.assertEqual(ReconBatch.objects.count(), n)
         self.assertContains(r, "ditolak")
-        self.assertContains(r, "30/06/2026")
+        self.assertContains(r, "29/06/2026")
 
     def test_get_menampilkan_preview_tanggal(self):
         r = self.client.get(reverse("reconcile"))

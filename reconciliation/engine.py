@@ -1059,14 +1059,25 @@ def _panel_dates(toko, date_from=None, date_to=None, include=None):
 
 
 def verify_panel_anchor(toko, date_from, date_to, include, window):
-    """Verifikasi jangkar tanggal: tiap tanggal ber-uang/bracket AKTIF harus 'tertutup'
-    minimal satu tanggal panel dalam window. Return list pelanggaran (kosong = lolos).
-    Basis PER-TANGGAL; baris admin/fee dikecualikan agar tak memicu false-positive.
+    """Verifikasi jangkar tanggal: uang/bracket AKTIF yang tanggalnya berada DALAM
+    rentang tanggal panel harus 'tertutup' minimal satu tanggal panel dalam window.
+    Return list pelanggaran (kosong = lolos). Basis PER-TANGGAL; admin/fee dikecualikan.
+
+    PENTING: hanya memeriksa tanggal DALAM rentang panel. Uang di LUAR rentang (mis.
+    statement bank sebulan penuh sedang panel cuma sebagian tanggal) BUKAN pelanggaran
+    — cuma belum direkonsiliasi, dibiarkan menunggu sampai panel tanggalnya diupload.
+    Tanpa panel sama sekali → tak ada yang direkon → tak ada pelanggaran.
 
     'Tertutup' — money (bank/gateway): ∃ panel p dengan p <= m <= p+window (searah
-    engine: uang >= panel). Bracket: ∃ panel p dengan |m-p| <= window (join utama
-    ticket, tanggal lebih longgar)."""
-    pdates = set(_panel_dates(toko, date_from, date_to, include))
+    engine: uang >= panel). Bracket: ∃ panel p dengan |m-p| <= window."""
+    pdates = sorted(_panel_dates(toko, date_from, date_to, include))
+    if not pdates:
+        return []
+    pset = set(pdates)
+    # Rentang relevan: uang harus >= panel (searah), jadi [panel_awal .. panel_akhir+window];
+    # bracket boleh mendahului panel, jadi [panel_awal-window .. panel_akhir+window].
+    lo_m, hi_m = pdates[0], pdates[-1] + timedelta(days=window)
+    lo_b, hi_b = pdates[0] - timedelta(days=window), pdates[-1] + timedelta(days=window)
     base = _date_filter(
         _active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko)),
         date_from, date_to,
@@ -1074,10 +1085,10 @@ def verify_panel_anchor(toko, date_from, date_to, include, window):
     violations = []
 
     def covered_money(m):
-        return any(p <= m <= p + timedelta(days=window) for p in pdates)
+        return any(p <= m <= p + timedelta(days=window) for p in pset)
 
     def covered_bracket(m):
-        return any(abs((m - p).days) <= window for p in pdates)
+        return any(abs((m - p).days) <= window for p in pset)
 
     money_keys = _included_money_sources(include)
     if money_keys:
@@ -1093,7 +1104,7 @@ def verify_panel_anchor(toko, date_from, date_to, include, window):
                 a[0] += abs(float(md or 0))
                 a[1] += 1
         for m, (gross, n) in agg.items():
-            if not covered_money(m):
+            if lo_m <= m <= hi_m and not covered_money(m):
                 violations.append({"date": m, "source": "uang", "amount_gross": gross, "n": n})
 
     if _inc(include, "bracket"):
@@ -1106,7 +1117,7 @@ def verify_panel_anchor(toko, date_from, date_to, include, window):
             if dt:
                 bdates[dt.date()] += 1
         for m, n in bdates.items():
-            if not covered_bracket(m):
+            if lo_b <= m <= hi_b and not covered_bracket(m):
                 violations.append({"date": m, "source": "bracket", "amount_gross": 0.0, "n": n})
 
     return sorted(violations, key=lambda v: (v["date"], v["source"]))
@@ -1115,10 +1126,14 @@ def verify_panel_anchor(toko, date_from, date_to, include, window):
 def run_batches_auto(toko, tolerance=None, date_from=None, date_to=None, user=None, include=None):
     """Orkestrator rekonsiliasi otomatis per tanggal: satu ReconBatch per tanggal-panel
     (panel = jangkar). Pre-flight `verify_panel_anchor` memblokir bila ada uang/bracket
-    tanpa panel penutup — TAK ada batch dibuat. Loop MENAIK memakai carry-over bawaan:
-    `run_batch(date_from=None, date_to=D, recon_date=D)` (date_from WAJIB None agar baris
-    carried tanggal < D tetap masuk scope; date_to=D cegah tanggal masa depan bocor).
-    Tanggal yang sudah punya batch dilewati & dilaporkan (tidak raise)."""
+    DALAM rentang panel tanpa panel penutup — TAK ada batch dibuat. Loop MENAIK memakai
+    carry-over bawaan: `run_batch(date_from=lo, date_to=D, recon_date=D)`.
+
+    `lo` = tanggal panel terawal (atau baris carried yang lebih awal, agar carry-over
+    lintas-hari tetap masuk scope) — BUKAN None. Ini penting: statement bank sering
+    diekspor sebulan penuh sedang panel cuma sebagian tanggal; uang SEBELUM `lo` tak
+    boleh ikut dikonsumsi ke batch pertama (biar tetap menunggu sampai panelnya ada).
+    `date_to=D` cegah tanggal masa depan bocor. Tanggal ber-batch dilewati (tidak raise)."""
     tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
     date_from = _as_date(date_from)
     date_to = _as_date(date_to)
@@ -1133,6 +1148,19 @@ def run_batches_auto(toko, tolerance=None, date_from=None, date_to=None, user=No
             "errors": [], "panel_dates": panel_dates,
         }
 
+    # Batas bawah scope: tanggal panel terawal, diperlebar ke tanggal baris carried
+    # bila lebih awal (carry-over lintas-hari harus tetap masuk scope). Uang di bawah
+    # batas ini tidak ikut dikonsumsi — dibiarkan menunggu panel tanggalnya.
+    lo = min(panel_dates) if panel_dates else None
+    if lo is not None:
+        carried_dates = [
+            r.left.occurred_at.date()
+            for r in _carried_results(toko).values()
+            if r.left and r.left.occurred_at
+        ]
+        if carried_dates:
+            lo = min(lo, min(carried_dates))
+
     batches, skipped_existing, errors = [], [], []
     for d in panel_dates:  # MENAIK — prasyarat kebenaran carry-over
         existing = ReconBatch.objects.filter(toko=toko, recon_date=d).first()
@@ -1141,7 +1169,7 @@ def run_batches_auto(toko, tolerance=None, date_from=None, date_to=None, user=No
             continue
         try:
             batch = run_batch(
-                toko, tolerance, date_from=None, date_to=d,
+                toko, tolerance, date_from=lo, date_to=d,
                 user=user, include=include, recon_date=d,
             )
             batches.append(batch)
