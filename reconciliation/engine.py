@@ -43,6 +43,23 @@ def _gw_settled(t):
     return _gw_status(t) in SETTLED_STATUS
 
 
+# Channel deposit pulsa di Panel: raw 'Bank Title' segmen 1 = provider seluler
+# '(AUTO)'. Uangnya TIDAK lewat bank/gateway (dikonversi terpisah) → jangan
+# difuzzy-kan ke mutasi bank; auditor verifikasi konversinya manual.
+_PULSA_PROVIDERS = frozenset(
+    {"TELKOMSEL", "AXIS", "XL", "INDOSAT", "IM3", "TRI", "THREE", "SMARTFREN", "BY.U", "PULSA"}
+)
+
+
+def _pulsa_channel(t):
+    """Nama channel pulsa baris panel ('TELKOMSEL (AUTO)') atau '' bila bukan."""
+    bt = ((t.raw or {}).get("Bank Title") or "").split("|")[0].strip()
+    if not bt:
+        return ""
+    first = bt.split()[0].upper()
+    return bt if (first in _PULSA_PROVIDERS or "PULSA" in bt.upper()) else ""
+
+
 def _included_money_sources(include):
     """Sumber uang yang ikut run. include=None → semua (bank+gateway, perilaku lama).
     Jika include diberikan, hanya sumber dengan inc_* dicentang yang dipakai."""
@@ -288,6 +305,15 @@ class _MoneyMatcher:
         alias_cp, alias_dest = _alias_map(left)
         used, out = set(), []
         for p in left:
+            # ===== Pass 0: DP pulsa — uang tak lewat bank/gateway → tinjau manual =====
+            if p.money_delta > 0:
+                pulsa = _pulsa_channel(p)
+                if pulsa:
+                    out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=None,
+                                           score=0, reason_code="pulsa_manual",
+                                           reason_detail=(f"Deposit pulsa {pulsa} — uangnya tidak lewat "
+                                                          "bank/gateway; cocokkan dengan laporan konversi pulsa")))
+                    continue
             # ===== Pass 1: gateway kunci EKSAK (TXN ID → Client Reference) =====
             tk, rf = _norm_key(p.ticket_no), _norm_key(p.reference)
             keytype = "gateway_ticket"
@@ -400,9 +426,14 @@ class _MoneyMatcher:
                                        score=best_s, reason_code=match_reason))
             elif best is not None and best_s >= _WEAK_FLOOR:
                 used.add(best.id)
+                # Detail memuat KEDUA nama — auditor bisa menilai dari tabel tanpa
+                # membuka baris (keluhan riil: 'bank cuma angka, alasannya samar').
+                nama_p = p.counterparty or p.username or "-"
+                nama_b = best.counterparty or best.dest_account or "-"
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=best,
                                        score=best_s, reason_code="weak_name",
-                                       reason_detail=f"nominal+tanggal cocok, nama lemah (score {best_s:.0f})"))
+                                       reason_detail=(f"nominal+tanggal cocok, nama mirip sebagian "
+                                                      f"(skor {best_s:.0f}): Panel '{nama_p}' vs Bank '{nama_b}'")))
             elif best is not None:
                 # Kandidat nominal+tanggal ADA tapi bukti identitas nol (< floor) →
                 # BUKAN pasangan. Uang tidak dikonsumsi — tetap bebas utk pasangan

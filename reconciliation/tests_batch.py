@@ -720,6 +720,56 @@ class AliasHistoryTests(TestCase):
         self.assertNotEqual(r.reason_code, "alias_history")
 
 
+class PulsaManualTests(TestCase):
+    """DP Pulsa (Bank Title 'TELKOMSEL/AXIS/XL (AUTO)') → langsung perlu_tinjau:
+    uangnya tak pernah lewat bank/gateway (konversi pulsa terpisah), jadi fuzzy
+    hanya akan menyeretnya ke pasangan sampah atau no_money yang menyesatkan."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.tol = ToleranceProfile.objects.get(name="Default")
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        self.up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+
+    def _tx(self, st, money, rh, **kw):
+        return Transaction.objects.create(
+            upload=self.up, source_type=st, toko=self.lbs, jenis="depo",
+            amount=Decimal(abs(int(money))), money_delta=Decimal(money),
+            occurred_at=datetime(2026, 6, 27, 21, 0), row_hash=rh, **kw,
+        )
+
+    def _pb(self):
+        b = run_batch(self.lbs, self.tol, date_from=date(2026, 6, 27), date_to=date(2026, 6, 27))
+        return b.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+
+    def test_dp_pulsa_langsung_tinjau(self):
+        self._tx(self.panel, "100000", "p1", counterparty="HALID",
+                 raw={"Bank Title": "TELKOMSEL (AUTO)|TELKOMSEL (AUTO)|TELKOMSEL (AUTO)"})
+        # Uang bank nominal sama — TAK BOLEH dipasangkan ke baris pulsa.
+        uang = self._tx(self.bank, "100000", "k1", counterparty="MILIH HS")
+        r = self._pb().results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "perlu_tinjau")
+        self.assertEqual(r.reason_code, "pulsa_manual")
+        self.assertIsNone(r.right)
+        self.assertIn("pulsa", r.reason_detail.lower())
+
+    def test_channel_bank_biasa_tak_kena(self):
+        self._tx(self.panel, "100000", "p1", counterparty="BUDI SANTOSO",
+                 raw={"Bank Title": "BCA|IRFAN RUKMANA|7126201591"})
+        self._tx(self.bank, "100000", "k1", counterparty="BUDI SANTOSO")
+        r = self._pb().results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+
+    def test_wd_tak_kena_walau_bank_title_aneh(self):
+        # Hanya DP: WD pulsa tak ada di bisnis ini, jangan menyapu WD.
+        self._tx(self.panel, "-100000", "p1", counterparty="BUDI SANTOSO",
+                 raw={"Bank Title": "XL (AUTO)|XL (AUTO)|XL (AUTO)"})
+        self._tx(self.bank, "-100000", "k1", counterparty="BUDI SANTOSO")
+        r = self._pb().results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+
+
 class DefaultWindowTests(TestCase):
     """Profil Default window 2 hari: WD Sabtu settle Senin (bukti staging 27-29
     Jun — 27=Sabtu, uangnya baru muncul di mutasi Senin 29; window 1 hari buta
