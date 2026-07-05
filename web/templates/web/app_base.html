@@ -287,6 +287,10 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
   {% with p=request.path %}
   <a class="link {% if p == '/' %}active{% endif %}" href="{% url 'dashboard' %}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Dashboard</a>
+  {% if all_tokos|length > 1 %}
+  <a class="link {% if '/tokos' in p %}active{% endif %}" href="{% url 'toko_overview' %}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Ringkasan Toko</a>
+  {% endif %}
   <a class="link {% if '/upload' in p %}active{% endif %}" href="{% url 'upload' %}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>Upload</a>
   <a class="link {% if '/transactions' in p %}active{% endif %}" href="{% url 'transactions' %}">

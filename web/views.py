@@ -769,6 +769,40 @@ def review_queue(request):
 
 
 @login_required
+def toko_overview(request):
+    """Ringkasan lintas toko (scoped RBAC): status rekon terakhir, selisih,
+    antrean tinjau, menunggu settlement, uang periksa D."""
+    from reconciliation.engine import pending_settlement_count
+
+    tokos = tokos_for(request.user)
+    rows = []
+    for t in tokos:
+        last = (
+            ReconBatch.objects.filter(toko=t, recon_date__isnull=False)
+            .order_by("recon_date")
+            .last()
+        )
+        s = (last.summary or {}) if last else {}
+        dp = abs((s.get("dp") or {}).get("selisih") or 0)
+        wd = abs((s.get("wd") or {}).get("selisih") or 0)
+        total = dp + wd
+        st = "" if last is None else ("ok" if total == 0 else ("warn" if total < 10_000_000 else "bad"))
+        tinjau = MatchResult.objects.filter(
+            run__batch__toko=t, bucket=MatchResult.Bucket.TINJAU
+        ).count()
+        um = (s.get("unmatched_money") or {}).get("d") or {}
+        rows.append({
+            "toko": t, "last": last, "selisih": total, "status": st,
+            "tinjau": tinjau, "pending": pending_settlement_count(t),
+            "uang_d": um.get("n") or 0,
+            "has_batch": last is not None,
+        })
+    # selisih terbesar dulu; toko tanpa batch di bawah
+    rows.sort(key=lambda r: (r["has_batch"], r["selisih"]), reverse=True)
+    return render(request, "web/toko_overview.html", {"rows": rows})
+
+
+@login_required
 @require_POST
 def bulk_review(request, pk):
     """Setujui / tandai-tinjau banyak hasil sekaligus (per halaman terfilter).

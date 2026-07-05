@@ -1,0 +1,49 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% block title %}Ringkasan Toko · Truth of Auditor{% endblock %}
+{% block crumb %}Ringkasan Toko{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Ringkasan Toko</h1>
+    <p>Status rekonsiliasi semua toko yang kamu akses — prioritaskan selisih terbesar.</p>
+  </div>
+</div>
+
+<div class="card pad0 reveal">
+  <div class="card-head"><h3>Toko <span class="faint" style="font-weight:500">({{ rows|length }})</span></h3></div>
+  <div class="twrap" style="border:none">
+  <table>
+    <thead><tr><th>Toko</th><th>Rekon terakhir</th><th class="num">Selisih (DP+WD)</th><th class="num">Antrean tinjau</th><th class="num">Menunggu settlement</th><th class="num">Uang periksa (D)</th><th class="r">Aksi</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><span style="display:flex;align-items:center;gap:9px"><span class="avatar-ini">{{ r.toko.name|first|upper }}</span><b>{{ r.toko.name }}</b></span></td>
+        <td>
+          {% if r.last %}
+            <a href="{% url 'batch_detail' r.last.pk %}">{{ r.last.recon_date|date:"d/m/Y" }}</a>
+          {% else %}<span class="badge muted">belum rekon</span>{% endif %}
+        </td>
+        <td class="num mono">
+          {% if not r.has_batch %}<span class="faint">—</span>
+          {% elif r.selisih == 0 %}<span class="badge ok plain">0 ✓</span>
+          {% else %}<span class="badge {{ r.status }} plain">{{ r.selisih|floatformat:0|intcomma }}</span>{% endif %}
+        </td>
+        <td class="num mono">{{ r.tinjau|intcomma }}</td>
+        <td class="num mono">{{ r.pending|intcomma }}</td>
+        <td class="num mono">{% if r.uang_d %}<span style="color:var(--bad)">{{ r.uang_d|intcomma }}</span>{% else %}0{% endif %}</td>
+        <td class="r">
+          <form method="post" action="{% url 'set_toko' %}" style="display:inline">
+            {% csrf_token %}
+            <input type="hidden" name="toko_id" value="{{ r.toko.id }}">
+            <input type="hidden" name="next" value="{% url 'dashboard' %}">
+            <button class="btn sm" type="submit">Buka →</button>
+          </form>
+        </td>
+      </tr>
+    {% empty %}<tr><td colspan="7" class="cell-empty">Tidak ada toko.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
