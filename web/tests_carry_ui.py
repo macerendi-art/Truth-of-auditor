@@ -1,5 +1,5 @@
-"""UI rekonsiliasi harian: field recon_date, guard duplikat, seksi settlement,
-dan revert late settlement saat batch penyelesai dihapus."""
+"""UI rekonsiliasi harian: preview auto-split per tanggal, skip tanggal ber-batch,
+seksi settlement, dan revert late settlement saat batch penyelesai dihapus."""
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -49,45 +49,53 @@ class _LoggedIn(TestCase):
 
 
 class ReconDateFormTests(_LoggedIn):
-    def test_form_punya_field_recon_date_dan_kolom_tanggal(self):
-        # Seed satu batch supaya tabel riwayat (bukan empty-state) yang dirender.
+    def test_form_preview_tanggal_dan_kolom_tanggal(self):
+        # Auto-split: date picker manual dihapus, diganti preview tanggal panel.
         self._tx(self.panel, "depo", "50000", "50000", "D1", "p1", username="budi")
         self._tx(self.bank, "depo", "50000", "50000", "", "k1", username="budi")
         run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 27))
         r = self.client.get(reverse("reconcile"))
         html = r.content.decode()
-        self.assertIn('name="recon_date"', html)
-        self.assertRegex(html, r'name="recon_date"[^>]*required')
+        self.assertNotIn('name="recon_date"', html)  # tak ada lagi field manual
+        self.assertIn("Tanggal yang akan diproses", html)  # preview auto-split
         self.assertIn("<th>Tanggal</th>", html)
 
-    def test_post_tanpa_recon_date_ditolak(self):
-        self._tx(self.panel, "depo", "50000", "50000", "D1", "p1", username="budi")
-        self._tx(self.bank, "depo", "50000", "50000", "", "k1", username="budi")
-        n = ReconBatch.objects.count()
-        r = self.client.post(reverse("reconcile"), {
-            "tolerance": "Default", "inc_panel_dp": "on", "inc_bank": "on",
-        }, follow=True)
-        self.assertContains(r, "Tanggal rekonsiliasi wajib diisi")
-        self.assertEqual(ReconBatch.objects.count(), n)
-
-    def test_guard_tanggal_duplikat_pesan_dengan_link(self):
+    def test_post_tanpa_recon_date_auto_split(self):
+        # Tanpa recon_date manual: tanggal dideteksi dari data (27 Jun) → 1 batch.
         self._tx(self.panel, "depo", "50000", "50000", "D1", "p1", username="budi")
         self._tx(self.bank, "depo", "50000", "50000", "", "k1", username="budi")
         self.client.post(reverse("reconcile"), {
-            "tolerance": "Default", "recon_date": "2026-06-27",
-            "inc_panel_dp": "on", "inc_bank": "on",
+            "tolerance": "Default", "inc_panel_dp": "on", "inc_bank": "on",
         })
-        existing = ReconBatch.objects.get(toko=self.lbs, recon_date=date(2026, 6, 27))
-        self._tx(self.panel, "depo", "60000", "60000", "D2", "p2", username="andi")
-        self._tx(self.bank, "depo", "60000", "60000", "", "k2", username="andi")
-        r = self.client.post(reverse("reconcile"), {
-            "tolerance": "Default", "recon_date": "2026-06-27",
-            "inc_panel_dp": "on", "inc_bank": "on",
-        }, follow=True)
-        self.assertContains(r, "sudah ada")
-        self.assertContains(r, reverse("batch_detail", args=[existing.pk]))
         self.assertEqual(
             ReconBatch.objects.filter(toko=self.lbs, recon_date=date(2026, 6, 27)).count(), 1
+        )
+
+    def test_tanggal_sudah_ada_batch_dilewati(self):
+        # Run pertama bikin batch 27. Lalu panel-27 susulan aktif + data 28:
+        # auto-run melewati 27 (dilaporkan), hanya bikin batch 28, tak menggandakan 27.
+        self._tx(self.panel, "depo", "50000", "50000", "D1", "p1", username="budi")
+        self._tx(self.bank, "depo", "50000", "50000", "", "k1", username="budi")
+        self.client.post(reverse("reconcile"), {
+            "tolerance": "Default", "inc_panel_dp": "on", "inc_bank": "on",
+        })
+        self.assertEqual(
+            ReconBatch.objects.filter(toko=self.lbs, recon_date=date(2026, 6, 27)).count(), 1
+        )
+        self._tx(self.panel, "depo", "80000", "80000", "D9", "p9", username="rian")
+        self._tx(self.panel, "depo", "60000", "60000", "D2", "p2",
+                 username="andi", dt=datetime(2026, 6, 28, 9, 0))
+        self._tx(self.bank, "depo", "60000", "60000", "", "k2",
+                 username="andi", dt=datetime(2026, 6, 28, 10, 0))
+        r = self.client.post(reverse("reconcile"), {
+            "tolerance": "Default", "inc_panel_dp": "on", "inc_bank": "on",
+        }, follow=True)
+        self.assertContains(r, "dilewati")
+        self.assertEqual(
+            ReconBatch.objects.filter(toko=self.lbs, recon_date=date(2026, 6, 27)).count(), 1
+        )
+        self.assertEqual(
+            ReconBatch.objects.filter(toko=self.lbs, recon_date=date(2026, 6, 28)).count(), 1
         )
 
     def test_pending_settlement_info_muncul(self):

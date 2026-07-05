@@ -5,7 +5,7 @@ dengan bucket cocok / tidak_cocok / perlu_tinjau + reason. Toleransi dari Tolera
 """
 import re
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.db import transaction as db_tx
 from django.db.models import Q, Sum
@@ -1029,3 +1029,121 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
     batch.summary = summary
     batch.save(update_fields=["summary"])
     return batch
+
+
+def _as_date(v):
+    """str ISO / date / None → date | None (verifikasi butuh aritmetika timedelta)."""
+    if v is None or v == "":
+        return None
+    return date.fromisoformat(v) if isinstance(v, str) else v
+
+
+def _panel_dates(toko, date_from=None, date_to=None, include=None):
+    """Tanggal-panel AKTIF terurut MENAIK dalam scope & include — jangkar auto-split.
+    Hanya baris panel DP/WD yang diikutkan (hormati include.panel_dp/panel_wd)."""
+    qs = Transaction.objects.filter(
+        source_type__key="panel", is_duplicate=False, jenis__in=["depo", "wd"]
+    )
+    if not _inc(include, "panel_dp"):
+        qs = qs.exclude(jenis="depo")
+    if not _inc(include, "panel_wd"):
+        qs = qs.exclude(jenis="wd")
+    qs = _date_filter(_active(_toko_filter(qs, toko)), date_from, date_to)
+    return sorted({dt.date() for dt in qs.values_list("occurred_at", flat=True) if dt})
+
+
+def verify_panel_anchor(toko, date_from, date_to, include, window):
+    """Verifikasi jangkar tanggal: tiap tanggal ber-uang/bracket AKTIF harus 'tertutup'
+    minimal satu tanggal panel dalam window. Return list pelanggaran (kosong = lolos).
+    Basis PER-TANGGAL; baris admin/fee dikecualikan agar tak memicu false-positive.
+
+    'Tertutup' — money (bank/gateway): ∃ panel p dengan p <= m <= p+window (searah
+    engine: uang >= panel). Bracket: ∃ panel p dengan |m-p| <= window (join utama
+    ticket, tanggal lebih longgar)."""
+    pdates = set(_panel_dates(toko, date_from, date_to, include))
+    base = _date_filter(
+        _active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko)),
+        date_from, date_to,
+    )
+    violations = []
+
+    def covered_money(m):
+        return any(p <= m <= p + timedelta(days=window) for p in pdates)
+
+    def covered_bracket(m):
+        return any(abs((m - p).days) <= window for p in pdates)
+
+    money_keys = _included_money_sources(include)
+    if money_keys:
+        agg = defaultdict(lambda: [0.0, 0])  # tanggal -> [gross_abs, n]
+        rows = (
+            base.filter(source_type__key__in=money_keys)
+            .exclude(jenis="admin")
+            .values_list("occurred_at", "money_delta")
+        )
+        for dt, md in rows:
+            if dt:
+                a = agg[dt.date()]
+                a[0] += abs(float(md or 0))
+                a[1] += 1
+        for m, (gross, n) in agg.items():
+            if not covered_money(m):
+                violations.append({"date": m, "source": "uang", "amount_gross": gross, "n": n})
+
+    if _inc(include, "bracket"):
+        bdates = defaultdict(int)
+        for dt in (
+            base.filter(source_type__key="bracket")
+            .exclude(ticket_no="")
+            .values_list("occurred_at", flat=True)
+        ):
+            if dt:
+                bdates[dt.date()] += 1
+        for m, n in bdates.items():
+            if not covered_bracket(m):
+                violations.append({"date": m, "source": "bracket", "amount_gross": 0.0, "n": n})
+
+    return sorted(violations, key=lambda v: (v["date"], v["source"]))
+
+
+def run_batches_auto(toko, tolerance=None, date_from=None, date_to=None, user=None, include=None):
+    """Orkestrator rekonsiliasi otomatis per tanggal: satu ReconBatch per tanggal-panel
+    (panel = jangkar). Pre-flight `verify_panel_anchor` memblokir bila ada uang/bracket
+    tanpa panel penutup — TAK ada batch dibuat. Loop MENAIK memakai carry-over bawaan:
+    `run_batch(date_from=None, date_to=D, recon_date=D)` (date_from WAJIB None agar baris
+    carried tanggal < D tetap masuk scope; date_to=D cegah tanggal masa depan bocor).
+    Tanggal yang sudah punya batch dilewati & dilaporkan (tidak raise)."""
+    tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
+    date_from = _as_date(date_from)
+    date_to = _as_date(date_to)
+    window = tolerance.date_window_days
+
+    panel_dates = _panel_dates(toko, date_from, date_to, include)
+    violations = verify_panel_anchor(toko, date_from, date_to, include, window)
+    if violations:
+        return {
+            "ok": False, "batches": [], "dates_processed": [],
+            "skipped_existing": [], "violations": violations,
+            "errors": [], "panel_dates": panel_dates,
+        }
+
+    batches, skipped_existing, errors = [], [], []
+    for d in panel_dates:  # MENAIK — prasyarat kebenaran carry-over
+        existing = ReconBatch.objects.filter(toko=toko, recon_date=d).first()
+        if existing:
+            skipped_existing.append({"date": d, "batch_id": existing.id})
+            continue
+        try:
+            batch = run_batch(
+                toko, tolerance, date_from=None, date_to=d,
+                user=user, include=include, recon_date=d,
+            )
+            batches.append(batch)
+        except Exception as e:  # noqa: BLE001 - kumpulkan kegagalan per tanggal, lanjut
+            errors.append({"date": d, "message": str(e)})
+    return {
+        "ok": True, "batches": batches,
+        "dates_processed": [b.recon_date for b in batches],
+        "skipped_existing": skipped_existing, "violations": [],
+        "errors": errors, "panel_dates": panel_dates,
+    }

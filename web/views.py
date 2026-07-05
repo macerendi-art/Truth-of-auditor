@@ -12,15 +12,17 @@ from django.db.models import Count, Q, Sum
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.utils.html import format_html
+from django.utils.html import format_html, format_html_join
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from reconciliation.engine import (
     MATCHERS,
+    _panel_dates,
     check_completeness,
     pending_settlement_count,
     run_batch,
+    run_batches_auto,
     run_match,
 )
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
@@ -572,24 +574,6 @@ def reconcile(request):
         return render(request, "web/no_toko.html")
     if request.method == "POST":
         tol = get_object_or_404(ToleranceProfile, name=request.POST.get("tolerance", "Default"))
-        # Rekonsiliasi harian: satu run = satu tanggal. Tanggal wajib diisi.
-        try:
-            recon_date = date_cls.fromisoformat((request.POST.get("recon_date") or "").strip())
-        except ValueError:
-            recon_date = None
-        if recon_date is None:
-            messages.error(request, "Tanggal rekonsiliasi wajib diisi.")
-            return redirect("reconcile")
-        existing = ReconBatch.objects.filter(toko=active, recon_date=recon_date).first()
-        if existing:
-            no = ReconBatch.objects.filter(toko=active, id__lte=existing.id).count()
-            messages.error(request, format_html(
-                'Rekonsiliasi {} tanggal {} sudah ada: <a href="{}">Batch #{}</a>. '
-                "Hapus batch itu dulu (tombol Hapus Laporan) bila ingin mengulang tanggal ini.",
-                active.name, recon_date.strftime("%d/%m/%Y"),
-                reverse("batch_detail", args=[existing.pk]), no,
-            ))
-            return redirect("reconcile")
         # Checkbox inc_* per baris kelengkapan = sumber yang DIIKUTKAN. Tidak ada
         # → tidak dicentang → tidak dicocokkan & tidak dikonsumsi.
         include = {
@@ -599,21 +583,49 @@ def reconcile(request):
             "bank": "inc_bank" in request.POST,
             "gateway": "inc_gateway" in request.POST,
         }
-        try:
-            batch = run_batch(
-                active, tol,
-                request.POST.get("date_from") or None,
-                request.POST.get("date_to") or None,
-                user=request.user,
-                include=include,
-                recon_date=recon_date,
+        # Auto-split: satu batch per tanggal-panel. Panel jadi jangkar; run ditolak
+        # bila ada uang/bracket tanpa panel penutup dalam window (verify_panel_anchor).
+        res = run_batches_auto(
+            active, tol,
+            request.POST.get("date_from") or None,
+            request.POST.get("date_to") or None,
+            user=request.user, include=include,
+        )
+        if not res["ok"]:
+            rows = format_html_join(
+                "", "<br>&bull; {} — {} ({} baris)",
+                ((v["date"].strftime("%d/%m/%Y"), v["source"], v["n"]) for v in res["violations"]),
             )
-        except ValueError as e:  # backstop guard engine (race dua tab)
-            messages.error(request, str(e))
+            messages.error(request, format_html(
+                "Rekonsiliasi ditolak: ada tanggal ber-uang/bracket tanpa panel penutup. "
+                "Upload panel tanggal terkait dulu, lalu jalankan lagi:{}", rows,
+            ))
             return redirect("reconcile")
-        no = ReconBatch.objects.filter(toko=active).count()
-        messages.success(request, f"Rekonsiliasi selesai (Batch #{no}).")
-        return redirect("batch_detail", pk=batch.pk)
+        for er in res["errors"]:
+            messages.error(request, f"{er['date'].strftime('%d/%m/%Y')}: {er['message']}")
+        batches, skipped = res["batches"], res["skipped_existing"]
+        if len(batches) == 1 and not skipped:
+            no = ReconBatch.objects.filter(toko=active).count()
+            messages.success(request, f"Rekonsiliasi selesai (Batch #{no}).")
+            return redirect("batch_detail", pk=batches[0].pk)
+        if batches:
+            rentang = (
+                f"{batches[0].recon_date.strftime('%d/%m')}–"
+                f"{batches[-1].recon_date.strftime('%d/%m/%Y')}"
+                if len(batches) > 1 else batches[0].recon_date.strftime("%d/%m/%Y")
+            )
+            msg = f"{len(batches)} batch dibuat ({rentang})."
+            if skipped:
+                msg += f" {len(skipped)} tanggal dilewati (sudah ada batch)."
+            messages.success(request, msg)
+        elif skipped:
+            messages.info(
+                request,
+                f"Semua {len(skipped)} tanggal sudah punya batch — tak ada yang baru dibuat.",
+            )
+        else:
+            messages.info(request, "Tidak ada tanggal panel untuk diproses. Upload panel dulu.")
+        return redirect("reconcile")
 
     df = request.GET.get("date_from") or None
     dt = request.GET.get("date_to") or None
@@ -632,6 +644,8 @@ def reconcile(request):
     comp = check_completeness(active, df, dt)
     comp_keys = ["panel_dp", "panel_wd", "bracket", "bank", "gateway"]
     comp_ready = sum(1 for k in comp_keys if comp.get(k))
+    # Preview auto-split: tanggal-panel yang akan diproses (tiap tanggal = satu batch).
+    panel_dates = _panel_dates(active, df, dt, None)
     ctx = {
         "active_toko": active,
         "completeness": comp,
@@ -642,7 +656,8 @@ def reconcile(request):
         "batches": batches,
         "bank": bank,
         "date_from": df or "", "date_to": dt or "",
-        "recon_date": date_cls.today().isoformat(),
+        "panel_dates": panel_dates,
+        "panel_dates_count": len(panel_dates),
         "pending_settlement": pending_settlement_count(active),
     }
     return render(request, "web/reconcile.html", ctx)

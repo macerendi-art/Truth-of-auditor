@@ -41,18 +41,45 @@ class ReconcileViewTests(TestCase):
         self.assertTrue(r.context["completeness"]["minimum_met"])
 
     def test_post_runs_batch_and_redirects(self):
+        # Auto-split: tanggal dideteksi dari data (27 Jun), tanpa recon_date manual.
+        # inc_* meniru checkbox form yang tercentang default untuk sumber siap.
         r = self.client.post(reverse("reconcile"),
-                             {"tolerance": "Default", "recon_date": "2026-06-27"})
+                             {"tolerance": "Default", "inc_panel_dp": "on", "inc_bank": "on"})
         self.assertEqual(r.status_code, 302)
         batch = ReconBatch.objects.latest("id")
         self.assertEqual(r.url, reverse("batch_detail", args=[batch.pk]))
         self.assertEqual(batch.toko, self.lbs)
+        self.assertEqual(batch.recon_date.isoformat(), "2026-06-27")
 
     def test_post_unknown_tolerance_returns_404(self):
         n = ReconBatch.objects.count()
         r = self.client.post(reverse("reconcile"), {"tolerance": "nope"})
         self.assertEqual(r.status_code, 404)
         self.assertEqual(ReconBatch.objects.count(), n)  # tak ada batch dibuat
+
+    def test_post_blokir_uang_yatim_tak_bikin_batch(self):
+        # Bank tanggal 30 tanpa panel penutup (window 1) → run ditolak, 0 batch.
+        bank = SourceType.objects.get(key="bank")
+        up = Upload.objects.create(source_type=bank, toko=self.lbs)
+        Transaction.objects.create(
+            upload=up, source_type=bank, toko=self.lbs, jenis="depo",
+            amount=Decimal("90000"), money_delta=Decimal("90000"),
+            occurred_at=datetime(2026, 6, 30, 10, 0), row_hash="r9",
+        )
+        n = ReconBatch.objects.count()
+        r = self.client.post(
+            reverse("reconcile"),
+            {"tolerance": "Default", "inc_panel_dp": "on", "inc_bank": "on"},
+            follow=True,
+        )
+        self.assertEqual(ReconBatch.objects.count(), n)
+        self.assertContains(r, "ditolak")
+        self.assertContains(r, "30/06/2026")
+
+    def test_get_menampilkan_preview_tanggal(self):
+        r = self.client.get(reverse("reconcile"))
+        self.assertEqual(r.context["panel_dates_count"], 1)
+        self.assertContains(r, "tanggal panel terdeteksi")
 
 
 class BatchDetailTests(TestCase):

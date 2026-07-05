@@ -103,8 +103,14 @@ details.adv .adv-body{padding:2px 14px 14px}
     <h3 style="margin:0 0 14px">Jalankan Rekonsiliasi</h3>
     <form method="post" id="jalankan-form" data-busy>
       {% csrf_token %}
-      <div class="field"><label>Tanggal rekonsiliasi</label>
-        <input type="date" name="recon_date" value="{{ recon_date }}" required>
+      <div class="field"><label>Tanggal yang akan diproses</label>
+        {% if panel_dates_count == 1 %}
+        <p class="faint" style="margin:2px 0 0;font-size:13px"><b>1</b> tanggal panel terdeteksi ({{ panel_dates.0|date:"d/m/Y" }}) — satu batch akan dibuat.</p>
+        {% elif panel_dates_count %}
+        <p class="faint" style="margin:2px 0 0;font-size:13px"><b>{{ panel_dates_count }}</b> tanggal panel terdeteksi ({{ panel_dates.0|date:"d/m" }}–{{ panel_dates|last|date:"d/m/Y" }}) — tiap tanggal jadi satu batch tersendiri.</p>
+        {% else %}
+        <p class="faint" style="margin:2px 0 0;font-size:13px">Belum ada data panel dalam scope — upload panel dulu.</p>
+        {% endif %}
       </div>
       <div class="field"><label>Profil Toleransi</label>
         <select name="tolerance" class="f">{% for t in tolerances %}<option value="{{ t.name }}">{{ t.name }} (±{{ t.date_window_days }} hari)</option>{% endfor %}</select></div>
@@ -117,7 +123,7 @@ details.adv .adv-body{padding:2px 14px 14px}
             <div class="field" style="margin-bottom:8px"><label>Dari tanggal</label><input type="date" name="date_from" value="{{ date_from }}"></div>
             <div class="field" style="margin-bottom:8px"><label>Sampai tanggal</label><input type="date" name="date_to" value="{{ date_to }}"></div>
           </div>
-          <p class="faint" style="margin:0;font-size:.8rem">Biasanya dikosongkan — bila diisi, transaksi "menunggu settlement" di luar rentang tidak ikut run ini.</p>
+          <p class="faint" style="margin:0;font-size:.8rem">Biasanya dikosongkan — bila diisi, hanya tanggal dalam rentang ini yang diproses jadi batch.</p>
         </div>
       </details>
 
