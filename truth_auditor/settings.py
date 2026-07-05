@@ -195,6 +195,26 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 # Picker folder (webkitdirectory) bisa kirim ratusan file; default Django 100.
 DATA_UPLOAD_MAX_NUMBER_FILES = 500
 
+# --- Logging: stdout terstruktur (Railway menangkap console) ---
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler', 'formatter': 'verbose'},
+    },
+    'root': {'handlers': ['console'], 'level': 'INFO'},
+    'loggers': {
+        # 4xx/5xx + unhandled exception tampil di log deploy, bukan menguap.
+        'django.request': {'handlers': ['console'], 'level': 'WARNING', 'propagate': False},
+    },
+}
+
 # --- Produksi / Railway ---
 CSRF_TRUSTED_ORIGINS = []
 if _railway_host:
