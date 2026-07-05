@@ -34,6 +34,8 @@ BUCKET_META = {
     "tidak_cocok": {"label": "Tidak Cocok", "cls": "bad"},
 }
 
+TX_EXPORT_LIMIT = 100_000
+
 REL_LABELS = {
     MatchRun.Relation.PANEL_BRACKET.value: ("Panel", "Bracket"),
     MatchRun.Relation.PANEL_BANK.value: ("Panel", "Bank/Gateway"),
@@ -318,6 +320,20 @@ def transactions(request):
         default_active=("waktu", "desc"),
     )
 
+    if request.GET.get("export"):
+        n = qs.count()
+        if n > TX_EXPORT_LIMIT:
+            messages.error(
+                request,
+                f"{n:,} baris terlalu banyak untuk diekspor — persempit filter dulu "
+                f"(maks {TX_EXPORT_LIMIT:,}).",
+            )
+            # buang param export agar redirect tidak memicu export lagi (loop)
+            redir = request.GET.copy()
+            redir.pop("export", None)
+            return redirect(f"{reverse('transactions')}?{redir.urlencode()}")
+        return _export_transactions(qs, active)
+
     params = request.GET.copy()
     for k in ("sort", "dir", "page"):
         params.pop(k, None)
@@ -364,6 +380,70 @@ def transactions(request):
         "qbase": qbase, "qpage": qpage,
     }
     return render(request, "web/transactions.html", ctx)
+
+
+def _export_transactions(qs, active):
+    import io
+    from datetime import datetime as _dt
+
+    from openpyxl import Workbook
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.styles import Font
+
+    rows = list(qs)
+    money_ids = [t.id for t in rows if t.source_type.key in ("bank", "gateway")]
+    best = {}
+    if money_ids:
+        results = (
+            MatchResult.objects.filter(right_id__in=money_ids, left__isnull=False)
+            .exclude(bucket=MatchResult.Bucket.TIDAK)
+            .select_related("left")
+        )
+        for r in results:
+            rank = (r.bucket == MatchResult.Bucket.COCOK, r.score or 0, r.run_id, r.id)
+            if r.right_id not in best or rank > best[r.right_id][0]:
+                best[r.right_id] = (rank, r.left)
+
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet("Transaksi")
+    bold = Font(bold=True)
+
+    def hcell(v):
+        c = WriteOnlyCell(ws, value=v)
+        c.font = bold
+        return c
+
+    ws.append([hcell(h) for h in [
+        "Waktu", "Sumber", "Jenis", "Amount", "Δ Uang", "Ticket",
+        "Username", "Nama Lengkap", "Counterparty",
+    ]])
+    for t in rows:
+        mp = best.get(t.id, (None, None))[1]
+        is_money = t.source_type.key in ("bank", "gateway")
+        ticket = t.ticket_no or (f"≈ {mp.ticket_no}" if mp and mp.ticket_no else "")
+        username = t.username or (f"≈ {mp.username}" if mp and mp.username else "")
+        if is_money:
+            nama = f"≈ {mp.counterparty}" if mp and mp.counterparty else ""
+        else:
+            nama = t.counterparty or ""
+        ws.append([
+            t.occurred_at.strftime("%d/%m/%Y %H:%M") if t.occurred_at else "",
+            t.source_label,
+            t.get_jenis_display(),
+            float(t.amount),
+            float(t.money_delta),
+            ticket, username, nama, t.counterparty or "",
+        ])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    resp = HttpResponse(
+        buf.read(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    fname = f"transaksi_{active.name}_{_dt.now():%Y%m%d-%H%M}.xlsx"
+    resp["Content-Disposition"] = f'attachment; filename="{fname}"'
+    return resp
 
 
 @login_required

@@ -8,6 +8,9 @@
     <h1>Transaksi</h1>
     <p>{{ total|intcomma }} baris kanonik untuk <b>{{ active_toko.name }}</b>.</p>
   </div>
+  <div class="actions">
+    <a class="btn" href="?{{ qpage }}&export=1">⬇ Export Excel</a>
+  </div>
 </div>
 
 <div class="card reveal" style="margin-bottom:18px">
