@@ -160,7 +160,8 @@ class PhoneIdentityTests(_Base):
 
 
 class Pass3NearMissTests(_Base):
-    def test_fee_kecil_identitas_kuat_jadi_tinjau(self):
+    def test_fee_identitas_persis_jadi_cocok(self):
+        # Nama identik (skor 100) + selisih fee kecil → cocok, fee tercatat.
         p = self.tx(self.panel, self.up_panel, "wd", "50000", "-50000",
                     datetime(2026, 6, 27, 9), ticket="W4", cp="GUDEL NGULET")
         m = self.tx(self.bank, self.up_hendi, "wd", "52000", "-52000",
@@ -168,8 +169,37 @@ class Pass3NearMissTests(_Base):
         self.match()
         r = MatchResult.objects.get(left=p)
         self.assertEqual(r.right_id, m.id)
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.reason_code, "amount_fee")
+
+    def test_fee_identitas_fuzzy_tetap_tinjau(self):
+        # Nama mirip tapi tak identik (>=85, <100) → tetap perlu mata manusia.
+        p = self.tx(self.panel, self.up_panel, "wd", "60000", "-60000",
+                    datetime(2026, 6, 27, 9), ticket="W41", cp="MUHAMMAD RIZKY PRATAMA")
+        m = self.tx(self.bank, self.up_hendi, "wd", "61000", "-61000",
+                    datetime(2026, 6, 27, 10), cp="MUHAMAD RIZKI PRATAM")
+        self.match()
+        r = MatchResult.objects.get(left=p)
+        self.assertEqual(r.right_id, m.id)
         self.assertEqual(r.bucket, MatchResult.Bucket.TINJAU)
         self.assertEqual(r.reason_code, "amount_fee")
+
+    def test_fee_via_nomor_hp_gopay_jadi_cocok(self):
+        # Skenario Bayu Sukma Hartono: WD 100k via GOPAY, mutasi -101.000 memuat
+        # nomor HP (087749070600) — identitas nomor = 100 → cocok.
+        p = self.tx(self.panel, self.up_panel, "wd", "100000", "-100000",
+                    datetime(2026, 6, 27, 9), ticket="W42", cp="Bayu sukma hartono",
+                    raw={"Player Bank": "GOPAY|Bayu sukma hartono|087749070600"})
+        m = self.tx(self.bank, self.up_hendi, "wd", "101000", "-101000",
+                    datetime(2026, 6, 27, 10), cp="",
+                    raw={"line": "2706/FTFVA/WS9527170001/GOPAY TOPUP - - 101,000.00 DB",
+                         "cont": "087749070600 TRSF E-BANKING DB"})
+        self.match()
+        r = MatchResult.objects.get(left=p)
+        self.assertEqual(r.right_id, m.id)
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.reason_code, "amount_fee")
+        self.assertEqual(r.score, 100)
 
     def test_uang_h_minus_1_identitas_kuat_jadi_tinjau(self):
         p = self.tx(self.panel, self.up_panel, "depo", "80000", "80000",

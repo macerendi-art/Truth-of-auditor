@@ -383,7 +383,11 @@ class _MoneyMatcher:
             if best:
                 s, b = best
                 diff = abs(int(abs(b.money_delta)) - amt)
-                emit(p, b, MatchResult.Bucket.TINJAU, s, "amount_fee",
+                # Identitas PERSIS (nomor HP/username/nama identik = 100) + selisih
+                # kecil khas biaya transfer → cocok; identitas fuzzy tetap ditinjau.
+                bucket = (MatchResult.Bucket.COCOK if s >= 100
+                          else MatchResult.Bucket.TINJAU)
+                emit(p, b, bucket, s, "amount_fee",
                      f"identitas cocok, selisih nominal {diff:,} (indikasi fee)")
                 continue
             for b, delta in kandidat(p, lo=-1, hi=-1):
