@@ -54,7 +54,11 @@
 <div class="card pad0 reveal">
   <div class="table-wrap tall" style="border:none">
   <table id="hasil-table">
-    <thead><tr><th style="width:28px"></th><th>Status</th><th>{{ left_label }}</th><th>User ID</th><th>Full Name</th><th>Player Bank</th><th>Bank Title</th><th>Handler</th><th class="num">Amount</th><th>{{ right_label }}</th><th class="num">Amount</th><th>Alasan</th><th style="text-align:center">Aksi</th></tr></thead>
+    <thead><tr><th style="width:28px"></th><th>Status</th><th>{{ left_label }}</th><th>User ID</th><th>Full Name</th><th>Player Bank</th><th>Bank Title</th><th>Handler</th>
+      <th class="num"><a class="th-sort" href="?bucket={{ bucket }}&reason={{ reason }}&sort=amount&dir={% if sort == 'amount' and dir == 'asc' %}desc{% else %}asc{% endif %}">Amount{% if sort == 'amount' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
+      <th>{{ right_label }}</th><th class="num">Amount</th>
+      <th><a class="th-sort" href="?bucket={{ bucket }}&reason={{ reason }}&sort=skor&dir={% if sort == 'skor' and dir == 'asc' %}desc{% else %}asc{% endif %}">Alasan{% if sort == 'skor' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
+      <th style="text-align:center">Aksi</th></tr></thead>
     <tbody>
     {% for r in page %}{% include "web/_result_row.html" %}{% empty %}
       <tr><td colspan="13" class="cell-empty">Tidak ada hasil pada bucket ini.</td></tr>{% endfor %}
@@ -66,9 +70,9 @@
 
 {% if page.has_other_pages %}
 <div class="pager">
-  {% if page.has_previous %}<a class="btn sm" href="?bucket={{ bucket }}&reason={{ reason }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
+  {% if page.has_previous %}<a class="btn sm" href="?bucket={{ bucket }}&reason={{ reason }}&sort={{ sort }}&dir={{ dir }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
   <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
-  {% if page.has_next %}<a class="btn sm" href="?bucket={{ bucket }}&reason={{ reason }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
+  {% if page.has_next %}<a class="btn sm" href="?bucket={{ bucket }}&reason={{ reason }}&sort={{ sort }}&dir={{ dir }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}

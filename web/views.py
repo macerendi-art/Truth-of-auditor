@@ -659,7 +659,7 @@ def batch_uang(request, pk):
 @login_required
 def run_detail(request, pk):
     run = get_object_or_404(MatchRun, pk=pk, batch__toko__in=tokos_for(request.user))
-    qs = MatchResult.objects.filter(run=run).select_related("left", "right").order_by("bucket", "-score")
+    qs = MatchResult.objects.filter(run=run).select_related("left", "right")
     bucket = request.GET.get("bucket", "")
     if bucket:
         qs = qs.filter(bucket=bucket)
@@ -670,6 +670,11 @@ def run_detail(request, pk):
     reason = request.GET.get("reason", "")
     if reason:
         qs = qs.filter(reason_code=reason)
+    qs, sort, sort_dir = _apply_sort(
+        request, qs,
+        allowed={"amount": "left__amount", "skor": "score", "waktu": "left__occurred_at"},
+        default_order=["bucket", "-score", "id"],
+    )
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
     left_label, right_label = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
     # Nomor batch per-toko (posisi urut, bukan pk global) — konsisten dgn batch_detail.
@@ -682,6 +687,7 @@ def run_detail(request, pk):
         "left_label": left_label, "right_label": right_label,
         "batch": batch, "batch_no": batch_no,
         "reasons": reasons, "reason": reason,
+        "sort": sort, "dir": sort_dir,
     }
     return render(request, "web/run_detail.html", ctx)
 
