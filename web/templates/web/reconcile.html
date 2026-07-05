@@ -28,8 +28,10 @@
     <h3 style="margin:0 0 12px">Jalankan</h3>
     <form method="post" id="jalankan-form" data-saran="{{ saran_iso }}">
       {% csrf_token %}
+      {# Label memuat SEMUA knob pembeda — window searah (uang boleh telat, bukan ±),
+         toleransi nominal, ambang nama. Dulu cuma window → Default & Longgar tampak kembar. #}
       <div class="field"><label>Profil Toleransi</label>
-        <select name="tolerance" class="f">{% for t in tolerances %}<option value="{{ t.name }}">{{ t.name }} (±{{ t.date_window_days }} hari)</option>{% endfor %}</select></div>
+        <select name="tolerance" class="f">{% for t in tolerances %}<option value="{{ t.name }}">{{ t.name }} — uang telat ≤{{ t.date_window_days }} hari{% if t.amount_abs_tol %} · beda nominal ≤{{ t.amount_abs_tol|floatformat:0 }}{% endif %} · nama ≥{{ t.fuzzy_threshold }}</option>{% endfor %}</select></div>
       <div class="{% if tanggal_disarankan %}date-hero{% endif %}">
         {% if tanggal_disarankan %}<span class="kicker"><svg width="13" height="13"><use href="#i-sparkles"/></svg> Tanggal disarankan — hari berikutnya yang belum direkonsiliasi</span>{% endif %}
         <div class="grid cols-2">
