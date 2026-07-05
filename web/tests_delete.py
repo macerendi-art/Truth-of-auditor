@@ -55,17 +55,20 @@ class DeleteUploadTests(TestCase):
         self.assertTrue(Upload.objects.filter(pk=up.pk).exists())
 
     def test_tombol_hanya_untuk_admin(self):
+        # Hapus (massal, checkbox pilih-semua) hanya untuk admin.
         _mk_upload(self.lbs)
         aud = User.objects.create_user("aud2", password="pw123456", role="auditor")
         aud.allowed_tokos.add(self.lbs)
         self.client.login(username="aud2", password="pw123456")
         self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
         r = self.client.get(reverse("upload"))
-        self.assertNotContains(r, "/delete/")
+        self.assertNotContains(r, "Hapus terpilih")
+        self.assertNotContains(r, 'id="chkAll"')
         self.client.login(username="adm", password="pw123456")
         self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
         r = self.client.get(reverse("upload"))
-        self.assertContains(r, "/delete/")
+        self.assertContains(r, "Hapus terpilih")
+        self.assertContains(r, 'id="chkAll"')
 
 
 class DeleteBatchTests(TestCase):

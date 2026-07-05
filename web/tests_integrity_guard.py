@@ -114,6 +114,13 @@ class DeleteUploadGuardTests(_Base):
         r = self.client.get(reverse("upload"))
         self.assertContains(r, "Dipakai hasil rekonsiliasi")
 
+    def test_riwayat_punya_pilih_semua_dan_hapus_massal(self):
+        self._upload(name="a.xlsx")
+        r = self.client.get(reverse("upload"))
+        self.assertContains(r, 'id="chkAll"')          # checkbox pilih semua
+        self.assertContains(r, 'name="upload_ids"')    # checkbox per baris (tak terkunci)
+        self.assertContains(r, "Hapus terpilih")       # tombol hapus massal
+
 
 class HollowDetectionTests(_Base):
     def test_batch_cangkang_dapat_banner(self):
