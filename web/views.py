@@ -330,8 +330,10 @@ def _uploads_for(toko, limit=20):
 
 def _saran_tanggal(toko):
     """Saran tanggal reconcile berikutnya: hari setelah window batch terakhir; bila
-    belum ada batch berjendela, tanggal transaksi AKTIF tertua (data yang belum
-    direkonsiliasi). None = tanpa saran (form dibiarkan kosong)."""
+    belum ada batch berjendela, tanggal PANEL aktif tertua — ritual itu
+    panel-driven; statement bank diekspor sebulan penuh (mulai tgl 1) dan tidak
+    boleh menyeret saran ke awal bulan padahal data panel mulai belakangan.
+    Fallback terakhir: transaksi aktif tertua apa pun. None = tanpa saran."""
     last = (
         ReconBatch.objects.filter(toko=toko, date_to__isnull=False)
         .order_by("-date_to", "-id")
@@ -339,9 +341,12 @@ def _saran_tanggal(toko):
     )
     if last:
         return last.date_to + timedelta(days=1)
-    lo = Transaction.objects.filter(
+    aktif = Transaction.objects.filter(
         toko=toko, is_duplicate=False, consumed_by_batch__isnull=True
-    ).aggregate(lo=Min("occurred_at"))["lo"]
+    )
+    lo = aktif.filter(source_type__key="panel").aggregate(lo=Min("occurred_at"))["lo"]
+    if lo is None:
+        lo = aktif.aggregate(lo=Min("occurred_at"))["lo"]
     return lo.date() if lo else None
 
 
