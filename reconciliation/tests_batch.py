@@ -718,3 +718,74 @@ class AliasHistoryTests(TestCase):
         _, pb = self._run_day(27)
         r = pb.results.get(left__isnull=False)
         self.assertNotEqual(r.reason_code, "alias_history")
+
+
+class DateProximityTieTests(TestCase):
+    """Skor seri → pilih kandidat tanggal TERDEKAT ke panel. Tanpa preferensi ini
+    greedy memilih urutan DB: batch hari-H bisa nyomot settlement H+1 padahal uang
+    hari-H ada, dan baris repeat player besok kelaparan. Bukti staging K25: 80
+    baris no_money padahal kandidat skor 100 ada — semua uangnya sudah dikonsumsi
+    batch kemarin."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.tol = ToleranceProfile.objects.get_or_create(name="Default")[0]
+        self.tol.date_window_days = 1
+        self.tol.fuzzy_threshold = 85
+        self.tol.save()
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        self.up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+
+    def _tx(self, st, money, rh, day=27, **kw):
+        return Transaction.objects.create(
+            upload=self.up, source_type=st, toko=self.lbs, jenis="depo",
+            amount=Decimal(abs(int(money))), money_delta=Decimal(money),
+            occurred_at=datetime(2026, 6, day, 21, 0), row_hash=rh, **kw,
+        )
+
+    def _run_day(self, day):
+        b = run_batch(self.lbs, self.tol, date_from=date(2026, 6, day), date_to=date(2026, 6, day))
+        return b, b.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+
+    def test_seri_pilih_tanggal_terdekat(self):
+        self._tx(self.panel, "50000", "p1", counterparty="BUDI SANTOSO")
+        # Uang H+1 sengaja dibuat DULUAN (id lebih kecil) — tanpa tie-break
+        # tanggal, greedy urutan DB memilihnya dan uang hari-H terlantar.
+        besok = self._tx(self.bank, "50000", "k28", day=28, counterparty="BUDI SANTOSO")
+        hari_h = self._tx(self.bank, "50000", "k27", day=27, counterparty="BUDI SANTOSO")
+        _, pb = self._run_day(27)
+        r = pb.results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+        self.assertEqual(r.right_id, hari_h.id)
+        besok.refresh_from_db()
+        self.assertIsNone(besok.consumed_by_batch)  # uang besok tetap bebas
+
+    def test_repeat_player_dua_hari_dua_batch(self):
+        # Orang sama, nominal sama, dua hari berturut — batch 27 tak boleh
+        # mencuri uang 28; batch 28 harus tetap dapat pasangannya.
+        self._tx(self.panel, "50000", "p27", day=27, counterparty="IRAMAYA YUATI")
+        self._tx(self.panel, "50000", "p28", day=28, counterparty="IRAMAYA YUATI")
+        uang28 = self._tx(self.bank, "50000", "k28", day=28, counterparty="IRAMAYA YUATI")
+        uang27 = self._tx(self.bank, "50000", "k27", day=27, counterparty="IRAMAYA YUATI")
+        _, pb27 = self._run_day(27)
+        r27 = pb27.results.get(left__isnull=False)
+        self.assertEqual(r27.right_id, uang27.id)
+        _, pb28 = self._run_day(28)
+        r28 = pb28.results.get(left__isnull=False)
+        self.assertEqual(r28.bucket, "cocok")
+        self.assertEqual(r28.right_id, uang28.id)
+
+    def test_dest_menang_atas_tanggal(self):
+        # Kunci kuat (nomor tujuan sama) H+1 mengalahkan nama-100 hari-H:
+        # identitas pasti > kedekatan tanggal.
+        self._tx(self.panel, "50000", "p1", counterparty="BUDI SANTOSO",
+                 dest_account="123456789")
+        self._tx(self.bank, "50000", "kh", day=27, counterparty="BUDI SANTOSO")
+        besok_dest = self._tx(self.bank, "50000", "kd", day=28,
+                              counterparty="BUDI SANTOSO", dest_account="123456789")
+        _, pb = self._run_day(27)
+        r = pb.results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+        self.assertEqual(r.reason_code, "bank_dest")
+        self.assertEqual(r.right_id, besok_dest.id)

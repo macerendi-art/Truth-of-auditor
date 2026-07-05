@@ -355,13 +355,17 @@ class _MoneyMatcher:
                 scored.append((s, b, is_dest, is_alias))
             if scored:
                 best_s = max(s for s, _, _, _ in scored)
-                # Pada skor seri, kandidat dest-match diprioritaskan (kunci kuat menang
-                # atas kecocokan nama yang kebetulan sama-sama 100), lalu alias historis.
-                best, best_is_dest, best_is_alias = next(
-                    ((b, d, al) for s, b, d, al in scored if s == best_s and d),
-                    next(
-                        ((b, d, al) for s, b, d, al in scored if s == best_s and al),
-                        next((b, d, al) for s, b, d, al in scored if s == best_s),
+                # Pada skor seri: kunci kuat (dest) menang atas nama, lalu alias
+                # historis, lalu TANGGAL TERDEKAT ke panel. Tanpa preferensi
+                # tanggal, urutan queryset yang menentukan (arbitrary di Postgres):
+                # batch hari-H bisa nyomot settlement H+1 padahal uang hari-H ada,
+                # dan baris repeat player besok kelaparan.
+                best, best_is_dest, best_is_alias = min(
+                    ((b, d, al) for s, b, d, al in scored if s == best_s),
+                    key=lambda t: (
+                        not t[1], not t[2],
+                        abs((t[0].occurred_at.date() - p.occurred_at.date()).days),
+                        t[0].id,
                     ),
                 )
             else:
@@ -370,14 +374,16 @@ class _MoneyMatcher:
             # ber-IDENTITAS BERBEDA → tinjau, JANGAN konsumsi (auditor pilih). Deposit
             # berulang oleh user SAMA BUKAN ambigu → pasangkan greedy 1-1. Untuk baris
             # dest-match, identitas = NOMOR TUJUAN (nomor sama = identitas sama, walau
-            # nama kosong) → jangan dianggap ambigu.
+            # nama kosong) → jangan dianggap ambigu. Dan bila PEMENANGNYA dest-match,
+            # identitas sudah TERBUKTI oleh nomor tujuan — seri dengan kandidat nama
+            # bukan ambigu, kunci kuat menang mutlak.
             tied = [(b, d) for s, b, d, _ in scored if s == best_s]
             tied_idents = {
                 b.dest_account if d
                 else ((b.username or "").strip().lower() or (b.counterparty or "").strip().lower())
                 for b, d in tied
             }
-            ambiguous = len(tied) >= 2 and len(tied_idents) >= 2
+            ambiguous = len(tied) >= 2 and len(tied_idents) >= 2 and not best_is_dest
             match_reason = (
                 "bank_dest" if best_is_dest
                 else "alias_history" if best_is_alias
