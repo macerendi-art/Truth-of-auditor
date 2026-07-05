@@ -114,6 +114,20 @@ class AutoSplitTests(_Base):
         self.assertEqual(res["errors"], [])
 
 
+    def test_deposit_tanpa_uang_sehari_tidak_hilang_senyap(self):
+        # Jaring senyap (fix bug D): panel 27 yang uangnya hanya datang 28 (tanpa
+        # panel 28) TIDAK boleh dikonsumsi diam-diam — harus tercatat no_money
+        # supaya selisih batch selalu punya baris penjelas.
+        p27 = self._hari(self.panel, "depo", "50000", "50000", "D1", "p1", 27, jam=21, username="budi")
+        self._hari(self.bank, "depo", "50000", "50000", "", "k1", 28, jam=1, username="budi")
+        res = run_batches_auto(self.lbs, self.tol)
+        self.assertTrue(res["ok"])
+        r = MatchResult.objects.filter(left=p27).first()
+        self.assertIsNotNone(r, "deposit hilang senyap — tak ada MatchResult")
+        self.assertEqual(r.bucket, MatchResult.Bucket.TIDAK)
+        self.assertEqual(r.reason_code, "no_money")
+
+
 class VerifyAnchorTests(_Base):
     def test_uang_yatim_memblokir_tanpa_bikin_batch(self):
         # Panel hanya 27; uang 30 tak tertutup panel (window 1) → tolak, 0 batch.

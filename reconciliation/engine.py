@@ -876,8 +876,14 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
         relations.append(MatchRun.Relation.PANEL_BRACKET)
     else:
         skipped.append(MatchRun.Relation.PANEL_BRACKET.value)
-    # PANEL_BANK hanya jika ada sumber uang yang ADA dan dicentang.
-    if (comp["bank"] and _inc(include, "bank")) or (comp["gateway"] and _inc(include, "gateway")):
+    # PANEL_BANK jalan bila ada uang (bank/gateway) yang ADA & dicentang, ATAU —
+    # jaring senyap — uang DIINGINKAN (dicentang) tapi kosong di scope sementara
+    # ada panel DP/WD: matcher menghasilkan no_money per baris panel sehingga
+    # deposit/wd tak lenyap senyap (selisih batch selalu punya baris penjelas).
+    money_present = (comp["bank"] and _inc(include, "bank")) or (comp["gateway"] and _inc(include, "gateway"))
+    money_wanted = _inc(include, "bank") or _inc(include, "gateway")
+    panel_present = (comp["panel_dp"] and _inc(include, "panel_dp")) or (comp["panel_wd"] and _inc(include, "panel_wd"))
+    if money_present or (money_wanted and panel_present):
         relations.append(MatchRun.Relation.PANEL_BANK)
     else:
         skipped.append(MatchRun.Relation.PANEL_BANK.value)
