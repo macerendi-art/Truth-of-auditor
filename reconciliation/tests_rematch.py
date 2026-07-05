@@ -205,7 +205,7 @@ class WeakNameOnRematchTests(_Base):
         batch = self._batch_25()
         res = self._pb(batch).results.get(left__isnull=False)
 
-        bank = self._tx(self.bank, "depo", "50000", "kb", day=25, counterparty="XYZ RANDOM")
+        bank = self._tx(self.bank, "depo", "50000", "kb", day=25, counterparty="BUDI S")
         stats = rematch_batch(batch)
 
         res.refresh_from_db()

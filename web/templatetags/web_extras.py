@@ -19,6 +19,7 @@ _REASON_LABELS = {
     "gateway_unpaid": "QR belum settle",
     "gateway_no_panel": "Uang QR tanpa deposit Panel",
     "weak_name": "Nama lemah",
+    "alias_history": "Cocok · rekening dikenal (riwayat)",
     "ambiguous_multi": "Kandidat ganda (identitas beda)",
     "amount_mismatch": "Nominal beda",
     "no_money": "Tak ada padanan uang",

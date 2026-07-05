@@ -252,7 +252,7 @@ class T1SettlementTests(TestCase):
     def test_t1_weak_name_still_review(self):
         # Satu kandidat, nama lemah, tanpa username → tetap weak_name (bukan ambiguous_multi).
         self._tx(self.panel, "depo", "50000", "p26", 26, counterparty="BUDI SANTOSO")
-        self._tx(self.bank, "depo", "50000", "k27", 27, counterparty="XYZ RANDOM")
+        self._tx(self.bank, "depo", "50000", "k27", 27, counterparty="BUDI S")
         batch = self._day26()
         pb = batch.runs.get(relation=MatchRun.Relation.PANEL_BANK)
         res = pb.results.get()
@@ -439,8 +439,8 @@ class WdDestKeyTests(TestCase):
 
     def test_wd_dest_beda_tetap_weak_name(self):
         # (b) dest beda + nama tak cocok -> tetap weak_name (tak diselamatkan dest).
-        self._tx(self.panel, "wd", "-50000", "p1", dest_account="81917710481", counterparty="BUDI")
-        self._tx(self.bank, "wd", "-50000", "kb", dest_account="99900011122", counterparty="XYZ RANDOM")
+        self._tx(self.panel, "wd", "-50000", "p1", dest_account="81917710481", counterparty="BUDI SANTOSO")
+        self._tx(self.bank, "wd", "-50000", "kb", dest_account="99900011122", counterparty="BUDI S")
         pb = self._pb(self._run())
         r = pb.results.get(left__isnull=False)
         self.assertEqual(r.bucket, "perlu_tinjau")
@@ -593,3 +593,128 @@ class GatewayOrphanWindowTests(TestCase):
         b = run_batch(self.lbs, self.tol)
         pb = b.runs.get(relation=MatchRun.Relation.PANEL_BANK)
         self.assertTrue(pb.results.filter(reason_code="gateway_no_panel").exists())
+
+
+class WeakFloorTests(TestCase):
+    """Floor bukti nama (_WEAK_FLOOR=55): nominal+tanggal sama TANPA bukti identitas
+    BUKAN pasangan. Bukti staging K25: 337 dari 552 tinjau berskor <40 (243 di
+    antaranya 0-9) — dipasangkan cuma karena nominal+window, dan uang bank ikut
+    terkunci ke pasangan sampah. Di bawah floor → no_money, uang TETAP BEBAS."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.tol = ToleranceProfile.objects.get_or_create(name="Default")[0]
+        self.tol.date_window_days = 1
+        self.tol.fuzzy_threshold = 85
+        self.tol.save()
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        self.up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+
+    def _tx(self, st, money, rh, day=27, **kw):
+        return Transaction.objects.create(
+            upload=self.up, source_type=st, toko=self.lbs, jenis="depo",
+            amount=Decimal(abs(int(money))), money_delta=Decimal(money),
+            occurred_at=datetime(2026, 6, day, 21, 0), row_hash=rh, **kw,
+        )
+
+    def _pb(self):
+        b = run_batch(self.lbs, self.tol, date_from=date(2026, 6, 27), date_to=date(2026, 6, 27))
+        return b.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+
+    def test_skor_nol_jadi_no_money(self):
+        # Nama beda total (skor ~40 token noise) → JANGAN dipasangkan.
+        self._tx(self.panel, "50000", "p1", counterparty="BUDI SANTOSO")
+        self._tx(self.bank, "50000", "k1", counterparty="XYZ RANDOM")
+        r = self._pb().results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "tidak_cocok")
+        self.assertEqual(r.reason_code, "no_money")
+        self.assertIsNone(r.right)
+        self.assertIn("bukti identitas", r.reason_detail)
+
+    def test_kandidat_t1_di_bawah_floor_tak_dicuri(self):
+        # Bank T+1 (di luar window) bukti nol → tak dipasangkan DAN tak ikut
+        # spillover — tetap bebas untuk batch pemilik tanggalnya. (Baris DALAM
+        # window tetap dikonsumsi _consume_scope — itu desain kepemilikan window,
+        # bukan pairing.)
+        self._tx(self.panel, "50000", "p1", counterparty="BUDI SANTOSO")
+        bank = self._tx(self.bank, "50000", "k1", day=28, counterparty="XYZ RANDOM")
+        r = self._pb().results.get(left__isnull=False)
+        self.assertEqual(r.reason_code, "no_money")
+        bank.refresh_from_db()
+        self.assertIsNone(bank.consumed_by_batch)
+
+    def test_skor_menengah_tetap_weak_name(self):
+        # Nama terpotong khas bank (skor ~80: 55<=s<85) → tetap tinjau weak_name.
+        self._tx(self.panel, "50000", "p1", counterparty="BUDI SANTOSO")
+        self._tx(self.bank, "50000", "k1", counterparty="BUDI S")
+        r = self._pb().results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "perlu_tinjau")
+        self.assertEqual(r.reason_code, "weak_name")
+
+
+class AliasHistoryTests(TestCase):
+    """Kamus alias dari SEJARAH: pasangan COCOK lama (kunci kuat) mengajari matcher
+    'player X memang memakai rekening atas nama Y / nomor Z'. Deposit rekening
+    pinjaman yang BERULANG naik jadi match kuat (95, alias_history) — cara
+    memaksimalkan match yang benar tanpa melonggarkan fuzzy."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.tol = ToleranceProfile.objects.get_or_create(name="Default")[0]
+        self.tol.date_window_days = 1
+        self.tol.fuzzy_threshold = 85
+        self.tol.save()
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        self.up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+        self._n = 0
+
+    def _tx(self, st, money, rh, day, **kw):
+        return Transaction.objects.create(
+            upload=self.up, source_type=st, toko=self.lbs, jenis="depo",
+            amount=Decimal(abs(int(money))), money_delta=Decimal(money),
+            occurred_at=datetime(2026, 6, day, 21, 0), row_hash=rh, **kw,
+        )
+
+    def _run_day(self, day):
+        b = run_batch(self.lbs, self.tol, date_from=date(2026, 6, day), date_to=date(2026, 6, day))
+        return b, b.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+
+    def _seed_history(self):
+        # Hari 26: budi77 match kuat ke rekening 'SITI AMINAH' (username exact di bank).
+        self._tx(self.panel, "50000", "hp", 26, username="budi77", counterparty="SITI AMINAH")
+        self._tx(self.bank, "50000", "hk", 26, username="budi77", counterparty="SITI AMINAH")
+        _, pb = self._run_day(26)
+        self.assertEqual(pb.summary["cocok"], 1)  # sejarah terbentuk
+
+    def test_alias_naikkan_match_berulang(self):
+        self._seed_history()
+        # Hari 27: budi77 deposit lagi via rekening SITI AMINAH — nominal beda,
+        # username bank kosong, nama panel != nama rekening → tanpa alias = sampah.
+        self._tx(self.panel, "75000", "p2", 27, username="budi77", counterparty="BUDI SANTOSO")
+        self._tx(self.bank, "75000", "k2", 27, counterparty="SITI AMINAH")
+        _, pb = self._run_day(27)
+        r = pb.results.get(left__isnull=False)
+        self.assertEqual(r.bucket, "cocok")
+        self.assertEqual(r.reason_code, "alias_history")
+        self.assertGreaterEqual(r.score, 95)
+
+    def test_alias_tak_bocor_ke_user_lain(self):
+        self._seed_history()
+        # Player LAIN pakai rekening yang sama → alias budi77 tak boleh menular.
+        self._tx(self.panel, "75000", "p2", 27, username="tono99", counterparty="TONO S")
+        self._tx(self.bank, "75000", "k2", 27, counterparty="SITI AMINAH")
+        _, pb = self._run_day(27)
+        r = pb.results.get(left__isnull=False)
+        self.assertNotEqual(r.reason_code, "alias_history")
+        self.assertNotEqual(r.bucket, "cocok")
+
+    def test_alias_hilang_saat_batch_sejarah_dihapus(self):
+        self._seed_history()
+        ReconBatch.objects.filter(toko=self.lbs).delete()  # bukti dihapus
+        self._tx(self.panel, "75000", "p2", 27, username="budi77", counterparty="BUDI SANTOSO")
+        self._tx(self.bank, "75000", "k2", 27, counterparty="SITI AMINAH")
+        _, pb = self._run_day(27)
+        r = pb.results.get(left__isnull=False)
+        self.assertNotEqual(r.reason_code, "alias_history")

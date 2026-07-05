@@ -18,6 +18,12 @@ from .models import MatchResult, MatchRun, ReconBatch, ToleranceProfile
 
 MONEY_SOURCES = ["bank", "gateway"]
 
+# Floor bukti identitas utk pasangan fuzzy bank: di bawah ini skor nama = noise
+# token belaka (nama beda total tetap dapat ~40 dari token_set_ratio). Nominal+
+# tanggal sama TANPA bukti identitas BUKAN pasangan — jatuh ke no_money, uang
+# tetap bebas (tidak dikunci ke pasangan sampah).
+_WEAK_FLOOR = 55
+
 # Status gateway yang dianggap UANG SUDAH MASUK. Selain ini (UNPAID/FAILED/EXPIRED/
 # PENDING) = QR belum settle → tak boleh jadi padanan uang & tak masuk gross.
 SETTLED_STATUS = {"PAID", "SUCCESS", "SETTLED", "SETTLE", "SUKSES", "COMPLETED"}
@@ -190,6 +196,38 @@ class PanelBracketMatcher:
         return out
 
 
+def _alias_map(left_rows):
+    """Kamus alias dari SEJARAH pasangan COCOK: username → {nama rekening, nomor
+    tujuan} yang pernah terbukti dipakai player itu (bank_dest / amount+date+name /
+    alias_history). Deposit-WD via rekening pinjaman yang BERULANG jadi match kuat,
+    bukan tinjau. Diturunkan langsung dari MatchResult — tanpa tabel; batch dihapus
+    = buktinya hilang = aliasnya ikut hilang (self-healing)."""
+    toko_ids = {t.toko_id for t in left_rows}
+    if not toko_ids:
+        return {}, {}
+    pairs = (
+        MatchResult.objects.filter(
+            bucket=MatchResult.Bucket.COCOK,
+            reason_code__in=("bank_dest", "amount+date+name", "alias_history"),
+            left__toko_id__in=toko_ids,
+            right__source_type__key="bank",
+        )
+        .exclude(left__username="")
+        .values_list("left__username", "right__counterparty", "right__dest_account")
+    )
+    alias_cp, alias_dest = {}, {}
+    for uname, cp, dest in pairs:
+        u = (uname or "").strip().lower()
+        if not u:
+            continue
+        k = clean_name(cp or "").upper()
+        if k:
+            alias_cp.setdefault(u, set()).add(k)
+        if dest:
+            alias_dest.setdefault(u, set()).add(dest)
+    return alias_cp, alias_dest
+
+
 class _MoneyMatcher:
     """Cocokkan sisi kredit (Panel/Bracket) ke sisi UANG (Bank/Gateway):
     blocking by nominal, lalu tanggal-terarah + username/fuzzy nama."""
@@ -247,6 +285,7 @@ class _MoneyMatcher:
             else:
                 bank_by_amt.setdefault(int(abs(b.money_delta)), []).append(b)
 
+        alias_cp, alias_dest = _alias_map(left)
         used, out = set(), []
         for p in left:
             # ===== Pass 1: gateway kunci EKSAK (TXN ID → Client Reference) =====
@@ -304,30 +343,46 @@ class _MoneyMatcher:
                         s = max(s, _name_score(p.counterparty, b.counterparty))
                 else:
                     s = _name_score(p.counterparty, b.counterparty)
-                scored.append((s, b, is_dest))
+                # Alias historis: rekening ini pernah TERBUKTI dipakai player ini
+                # (pasangan cocok lama) → bukti kuat walau nama beda total.
+                u = (p.username or "").strip().lower()
+                is_alias = bool(u) and (
+                    clean_name(b.counterparty or "").upper() in alias_cp.get(u, ())
+                    or (b.dest_account and b.dest_account in alias_dest.get(u, ()))
+                )
+                if is_alias:
+                    s = max(s, 95.0)
+                scored.append((s, b, is_dest, is_alias))
             if scored:
-                best_s = max(s for s, _, _ in scored)
+                best_s = max(s for s, _, _, _ in scored)
                 # Pada skor seri, kandidat dest-match diprioritaskan (kunci kuat menang
-                # atas kecocokan nama yang kebetulan sama-sama 100).
-                best, best_is_dest = next(
-                    ((b, d) for s, b, d in scored if s == best_s and d),
-                    next((b, d) for s, b, d in scored if s == best_s),
+                # atas kecocokan nama yang kebetulan sama-sama 100), lalu alias historis.
+                best, best_is_dest, best_is_alias = next(
+                    ((b, d, al) for s, b, d, al in scored if s == best_s and d),
+                    next(
+                        ((b, d, al) for s, b, d, al in scored if s == best_s and al),
+                        next((b, d, al) for s, b, d, al in scored if s == best_s),
+                    ),
                 )
             else:
-                best, best_s, best_is_dest = None, -1, False
+                best, best_s, best_is_dest, best_is_alias = None, -1, False, False
             # Ambigu SEJATI: >=2 kandidat SERI di skor tertinggi DAN lolos ambang DAN
             # ber-IDENTITAS BERBEDA → tinjau, JANGAN konsumsi (auditor pilih). Deposit
             # berulang oleh user SAMA BUKAN ambigu → pasangkan greedy 1-1. Untuk baris
             # dest-match, identitas = NOMOR TUJUAN (nomor sama = identitas sama, walau
             # nama kosong) → jangan dianggap ambigu.
-            tied = [(b, d) for s, b, d in scored if s == best_s]
+            tied = [(b, d) for s, b, d, _ in scored if s == best_s]
             tied_idents = {
                 b.dest_account if d
                 else ((b.username or "").strip().lower() or (b.counterparty or "").strip().lower())
                 for b, d in tied
             }
             ambiguous = len(tied) >= 2 and len(tied_idents) >= 2
-            match_reason = "bank_dest" if best_is_dest else "amount+date+name"
+            match_reason = (
+                "bank_dest" if best_is_dest
+                else "alias_history" if best_is_alias
+                else "amount+date+name"
+            )
             if best is not None and best_s >= tol.fuzzy_threshold and ambiguous:
                 names = ", ".join(f"#{b.id} {b.counterparty or b.username or '-'}" for b, _ in tied)
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=None,
@@ -337,11 +392,21 @@ class _MoneyMatcher:
                 used.add(best.id)
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.COCOK, left=p, right=best,
                                        score=best_s, reason_code=match_reason))
-            elif best is not None:
+            elif best is not None and best_s >= _WEAK_FLOOR:
                 used.add(best.id)
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TINJAU, left=p, right=best,
                                        score=best_s, reason_code="weak_name",
                                        reason_detail=f"nominal+tanggal cocok, nama lemah (score {best_s:.0f})"))
+            elif best is not None:
+                # Kandidat nominal+tanggal ADA tapi bukti identitas nol (< floor) →
+                # BUKAN pasangan. Uang tidak dikonsumsi — tetap bebas utk pasangan
+                # sejati (hari lain / alias yang terbentuk kemudian).
+                out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=p, right=None,
+                                       score=0, reason_code="no_money",
+                                       reason_detail=(
+                                           f"{len(scored)} kandidat nominal+tanggal, bukti identitas "
+                                           f"lemah semua (skor tertinggi {best_s:.0f} < {_WEAK_FLOOR})"
+                                       )))
             else:
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=p, right=None,
                                        score=0, reason_code="no_money",
