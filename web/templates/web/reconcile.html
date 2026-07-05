@@ -2,31 +2,110 @@
 {% load humanize %}
 {% block title %}Rekonsiliasi · Truth of Auditor{% endblock %}
 {% block crumb %}Rekonsiliasi{% endblock %}
+{% block head %}
+<style>
+.src-list{display:flex;flex-direction:column}
+.src-row{display:flex;align-items:center;gap:12px;padding:12px 2px;border-bottom:1px solid var(--line)}
+.src-row:last-child{border-bottom:none}
+.src-row .ic{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--info-bg);color:var(--brand);flex-shrink:0}
+.src-row .ic svg{width:18px;height:18px}
+.src-row.on .ic{background:var(--ok-bg);color:var(--ok)}
+.src-row.off{opacity:.6}
+.src-row .meta{flex:1;min-width:0}
+.src-row .meta b{font-size:14px;font-weight:600;display:block;line-height:1.3}
+.src-row .meta small{font-size:12px;color:var(--faint)}
+.src-row .pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;white-space:nowrap}
+.src-row .pill.on{color:var(--ok);background:var(--ok-bg)}
+.src-row .pill.off{color:var(--muted);background:var(--panel-2);border:1px solid var(--line)}
+.switch{position:relative;width:38px;height:22px;flex-shrink:0;display:inline-block}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch .track{position:absolute;inset:0;background:var(--line-2);border-radius:99px;transition:background .16s;cursor:pointer}
+.switch .track:before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:transform .16s;box-shadow:0 1px 3px rgba(16,24,40,.25)}
+.switch input:checked+.track{background:var(--brand)}
+.switch input:checked+.track:before{transform:translateX(16px)}
+.switch input:disabled+.track{background:var(--line);cursor:not-allowed}
+.ring{position:relative;width:54px;height:54px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;
+  background:conic-gradient(var(--brand) calc(var(--pct)*1%),var(--line) 0)}
+.ring:before{content:"";position:absolute;width:40px;height:40px;border-radius:50%;background:var(--panel)}
+.ring span{position:relative;font-family:'Sora';font-size:13px;font-weight:700;letter-spacing:-.02em}
+details.adv{margin:2px 0 16px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2)}
+details.adv>summary{list-style:none;cursor:pointer;padding:10px 14px;font-size:13px;font-weight:600;color:var(--muted);
+  display:flex;align-items:center;gap:8px}
+details.adv>summary::-webkit-details-marker{display:none}
+details.adv>summary .chev{margin-left:auto;transition:transform .16s}
+details.adv[open]>summary .chev{transform:rotate(180deg)}
+details.adv .adv-body{padding:2px 14px 14px}
+.empty{text-align:center;padding:48px 20px}
+.empty .ic{width:56px;height:56px;border-radius:16px;background:var(--info-bg);color:var(--brand);display:grid;place-items:center;margin:0 auto 14px}
+.empty .ic svg{width:26px;height:26px}
+.empty h4{margin:0 0 6px;font-family:'Sora';font-size:16px}
+.empty p{margin:0 auto 16px;max-width:340px;color:var(--muted);font-size:13.5px}
+.run-btn{width:100%;justify-content:center;padding:12px;font-size:14.5px}
+</style>
+{% endblock %}
 {% block content %}
 <div class="page-head reveal">
-  <h1>Rekonsiliasi — {{ active_toko.name }}</h1>
-  <p>Jalankan Panel↔Bracket &amp; Panel↔Bank/Gateway sekaligus. Cek kelengkapan dulu.</p>
+  <div>
+    <h1>Rekonsiliasi — {{ active_toko.name }}</h1>
+    <p>Jalankan Panel↔Bracket &amp; Panel↔Bank/Gateway sekaligus. Cek kelengkapan dulu.</p>
+  </div>
 </div>
 
 <div class="grid cols-2">
+  {% with c=completeness %}
+  {# ---- KELENGKAPAN DATA ---- #}
   <div class="card reveal">
-    <h3 style="margin:0 0 12px">Kelengkapan Data</h3>
-    <p class="faint" style="margin:-6px 0 12px;font-size:.86rem">Centang sumber yang ikut dijalankan. Sumber kosong tidak bisa dicentang.</p>
-    {% with c=completeness %}
-    <table>
-      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_panel_dp" form="jalankan-form" {% if c.panel_dp %}checked{% else %}disabled{% endif %}> Panel Deposit</label></td><td>{% if c.panel_dp %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
-      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_panel_wd" form="jalankan-form" {% if c.panel_wd %}checked{% else %}disabled{% endif %}> Panel Withdraw</label></td><td>{% if c.panel_wd %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
-      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_bracket" form="jalankan-form" {% if c.bracket %}checked{% else %}disabled{% endif %}> Bracket / FR</label></td><td>{% if c.bracket %}<span class="badge ok">ada</span>{% else %}<span class="badge warn">tidak ada → Panel↔Bracket dilewati</span>{% endif %}</td></tr>
-      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_bank" form="jalankan-form" {% if c.bank %}checked{% else %}disabled{% endif %}> Bank</label></td><td>{% if c.bank %}<span class="badge ok">ada</span>{% else %}<span class="badge bad">kosong</span>{% endif %}</td></tr>
-      <tr><td><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" name="inc_gateway" form="jalankan-form" {% if c.gateway %}checked{% else %}disabled{% endif %}> Gateway</label></td><td>{% if c.gateway %}<span class="badge ok">ada</span>{% else %}<span class="badge warn">kosong</span>{% endif %}</td></tr>
-    </table>
-    {% if not c.minimum_met %}<div class="msg error" style="margin-top:12px">⚠ Minimum belum terpenuhi (butuh Panel + minimal 1 Bank/Gateway). Kamu masih boleh menjalankan.</div>{% endif %}
-    {% if pending_settlement %}<p class="faint" style="margin:12px 0 0;font-size:.86rem">⏳ {{ pending_settlement }} transaksi menunggu settlement dari tanggal sebelumnya — ikut dicocokkan otomatis di run berikutnya.</p>{% endif %}
-    {% endwith %}
+    <div class="h-row" style="margin-bottom:8px">
+      <h3 style="margin:0">Kelengkapan Data</h3>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="ring" style="--pct:{{ comp_pct }}"><span>{{ comp_ready }}/{{ comp_total }}</span></div>
+      </div>
+    </div>
+    <p class="faint" style="margin:0 0 6px;font-size:.86rem">Aktifkan sumber yang ikut dijalankan. Sumber kosong tidak bisa diaktifkan.</p>
+
+    <div class="src-list">
+      <div class="src-row {% if c.panel_dp %}on{% else %}off{% endif %}">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg></span>
+        <div class="meta"><b>Panel Deposit</b><small>Riwayat DP dari panel</small></div>
+        <span class="pill {% if c.panel_dp %}on{% else %}off{% endif %}">{% if c.panel_dp %}siap{% else %}kosong{% endif %}</span>
+        <label class="switch"><input type="checkbox" name="inc_panel_dp" form="jalankan-form" {% if c.panel_dp %}checked{% else %}disabled{% endif %}><span class="track"></span></label>
+      </div>
+      <div class="src-row {% if c.panel_wd %}on{% else %}off{% endif %}">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></span>
+        <div class="meta"><b>Panel Withdraw</b><small>Riwayat WD dari panel</small></div>
+        <span class="pill {% if c.panel_wd %}on{% else %}off{% endif %}">{% if c.panel_wd %}siap{% else %}kosong{% endif %}</span>
+        <label class="switch"><input type="checkbox" name="inc_panel_wd" form="jalankan-form" {% if c.panel_wd %}checked{% else %}disabled{% endif %}><span class="track"></span></label>
+      </div>
+      <div class="src-row {% if c.bracket %}on{% else %}off{% endif %}">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+        <div class="meta"><b>Bracket / FR</b><small>{% if c.bracket %}Ledger agen{% else %}opsional — Panel↔Bracket dilewati bila kosong{% endif %}</small></div>
+        <span class="pill {% if c.bracket %}on{% else %}off{% endif %}">{% if c.bracket %}siap{% else %}opsional{% endif %}</span>
+        <label class="switch"><input type="checkbox" name="inc_bracket" form="jalankan-form" {% if c.bracket %}checked{% else %}disabled{% endif %}><span class="track"></span></label>
+      </div>
+      <div class="src-row {% if c.bank %}on{% else %}off{% endif %}">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>
+        <div class="meta"><b>Bank</b><small>Mutasi rekening (BCA/BRI/Mandiri)</small></div>
+        <span class="pill {% if c.bank %}on{% else %}off{% endif %}">{% if c.bank %}siap{% else %}kosong{% endif %}</span>
+        <label class="switch"><input type="checkbox" name="inc_bank" form="jalankan-form" {% if c.bank %}checked{% else %}disabled{% endif %}><span class="track"></span></label>
+      </div>
+      <div class="src-row {% if c.gateway %}on{% else %}off{% endif %}">
+        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>
+        <div class="meta"><b>Gateway</b><small>QR Flyer / NXPay</small></div>
+        <span class="pill {% if c.gateway %}on{% else %}off{% endif %}">{% if c.gateway %}siap{% else %}opsional{% endif %}</span>
+        <label class="switch"><input type="checkbox" name="inc_gateway" form="jalankan-form" {% if c.gateway %}checked{% else %}disabled{% endif %}><span class="track"></span></label>
+      </div>
+    </div>
+
+    {% if not c.minimum_met %}<div class="msg warning" style="margin-top:14px;font-size:13px">Minimum belum terpenuhi (butuh Panel + minimal 1 Bank/Gateway). Kamu masih boleh menjalankan.</div>{% endif %}
+    {% if pending_settlement %}<div style="margin-top:12px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--warn)">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      <span><b>{{ pending_settlement }}</b> transaksi menunggu settlement — ikut dicocokkan otomatis di run ini.</span>
+    </div>{% endif %}
   </div>
 
+  {# ---- JALANKAN ---- #}
   <div class="card reveal">
-    <h3 style="margin:0 0 12px">Jalankan</h3>
+    <h3 style="margin:0 0 14px">Jalankan Rekonsiliasi</h3>
     <form method="post" id="jalankan-form">
       {% csrf_token %}
       <div class="field"><label>Tanggal rekonsiliasi</label>
@@ -34,29 +113,44 @@
       </div>
       <div class="field"><label>Profil Toleransi</label>
         <select name="tolerance" class="f">{% for t in tolerances %}<option value="{{ t.name }}">{{ t.name }} (±{{ t.date_window_days }} hari)</option>{% endfor %}</select></div>
-      <div class="grid cols-2">
-        <div class="field"><label>Dari tanggal</label><input type="date" name="date_from" value="{{ date_from }}"></div>
-        <div class="field"><label>Sampai tanggal</label><input type="date" name="date_to" value="{{ date_to }}"></div>
-      </div>
-      <p class="faint" style="margin:-6px 0 12px;font-size:.82rem">Filter Dari/Sampai biasanya dikosongkan — bila diisi, transaksi "menunggu settlement" di luar rentang tidak ikut run ini.</p>
-      <button class="btn primary" type="submit">▶ Jalankan Rekonsiliasi</button>
+
+      <details class="adv" {% if date_from or date_to %}open{% endif %}>
+        <summary>Filter lanjutan (opsional)
+          <svg class="chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></summary>
+        <div class="adv-body">
+          <div class="row">
+            <div class="field" style="margin-bottom:8px"><label>Dari tanggal</label><input type="date" name="date_from" value="{{ date_from }}"></div>
+            <div class="field" style="margin-bottom:8px"><label>Sampai tanggal</label><input type="date" name="date_to" value="{{ date_to }}"></div>
+          </div>
+          <p class="faint" style="margin:0;font-size:.8rem">Biasanya dikosongkan — bila diisi, transaksi "menunggu settlement" di luar rentang tidak ikut run ini.</p>
+        </div>
+      </details>
+
+      <button class="btn primary run-btn" type="submit">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Jalankan Rekonsiliasi</button>
     </form>
   </div>
+  {% endwith %}
 </div>
 
-<div class="card reveal" style="padding:0;overflow:hidden">
-  <div style="padding:18px 20px 6px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+{# ---- RIWAYAT BATCH ---- #}
+<div class="card pad0 reveal" style="margin-top:16px">
+  <div style="padding:16px 18px 6px;display:flex;align-items:center;justify-content:space-between;gap:12px">
     <h3 style="margin:0">Riwayat Batch</h3>
+    {% if batches or bank %}
     <form method="get" style="margin:0">
       {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
       {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
-      <select name="bank" class="f" style="width:auto;padding:7px 10px" aria-label="Sumber uang" onchange="this.form.submit()">
+      <select name="bank" class="f" style="width:auto;padding:6px 10px;font-size:13px" aria-label="Sumber uang" onchange="this.form.submit()">
         <option value="">Semua sumber</option>
         <option value="bank" {% if bank == "bank" %}selected{% endif %}>Bank</option>
         <option value="gateway" {% if bank == "gateway" %}selected{% endif %}>Gateway</option>
       </select>
     </form>
+    {% endif %}
   </div>
+  {% if batches %}
   <div class="twrap" style="border:none">
   <table>
     <thead><tr><th>Batch</th><th>Tanggal</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th class="r">Cocok</th><th class="r">Tinjau</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
@@ -80,9 +174,17 @@
         </td>
         {% endif %}
       </tr>
-    {% empty %}<tr><td colspan="{% if is_admin_user %}7{% else %}6{% endif %}" class="faint" style="text-align:center;padding:20px">{% if bank %}Tidak ada batch dengan sumber ini.{% else %}Belum ada batch.{% endif %}</td></tr>{% endfor %}
+    {% endfor %}
     </tbody>
   </table>
   </div>
+  {% else %}
+  <div class="empty">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v16a2 2 0 0 0 2 2h12"/><path d="M18 8l-4-4 4-4"/><path d="M2 12h13a4 4 0 0 1 4 4v4"/></svg></span>
+    <h4>{% if bank %}Tidak ada batch untuk sumber ini{% else %}Belum ada rekonsiliasi{% endif %}</h4>
+    <p>{% if bank %}Tidak ada batch dengan sumber ini. Coba pilih "Semua sumber" atau jalankan rekonsiliasi baru.{% else %}Upload file sumber lalu jalankan rekonsiliasi pertama untuk toko ini.{% endif %}</p>
+    <a class="btn" href="{% url 'upload' %}">Upload file →</a>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

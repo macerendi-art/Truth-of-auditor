@@ -381,9 +381,15 @@ def reconcile(request):
     if bank:
         all_batches = [b for b in all_batches if (b.completeness or {}).get(bank)]
     batches = all_batches[:20]
+    comp = check_completeness(active, df, dt)
+    comp_keys = ["panel_dp", "panel_wd", "bracket", "bank", "gateway"]
+    comp_ready = sum(1 for k in comp_keys if comp.get(k))
     ctx = {
         "active_toko": active,
-        "completeness": check_completeness(active, df, dt),
+        "completeness": comp,
+        "comp_ready": comp_ready,
+        "comp_total": len(comp_keys),
+        "comp_pct": round(100 * comp_ready / len(comp_keys)),
         "tolerances": ToleranceProfile.objects.all(),
         "batches": batches,
         "bank": bank,

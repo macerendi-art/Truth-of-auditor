@@ -50,6 +50,10 @@ class _LoggedIn(TestCase):
 
 class ReconDateFormTests(_LoggedIn):
     def test_form_punya_field_recon_date_dan_kolom_tanggal(self):
+        # Seed satu batch supaya tabel riwayat (bukan empty-state) yang dirender.
+        self._tx(self.panel, "depo", "50000", "50000", "D1", "p1", username="budi")
+        self._tx(self.bank, "depo", "50000", "50000", "", "k1", username="budi")
+        run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 27))
         r = self.client.get(reverse("reconcile"))
         html = r.content.decode()
         self.assertIn('name="recon_date"', html)

@@ -107,6 +107,10 @@ class BatchDetailDisplayTests(_LoggedIn):
 
 class RiwayatColumnTests(_LoggedIn):
     def test_dp_wd_headers_right_aligned(self):
+        # Tabel riwayat hanya dirender bila ada batch (selain itu: empty-state).
+        self._tx(self.panel, "depo", "50000", "50000", "D1", "p1")
+        self._tx(self.bank, "depo", "50000", "50000", "", "k1")
+        run_batch(self.lbs, self.tol, recon_date=datetime(2026, 6, 27).date())
         r = self.client.get(reverse("reconcile"))
         html = r.content.decode()
         self.assertIn('<th class="num">DP selisih</th>', html)
