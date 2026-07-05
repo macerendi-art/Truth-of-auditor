@@ -144,8 +144,9 @@ def dashboard(request):
             "no": (ReconBatch.objects.filter(toko=active, id__lte=b.id).count() if b else None),
         })
 
-    # --- tren selisih 14 batch terakhir (bar SVG dihitung di sini) ---
-    tren_src = batches[-14:]
+    # --- tren selisih 30 hari kalender terakhir (bar DP/WD + garis total) ---
+    tren_cutoff = anchor - timedelta(days=29)
+    tren_src = [b for b in batches if b.recon_date and b.recon_date >= tren_cutoff]
     mx = max((selisih(b) for b in tren_src), default=0) or 1
     tren = []
     for b in tren_src:
@@ -155,6 +156,7 @@ def dashboard(request):
         tren.append({
             "b": b, "dp": dp, "wd": wd,
             "hdp": round(100 * dp / mx), "hwd": round(100 * wd / mx),
+            "tot": dp + wd, "htot": round(100 * (dp + wd) / mx),
         })
 
     # --- kartu status ---
