@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
-from django.db.models import Count, Q, Sum
+from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, OuterRef, Q, Sum
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -25,6 +25,8 @@ from reconciliation.engine import (
     run_batches_auto,
     run_match,
 )
+from core.audit import catat
+from core.models import AuditLog
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
 from sources.detect import detect_source
 from sources.management.commands.ingest import detect_flow
@@ -290,6 +292,26 @@ def _analyze_file(name, fileobj):
     }
 
 
+def _uploads_for(toko, limit=20):
+    """Riwayat upload toko, dianotasi `locked` (buktinya dipakai hasil rekon:
+    direferensi MatchResult left/right ATAU dikonsumsi batch). Tombol Hapus
+    per-baris dinonaktifkan; server (`_locking_batches`) tetap penjaga terakhir."""
+    ref = MatchResult.objects.filter(
+        Q(left__upload=OuterRef("pk")) | Q(right__upload=OuterRef("pk"))
+    )
+    consumed = Transaction.objects.filter(
+        upload=OuterRef("pk"), consumed_by_batch__isnull=False
+    )
+    return (
+        Upload.objects.filter(toko=toko)
+        .select_related("source_type")
+        .annotate(locked=ExpressionWrapper(
+            Exists(ref) | Exists(consumed), output_field=BooleanField(),
+        ))
+        .order_by("-id")[:limit]
+    )
+
+
 @login_required
 def upload(request):
     active = _active_toko(request)
@@ -360,13 +382,13 @@ def upload(request):
         return render(request, "web/upload.html", {
             "preview": preview, "parsers": sorted(PARSERS.keys()),
             "flows": ["", "dp", "wd"], "active_toko": active,
-            "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
+            "uploads": _uploads_for(active),
         })
     from reconciliation.engine import check_completeness
 
     return render(request, "web/upload.html", {
         "parsers": sorted(PARSERS.keys()), "active_toko": active,
-        "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
+        "uploads": _uploads_for(active),
         "comp": check_completeness(active),
     })
 
@@ -609,6 +631,9 @@ def reconcile(request):
         for er in res["errors"]:
             messages.error(request, f"{er['date'].strftime('%d/%m/%Y')}: {er['message']}")
         batches, skipped = res["batches"], res["skipped_existing"]
+        for b in batches:
+            no = ReconBatch.objects.filter(toko=active, id__lte=b.id).count()
+            catat(request.user, "reconcile", f"Batch #{no}", toko=active, batch_pk=b.pk)
         if len(batches) == 1 and not skipped:
             no = ReconBatch.objects.filter(toko=active).count()
             messages.success(request, f"Rekonsiliasi selesai (Batch #{no}).")
@@ -723,10 +748,19 @@ def batch_detail(request, pk):
             row["unpaired"] += 1
     per_bank = sorted(agg.values(), key=lambda r: r["label"])
 
+    # Deteksi cangkang (F1-B): summary mengklaim hasil tapi MatchResult sudah tak
+    # ada (bukti terhapus → cascade). Batch begini tak bisa diverifikasi.
+    bkt = (batch.summary or {}).get("buckets", {})
+    claimed = sum(v for v in bkt.values() if isinstance(v, (int, float)))
+    is_hollow = claimed > 0 and not MatchResult.objects.filter(run__batch=batch).exists()
+    riwayat = list(
+        AuditLog.objects.filter(detail__batch_pk=batch.pk).select_related("user")[:20]
+    )
+
     return render(request, "web/batch_detail.html", {
         "batch": batch, "batch_no": batch_no, "s": batch.summary or {}, "runs": batch.runs.all(),
         "resolved_here": resolved_here, "settled_elsewhere": settled_elsewhere,
-        "per_bank": per_bank,
+        "per_bank": per_bank, "is_hollow": is_hollow, "riwayat": riwayat,
     })
 
 
@@ -866,12 +900,16 @@ def run_detail(request, pk):
     batch_no = (
         ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count() if batch else None
     )
+    # Cangkang (F1-B): summary run mengklaim hasil tapi MatchResult sudah tak ada.
+    rs = run.summary or {}
+    claimed = sum(v for v in rs.values() if isinstance(v, (int, float)))
+    is_hollow = claimed > 0 and not MatchResult.objects.filter(run=run).exists()
     ctx = {
         "run": run, "page": page, "bucket": bucket, "bucket_meta": BUCKET_META,
         "left_label": left_label, "right_label": right_label,
         "batch": batch, "batch_no": batch_no,
         "reasons": reasons, "reason": reason,
-        "sort": sort, "dir": sort_dir,
+        "sort": sort, "dir": sort_dir, "is_hollow": is_hollow,
     }
     return render(request, "web/run_detail.html", ctx)
 
@@ -955,6 +993,10 @@ def bulk_review(request, pk):
         ReviewAction.objects.create(
             result=r, action=action, reason="bulk", reviewer=request.user
         )
+    if rows:
+        catat(request.user, "review_massal", f"{len(rows)} hasil",
+              toko=run.batch.toko if run.batch else None,
+              run_pk=run.pk, n=len(rows), action=action)
     messages.success(request, f"{len(rows)} hasil diperbarui.")
     nxt = request.POST.get("next") or reverse("run_detail", args=[run.pk])
     if not url_has_allowed_host_and_scheme(
@@ -985,6 +1027,8 @@ def review(request, pk):
     r.reason_code = "manual_override"
     r.save(update_fields=["bucket", "reason_code"])
     ReviewAction.objects.create(result=r, action=action, reason=reason, reviewer=request.user)
+    catat(request.user, "review", f"Result #{r.pk}",
+          toko=r.run.batch.toko if r.run.batch else None, result_pk=r.pk, action=action)
     show_run_col = request.POST.get("show_run_col") == "1"
     if show_run_col and r.run.batch:
         r.home_no = ReconBatch.objects.filter(

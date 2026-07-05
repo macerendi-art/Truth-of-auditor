@@ -17,6 +17,12 @@
   {% endif %}
 </div>
 
+{% if is_hollow %}
+<div class="msg error reveal" style="margin-bottom:16px;border-left:4px solid var(--bad)">
+  <b>⚠ Batch cangkang — hasil TIDAK BISA diverifikasi.</b> Ringkasan menyebut hasil, tapi bukti transaksinya sudah terhapus (cascade). Angka di bawah tidak sah — buat ulang batch ini dari data yang lengkap.
+</div>
+{% endif %}
+
 {% if s.warnings %}
 <div class="msg error reveal" style="margin-bottom:16px">
   {% for w in s.warnings %}<div>⚠ {{ w }}</div>{% endfor %}
@@ -170,4 +176,25 @@
   </table>
   </div>
 </div>
+
+{% if riwayat %}
+<div class="card pad0 reveal" style="margin-top:16px">
+  <div class="card-head"><h3>Riwayat aksi</h3><span class="sub">{{ riwayat|length }} aksi tercatat</span></div>
+  <div class="twrap" style="border:none">
+  <table>
+    <thead><tr><th>Waktu</th><th>Aksi</th><th>Oleh</th><th>Objek</th></tr></thead>
+    <tbody>
+    {% for a in riwayat %}
+      <tr>
+        <td class="faint">{{ a.created_at|date:"d/m/Y H:i" }}</td>
+        <td><span class="badge muted">{{ a.aksi }}</span></td>
+        <td>{{ a.user.username|default:"—" }}</td>
+        <td class="faint">{{ a.objek }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
 {% endblock %}

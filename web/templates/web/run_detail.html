@@ -11,6 +11,12 @@
   <div class="actions"><a class="btn" href="{% url 'export_run' run.pk %}">⬇ Export Excel</a></div>
 </div>
 
+{% if is_hollow %}
+<div class="msg error reveal" style="margin-bottom:16px;border-left:4px solid var(--bad)">
+  <b>⚠ Run cangkang — hasil TIDAK BISA diverifikasi.</b> Ringkasan menyebut hasil, tapi bukti transaksinya sudah terhapus (cascade). Angka di bawah tidak sah — buat ulang dari data yang lengkap.
+</div>
+{% endif %}
+
 {% if run.summary %}
 <div class="grid cols-4 reveal">
   <div class="card stat"><div class="k">{{ left_label }}</div><div class="v">{{ run.summary.left|intcomma }}</div></div>
