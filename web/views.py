@@ -22,6 +22,7 @@ from reconciliation.engine import (
     check_completeness,
     rematch_batch,
     run_batch,
+    run_batch_into,
     run_match,
 )
 from core.audit import catat
@@ -561,7 +562,8 @@ def _window_label(dfrom, dto, with_year=False):
 def _status_batches(batches):
     """Chip status per batch riwayat (F3): pisahkan ekor T+1 yang normal dari
     selisih beneran, dan tandai batch cangkang yang buktinya sudah dihapus.
-    Mengisi atribut `window_label` dan `status` pada tiap batch (in-place)."""
+    Mengisi atribut `window_label` dan `chip` pada tiap batch (in-place —
+    JANGAN pakai nama `status`: itu field model utk background run)."""
     ids = [b.id for b in batches]
     res_counts = {
         row["run__batch"]: row["n"]
@@ -577,13 +579,56 @@ def _status_batches(batches):
                 run__batch=b, bucket=MatchResult.Bucket.TIDAK, reason_code="no_money",
                 left__occurred_at__date=b.date_to, left__occurred_at__hour__gte=_JAM_EKOR,
             ).count())
-        b.status = {
-            "rusak": b.bk["total"] > 0 and res_counts.get(b.id, 0) == 0,
+        b.chip = {
+            "rusak": b.bk["total"] > 0 and res_counts.get(b.id, 0) == 0
+                     and b.status == ReconBatch.Status.SELESAI,
             "ekor": ekor,
             "real": max(tidak - ekor, 0),
             "tinjau": tinjau,
-            "final": tidak == 0 and tinjau == 0,
+            "final": tidak == 0 and tinjau == 0 and b.status == ReconBatch.Status.SELESAI,
+            "berjalan": b.status == ReconBatch.Status.BERJALAN,
+            "gagal": b.status == ReconBatch.Status.GAGAL,
         }
+
+
+# Di atas ambang baris aktif ini, reconcile jalan di THREAD background —
+# request kembali seketika, worker gunicorn tidak dibunuh timeout 120s.
+_BG_THRESHOLD = 20000
+
+
+def _perkiraan_baris(toko, date_from, date_to):
+    """Perkiraan kasar beban run: transaksi AKTIF toko dalam window (tanpa
+    pelebaran T+1 — cukup akurat untuk keputusan sync vs background)."""
+    qs = Transaction.objects.filter(
+        toko=toko, is_duplicate=False, consumed_by_batch__isnull=True
+    )
+    if date_from:
+        qs = qs.filter(occurred_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(occurred_at__date__lte=date_to)
+    return qs.count()
+
+
+def _spawn_bg(batch_pk):
+    """Jalankan run_batch_into di thread daemon. Koneksi DB thread ditutup di
+    akhir; error sudah ditandai run_batch_into (status=gagal + error_note)."""
+    import logging
+    import threading
+
+    from django.db import connections
+
+    def job():
+        try:
+            batch = ReconBatch.objects.get(pk=batch_pk)
+            run_batch_into(batch)
+        except Exception:  # noqa: BLE001 - status gagal sudah tercatat di batch
+            logging.getLogger(__name__).exception(
+                "reconcile background gagal (batch %s)", batch_pk
+            )
+        finally:
+            connections.close_all()
+
+    threading.Thread(target=job, daemon=True).start()
 
 
 @login_required
@@ -602,10 +647,31 @@ def reconcile(request):
             "bank": "inc_bank" in request.POST,
             "gateway": "inc_gateway" in request.POST,
         }
+        df_post = request.POST.get("date_from") or None
+        dt_post = request.POST.get("date_to") or None
+        if _perkiraan_baris(active, df_post, dt_post) > _BG_THRESHOLD:
+            batch = ReconBatch.objects.create(
+                toko=active, tolerance=tol, date_from=df_post, date_to=dt_post,
+                created_by=request.user, include=include,
+                status=ReconBatch.Status.BERJALAN,
+            )
+            _spawn_bg(batch.pk)
+            no = ReconBatch.objects.filter(toko=active).count()
+            catat(
+                request.user, "reconcile", f"Batch #{no}", toko=active,
+                batch_pk=batch.pk, date_from=df_post or "", date_to=dt_post or "",
+                latar_belakang=True,
+            )
+            messages.info(
+                request,
+                f"Data besar — rekonsiliasi Batch #{no} berjalan di latar belakang. "
+                f"Halaman batch menyegarkan otomatis sampai selesai.",
+            )
+            return redirect("batch_detail", pk=batch.pk)
         batch = run_batch(
             active, tol,
-            request.POST.get("date_from") or None,
-            request.POST.get("date_to") or None,
+            df_post,
+            dt_post,
             user=request.user,
             include=include,
         )

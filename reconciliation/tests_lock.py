@@ -18,15 +18,20 @@ class RunBatchAtomicTests(TestCase):
         self.lbs = Toko.objects.get(key="lbs")
         self.tol = ToleranceProfile.objects.get(name="Default")
 
-    def test_gagal_di_tengah_tidak_meninggalkan_batch_cangkang(self):
+    def test_gagal_di_tengah_ditandai_gagal_tanpa_isi(self):
         with mock.patch.object(
             engine, "_aggregate_batch", side_effect=RuntimeError("boom")
         ):
             with self.assertRaises(RuntimeError):
                 engine.run_batch(self.lbs, self.tol, "2026-06-28", "2026-06-28")
-        self.assertEqual(ReconBatch.objects.count(), 0)
+        # Isi (runs/hasil/konsumsi) rollback total; batch tersisa sebagai
+        # penanda GAGAL yang terlihat — bukan cangkang setengah jadi.
+        batch = ReconBatch.objects.get()
+        self.assertEqual(batch.status, ReconBatch.Status.GAGAL)
+        self.assertIn("boom", batch.error_note)
+        self.assertEqual(batch.runs.count(), 0)
 
-    def test_run_batch_normal_tetap_jalan(self):
+    def test_run_batch_normal_selesai(self):
         batch = engine.run_batch(self.lbs, self.tol, "2026-06-28", "2026-06-28")
         self.assertIsNotNone(batch.pk)
-        self.assertEqual(ReconBatch.objects.count(), 1)
+        self.assertEqual(batch.status, ReconBatch.Status.SELESAI)

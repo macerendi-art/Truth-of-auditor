@@ -533,21 +533,43 @@ def _consume_scope(toko, date_from, date_to, include):
 def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, include=None):
     date_from, date_to = _as_date(date_from), _as_date(date_to)
     tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
-    with db_tx.atomic():
-        # Lock per-toko: dua reconcile bersamaan pada toko sama diserialisasi
-        # (Postgres; sqlite mengunci DB level file). Sekaligus menjadikan
-        # seluruh run atomic — gagal di tengah = rollback total, tanpa batch
-        # cangkang dan tanpa konsumsi setengah jadi.
-        toko = type(toko).objects.select_for_update().get(pk=toko.pk)
-        return _run_batch_locked(toko, tolerance, date_from, date_to, user, include)
-
-
-def _run_batch_locked(toko, tolerance, date_from, date_to, user, include):
-    comp = check_completeness(toko, date_from, date_to, tol=tolerance)
     batch = ReconBatch.objects.create(
         toko=toko, tolerance=tolerance, date_from=date_from, date_to=date_to,
-        created_by=user, completeness=comp, include=include,
+        created_by=user, include=include, status=ReconBatch.Status.BERJALAN,
     )
+    return run_batch_into(batch, user=user)
+
+
+def run_batch_into(batch, user=None):
+    """Isi batch placeholder (status=berjalan) dengan hasil rekonsiliasi penuh.
+
+    Entry point background runner: placeholder dibuat cepat di request, engine
+    jalan di thread. Lock baris Toko men-serialisasi reconcile/re-match per
+    toko. Gagal = isi (runs/hasil/konsumsi) rollback TOTAL, batch ditandai
+    `gagal` + error_note — kegagalan terlihat, bukan cangkang setengah jadi.
+    """
+    try:
+        with db_tx.atomic():
+            toko = type(batch.toko).objects.select_for_update().get(pk=batch.toko_id)
+            _run_batch_locked(
+                batch, toko, batch.tolerance,
+                _as_date(batch.date_from), _as_date(batch.date_to),
+                user or batch.created_by, batch.include,
+            )
+            batch.status = ReconBatch.Status.SELESAI
+            batch.save(update_fields=["status"])
+    except Exception as e:  # noqa: BLE001 - tandai gagal, tetap propagate
+        ReconBatch.objects.filter(pk=batch.pk).update(
+            status=ReconBatch.Status.GAGAL, error_note=str(e)[:500]
+        )
+        raise
+    return batch
+
+
+def _run_batch_locked(batch, toko, tolerance, date_from, date_to, user, include):
+    comp = check_completeness(toko, date_from, date_to, tol=tolerance)
+    batch.completeness = comp
+    batch.save(update_fields=["completeness"])
     relations, skipped = [], []
     # PANEL_BRACKET hanya jika bracket ADA dan dicentang.
     if comp["bracket"] and _inc(include, "bracket"):

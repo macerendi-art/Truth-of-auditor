@@ -48,6 +48,11 @@ class MatchRun(TimeStampedModel):
 class ReconBatch(TimeStampedModel):
     """Satu sesi rekonsiliasi paralel untuk satu Toko + periode."""
 
+    class Status(models.TextChoices):
+        BERJALAN = "berjalan", "Berjalan"
+        SELESAI = "selesai", "Selesai"
+        GAGAL = "gagal", "Gagal"
+
     toko = models.ForeignKey("sources.Toko", on_delete=models.PROTECT, null=True, blank=True)
     tolerance = models.ForeignKey(ToleranceProfile, on_delete=models.PROTECT)
     date_from = models.DateField(null=True, blank=True)
@@ -61,6 +66,11 @@ class ReconBatch(TimeStampedModel):
     created_by = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True
     )
+    # default SELESAI: semua batch lama (pra-kolom ini) memang sudah selesai.
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.SELESAI
+    )
+    error_note = models.TextField(blank=True, default="")
 
     def __str__(self):
         return f"Batch #{self.pk}"

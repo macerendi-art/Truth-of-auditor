@@ -108,12 +108,14 @@
           <div class="faint" style="font-size:11px" title="Waktu batch dibuat">dibuat {{ b.created_at|date:"d/m H:i" }}</div>
         </td>
         <td style="white-space:nowrap">
-          {% if b.status.rusak %}<span class="badge bad" title="Upload sumber hasil ini sudah dihapus — angka tidak bisa diverifikasi">bukti dihapus</span>
+          {% if b.chip.berjalan %}<span class="badge warn" title="Rekonsiliasi sedang berjalan di latar belakang">⏳ berjalan…</span>
+          {% elif b.chip.gagal %}<span class="badge bad" title="Rekonsiliasi gagal — buka batch untuk detail error">✗ gagal</span>
+          {% elif b.chip.rusak %}<span class="badge bad" title="Upload sumber hasil ini sudah dihapus — angka tidak bisa diverifikasi">bukti dihapus</span>
           {% else %}
-            {% if b.status.final %}<span class="badge ok" title="Tidak ada baris terbuka">✓ final</span>{% endif %}
-            {% if b.status.ekor %}<span class="badge warn" title="Transaksi malam hari terakhir window — uangnya di file besok, tertutup auto re-match">⏳ {{ b.status.ekor }} ekor</span>{% endif %}
-            {% if b.status.real %}<span class="badge bad" title="Tidak cocok di luar heuristik ekor malam — periksa">⚠ {{ b.status.real }} selisih real</span>{% endif %}
-            {% if b.status.tinjau %}<span class="badge warn" title="Menunggu keputusan review">⚑ {{ b.status.tinjau }} tinjau</span>{% endif %}
+            {% if b.chip.final %}<span class="badge ok" title="Tidak ada baris terbuka">✓ final</span>{% endif %}
+            {% if b.chip.ekor %}<span class="badge warn" title="Transaksi malam hari terakhir window — uangnya di file besok, tertutup auto re-match">⏳ {{ b.chip.ekor }} ekor</span>{% endif %}
+            {% if b.chip.real %}<span class="badge bad" title="Tidak cocok di luar heuristik ekor malam — periksa">⚠ {{ b.chip.real }} selisih real</span>{% endif %}
+            {% if b.chip.tinjau %}<span class="badge warn" title="Menunggu keputusan review">⚑ {{ b.chip.tinjau }} tinjau</span>{% endif %}
           {% endif %}
         </td>
         <td class="num amount">{{ b.summary.dp.selisih|default:0|floatformat:0|intcomma }}</td>

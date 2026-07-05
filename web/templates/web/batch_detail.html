@@ -3,6 +3,19 @@
 {% block title %}Batch #{{ batch_no }} · Rekonsiliasi{% endblock %}
 {% block crumb %}Rekonsiliasi · Batch #{{ batch_no }}{% endblock %}
 {% block content %}
+{% if batch.status == "berjalan" %}
+<div class="msg reveal" style="margin-bottom:16px">
+  ⏳ Rekonsiliasi sedang berjalan di latar belakang — halaman ini menyegarkan
+  otomatis tiap 3 detik. Aman ditinggal; hasil muncul di sini begitu selesai.
+</div>
+<script>setTimeout(function () { location.reload(); }, 3000);</script>
+{% elif batch.status == "gagal" %}
+<div class="msg error reveal" style="margin-bottom:16px">
+  ✗ Rekonsiliasi GAGAL — tidak ada hasil yang tersimpan (semua di-rollback,
+  transaksi tetap aktif). Hapus batch ini lalu coba lagi.
+  {% if batch.error_note %}<div class="faint" style="margin-top:6px">Error: {{ batch.error_note }}</div>{% endif %}
+</div>
+{% endif %}
 {% if rusak %}
 <div class="msg error reveal" style="margin-bottom:16px">
   ⚠ Bukti hasil ini sudah dihapus (upload sumbernya di-delete). Angka ringkasan di bawah
@@ -45,6 +58,7 @@
 </div>
 {% endif %}
 
+{% if batch.status != "berjalan" %}
 {% if pending_t1.n %}
 {# Ekor T+1: bedakan "nunggu file besok" dari selisih nyata — anti panik pagi. #}
 <div class="msg warning reveal" style="margin-bottom:16px">
@@ -117,6 +131,8 @@
   </table>
   </div>
 </div>
+
+{% endif %}{# /batch.status != berjalan #}
 
 {% if riwayat_aksi %}
 <div class="card reveal">
