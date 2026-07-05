@@ -1,5 +1,7 @@
 from django.urls import path
 
+from reports.views import export_batch
+
 from . import admin_views, views
 
 urlpatterns = [
@@ -10,6 +12,7 @@ urlpatterns = [
     path("reconcile/", views.reconcile, name="reconcile"),
     path("batch/<int:pk>/", views.batch_detail, name="batch_detail"),
     path("batch/<int:pk>/rematch/", views.rematch, name="rematch_batch"),
+    path("batch/<int:pk>/export/", export_batch, name="export_batch"),
     path("run/<int:pk>/", views.run_detail, name="run_detail"),
     path("run/<int:pk>/export/", views.export_run, name="export_run"),
     path("result/<int:pk>/review/", views.review, name="review"),
