@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -51,6 +52,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django.contrib.humanize',
+    'axes',
     # local apps
     'core',
     'accounts',
@@ -71,6 +73,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'axes.middleware.AxesMiddleware',
 ]
 
 ROOT_URLCONF = 'truth_auditor.urls'
@@ -160,6 +163,19 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # --- Truth of Auditor ---
 AUTH_USER_MODEL = 'accounts.User'
+
+# --- Brute-force login (django-axes) ---
+# Off saat suite tes (client.login() tanpa request tidak kompatibel dgn backend
+# axes); tes lockout sendiri menyalakannya via override_settings.
+AUTHENTICATION_BACKENDS = [
+    'axes.backends.AxesStandaloneBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+AXES_ENABLED = 'test' not in sys.argv
+AXES_FAILURE_LIMIT = 5
+AXES_COOLOFF_TIME = 1  # jam; lockout lepas sendiri
+AXES_RESET_ON_SUCCESS = True
+AXES_LOCKOUT_PARAMETERS = [['username', 'ip_address']]  # kunci kombo user+IP
 
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = '/'

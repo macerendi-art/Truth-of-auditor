@@ -5,6 +5,7 @@ msoffcrypto-tool
 pdfplumber
 rapidfuzz
 python-dateutil
+django-axes
 
 # deployment (Railway/produksi)
 gunicorn

@@ -33,6 +33,32 @@ class SecretKeyTests(TestCase):
         self.assertTrue(key.startswith("django-insecure-"))
 
 
+from django.test import override_settings
+
+
+@override_settings(AXES_ENABLED=True)
+class BruteForceTests(TestCase):
+    """django-axes: 5x salah password = akun+IP dikunci sementara (429)."""
+
+    def setUp(self):
+        User.objects.create_user("adm", password="pw123456", role="admin")
+
+    def test_lockout_setelah_5_gagal(self):
+        url = reverse("login")
+        for _ in range(5):
+            r = self.client.post(url, {"username": "adm", "password": "salah"})
+        # Percobaan ke-6 dengan password BENAR pun ditolak — lockout aktif.
+        r = self.client.post(url, {"username": "adm", "password": "pw123456"})
+        self.assertEqual(r.status_code, 429)
+
+    def test_di_bawah_limit_tetap_bisa_login(self):
+        url = reverse("login")
+        for _ in range(3):
+            self.client.post(url, {"username": "adm", "password": "salah"})
+        r = self.client.post(url, {"username": "adm", "password": "pw123456"})
+        self.assertEqual(r.status_code, 302)  # sukses → redirect
+
+
 class CspHeaderTests(TestCase):
     def test_csp_header_terpasang(self):
         r = self.client.get(reverse("login"))
