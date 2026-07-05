@@ -610,6 +610,19 @@ def batch_uang(request, pk):
     if kat in KATEGORI_UANG:
         rows = [t for t in rows if t.kategori == kat]
 
+    # Sort in-memory (rows sudah list, kategori dihitung pasca-query).
+    from datetime import datetime as _dt
+
+    sort = request.GET.get("sort", "")
+    sort_dir = request.GET.get("dir", "")
+    if sort == "nominal":
+        rows.sort(key=lambda t: abs(float(t.money_delta)), reverse=(sort_dir == "desc"))
+    elif sort == "tanggal":
+        rows.sort(key=lambda t: (t.occurred_at or _dt.min), reverse=(sort_dir == "desc"))
+    else:
+        sort, sort_dir = "tanggal", "asc"  # default: tanggal naik
+        rows.sort(key=lambda t: (t.occurred_at or _dt.min))
+
     if request.GET.get("export"):
         import io
 
@@ -652,7 +665,7 @@ def batch_uang(request, pk):
     ]
     return render(request, "web/batch_uang.html", {
         "batch": batch, "batch_no": batch_no, "page": page,
-        "kartu": kartu, "kat": kat,
+        "kartu": kartu, "kat": kat, "sort": sort, "dir": sort_dir,
     })
 
 
