@@ -3,12 +3,12 @@
 {% block title %}Run #{{ run.pk }}{% if batch %} · Batch #{{ batch_no }}{% endif %} · Truth of Auditor{% endblock %}
 {% block crumb %}Rekonsiliasi{% if batch %} · <a href="{% url 'batch_detail' batch.pk %}">Batch #{{ batch_no }}</a>{% endif %} · {{ run.get_relation_display }} (Run #{{ run.pk }}){% endblock %}
 {% block content %}
-<div class="page-head reveal" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+<div class="page-head reveal">
   <div>
     <h1>{{ run.get_relation_display }}</h1>
     <p>{% if batch %}<a href="{% url 'batch_detail' batch.pk %}">Batch #{{ batch_no }}</a> · {% endif %}{{ run.get_relation_display }} (Run #{{ run.pk }}) · toleransi <b>{{ run.tolerance.name }}</b> (±{{ run.tolerance.date_window_days }} hari) · {{ run.created_at|date:"d/m/Y H:i" }}</p>
   </div>
-  <a class="btn" href="{% url 'export_run' run.pk %}">⬇ Export Excel</a>
+  <div class="actions"><a class="btn" href="{% url 'export_run' run.pk %}">⬇ Export Excel</a></div>
 </div>
 
 {% if run.summary %}
@@ -27,23 +27,55 @@
   <a href="?bucket=tidak_cocok" class="{% if bucket == 'tidak_cocok' %}active{% endif %}">Tidak Cocok</a>
 </div>
 
+{% if reasons|length > 1 %}
+<div class="tabs reveal" style="margin-top:-6px">
+  <a href="?bucket={{ bucket }}" class="{% if not reason %}active{% endif %}" style="font-size:12px;padding:5px 11px">semua alasan</a>
+  {% for rc in reasons %}
+  <a href="?bucket={{ bucket }}&reason={{ rc.reason_code }}" class="{% if reason == rc.reason_code %}active{% endif %}" style="font-size:12px;padding:5px 11px">
+    {{ rc.reason_code }}<span class="n">{{ rc.n|intcomma }}</span></a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<form id="bulk-form" method="post" action="{% url 'bulk_review' run.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+  <div class="card reveal" style="padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;font-size:13px;font-weight:500">
+      <input type="checkbox" id="checkAll" style="width:auto"> pilih semua di halaman ini</label>
+    <span style="flex:1"></span>
+    <button class="btn sm" type="submit" name="action" value="mark_matched"
+      onclick="return confirm('Tandai COCOK semua baris terpilih?')">✓ Setujui terpilih</button>
+    <button class="btn sm ghost" type="submit" name="action" value="mark_review"
+      onclick="return confirm('Tandai PERLU TINJAU semua baris terpilih?')">⚑ Tinjau terpilih</button>
+  </div>
+
 <div class="card pad0 reveal">
   <div class="table-wrap" style="border:none">
   <table>
-    <thead><tr><th>Status</th><th>{{ left_label }}</th><th>User ID</th><th>Full Name</th><th>Player Bank</th><th>Bank Title</th><th>Handler</th><th class="num">Amount</th><th>{{ right_label }}</th><th class="num">Amount</th><th>Alasan</th><th style="text-align:center">Aksi</th></tr></thead>
+    <thead><tr><th style="width:28px"></th><th>Status</th><th>{{ left_label }}</th><th>User ID</th><th>Full Name</th><th>Player Bank</th><th>Bank Title</th><th>Handler</th><th class="num">Amount</th><th>{{ right_label }}</th><th class="num">Amount</th><th>Alasan</th><th style="text-align:center">Aksi</th></tr></thead>
     <tbody>
     {% for r in page %}{% include "web/_result_row.html" %}{% empty %}
-      <tr><td colspan="12" class="muted" style="padding:28px;text-align:center">Tidak ada hasil pada bucket ini.</td></tr>{% endfor %}
+      <tr><td colspan="13" class="muted" style="padding:28px;text-align:center">Tidak ada hasil pada bucket ini.</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>
 </div>
+</form>
 
 {% if page.has_other_pages %}
 <div class="pager">
-  {% if page.has_previous %}<a class="btn sm" href="?bucket={{ bucket }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
+  {% if page.has_previous %}<a class="btn sm" href="?bucket={{ bucket }}&reason={{ reason }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
   <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
-  {% if page.has_next %}<a class="btn sm" href="?bucket={{ bucket }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
+  {% if page.has_next %}<a class="btn sm" href="?bucket={{ bucket }}&reason={{ reason }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
 </div>
 {% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('checkAll').addEventListener('change', function(){
+  var on = this.checked;
+  document.querySelectorAll('input[name="result_ids"]').forEach(function(c){ c.checked = on; });
+});
+</script>
 {% endblock %}

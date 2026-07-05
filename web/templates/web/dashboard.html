@@ -4,80 +4,156 @@
 {% block crumb %}Dashboard{% endblock %}
 {% block content %}
 <div class="page-head reveal">
-  <h1>Dashboard</h1>
-  <p>Ringkasan data terparse &amp; rekonsiliasi untuk <b>{{ active_toko.name }}</b>.</p>
-</div>
-
-<div class="grid cols-4">
-  <div class="card stat reveal">
-    <div class="top"><span class="k">Total Transaksi</span>
-      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span></div>
-    <div class="v num" data-count="{{ tx_total }}">{{ tx_total|intcomma }}</div>
+  <div>
+    <h1>Dashboard</h1>
+    <p>Kokpit harian untuk <b>{{ active_toko.name }}</b> — status rekonsiliasi, tren selisih, dan daftar kerja.</p>
   </div>
-  <div class="card stat reveal">
-    <div class="top"><span class="k">File Di-upload</span>
-      <span class="ic g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></span></div>
-    <div class="v num" data-count="{{ upload_total }}">{{ upload_total|intcomma }}</div>
-  </div>
-  <div class="card stat reveal">
-    <div class="top"><span class="k">Rekonsiliasi</span>
-      <span class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v16a2 2 0 0 0 2 2h12"/><path d="M18 8l-4-4 4-4"/><path d="M2 12h13a4 4 0 0 1 4 4v4"/></svg></span></div>
-    <div class="v num" data-count="{{ run_total }}">{{ run_total|intcomma }}</div>
-  </div>
-  <div class="card stat reveal">
-    <div class="top"><span class="k">Jenis Sumber</span>
-      <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h7v7H3z"/><path d="M14 3h7v7h-7z"/><path d="M14 14h7v7h-7z"/><path d="M3 14h7v7H3z"/></svg></span></div>
-    <div class="v num" data-count="{{ by_source|length }}">{{ by_source|length }}</div>
+  <div class="actions">
+    <a class="btn" href="{% url 'upload' %}">Upload file</a>
+    <a class="btn primary" href="{% url 'reconcile' %}">Rekonsiliasi →</a>
   </div>
 </div>
 
+{# ---- KARTU STATUS ---- #}
+<div class="grid cols-4 reveal">
+  <div class="card stat">
+    <div class="top"><span class="k">Rekon terakhir</span>
+      <span class="ic {% if last_sel == 0 %}g{% elif last_sel < 10000000 %}a{% else %}r{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg></span></div>
+    {% if last %}
+    <div class="v">{{ last.recon_date|date:"d M" }}</div>
+    <div class="sub"><a href="{% url 'batch_detail' last.pk %}">Batch #{{ last_no }}</a> · selisih {{ last_sel|floatformat:0|intcomma }}</div>
+    {% else %}<div class="v faint">—</div><div class="sub">belum ada rekonsiliasi</div>{% endif %}
+  </div>
+  <div class="card stat">
+    <div class="top"><span class="k">Menunggu settlement</span>
+      <span class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span></div>
+    <div class="v {% if pending %}a{% endif %}">{{ pending|intcomma }}</div>
+    <div class="sub">kredit menunggu uang tiba di run berikutnya</div>
+  </div>
+  <div class="card stat">
+    <div class="top"><span class="k">Antrean tinjau</span>
+      <span class="ic {% if pending_review_count %}a{% else %}g{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span></div>
+    <div class="v {% if pending_review_count %}a{% else %}g{% endif %}">{{ pending_review_count|intcomma }}</div>
+    <div class="sub">hasil perlu mata manusia</div>
+  </div>
+  <div class="card stat">
+    <div class="top"><span class="k">Uang periksa (D)</span>
+      <span class="ic {% if um_d.n %}r{% else %}g{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span></div>
+    <div class="v {% if um_d.n %}r{% else %}g{% endif %}">{{ um_d.n|default:0|intcomma }}</div>
+    <div class="sub">{% if last %}<a href="{% url 'batch_uang' last.pk %}?k=d">uang tanpa catatan panel →</a>{% else %}—{% endif %}</div>
+  </div>
+</div>
+
+{# ---- KALENDER + TREN ---- #}
 <div class="grid cols-2" style="margin-top:16px">
   <div class="card reveal">
-    <h3>Transaksi per Sumber</h3>
+    <div class="h-row"><h3>Kalender rekonsiliasi — 14 hari</h3>
+      <span class="faint" style="font-size:11.5px">hijau seimbang · kuning kecil · merah besar</span></div>
+    <div class="cal">
+      {% for k in kal %}
+      {% if k.batch %}
+      <a class="{{ k.st }} {% if k.today %}today{% endif %}" href="{% url 'batch_detail' k.batch.pk %}" title="Batch #{{ k.no }} — klik untuk detail">
+        <span class="d">{{ k.d|date:"j" }}</span><span class="m">{{ k.d|date:"M" }}</span><span class="s"></span></a>
+      {% else %}
+      <a class="{% if k.today %}today{% endif %}" href="{% url 'reconcile' %}" title="Belum direkonsiliasi">
+        <span class="d faint">{{ k.d|date:"j" }}</span><span class="m">{{ k.d|date:"M" }}</span><span class="s"></span></a>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  <div class="card reveal">
+    <div class="h-row"><h3>Tren selisih per batch</h3>
+      <span class="faint" style="font-size:11.5px"><span style="color:var(--brand)">■</span> DP · <span style="color:var(--warn)">■</span> WD</span></div>
+    {% if tren %}
+    <svg class="spark" viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="Tren selisih DP dan WD per batch harian"></svg>
+    <div id="tren-data" hidden>{% for t in tren %}{{ t.b.recon_date|date:"d/m" }}|{{ t.hdp }}|{{ t.hwd }}|{{ t.dp|floatformat:0 }}|{{ t.wd|floatformat:0 }};{% endfor %}</div>
+    {% else %}<p class="faint" style="margin:0">Belum ada batch harian — jalankan rekonsiliasi pertama.</p>{% endif %}
+  </div>
+</div>
+
+{# ---- KERJAKAN HARI INI + SUMBER ---- #}
+<div class="grid cols-2" style="margin-top:16px">
+  <div class="card reveal">
+    <h3>Kerjakan hari ini</h3>
+    <table class="flush">
+      <tr><td style="width:34px">{% if comp.minimum_met %}<span class="badge ok plain">✓</span>{% else %}<span class="badge warn plain">•</span>{% endif %}</td>
+        <td>Kelengkapan sumber aktif</td>
+        <td class="r"><a class="btn sm" href="{% url 'upload' %}">{% if comp.minimum_met %}lengkap{% else %}upload{% endif %}</a></td></tr>
+      <tr><td><span class="badge {% if pending %}warn{% else %}ok{% endif %} plain">{% if pending %}{{ pending }}{% else %}✓{% endif %}</span></td>
+        <td>Rekonsiliasi tanggal berikutnya ({{ next_date|date:"d/m" }})</td>
+        <td class="r"><a class="btn sm" href="{% url 'reconcile' %}">jalankan</a></td></tr>
+      <tr><td><span class="badge {% if pending_review_count %}warn{% else %}ok{% endif %} plain">{% if pending_review_count %}{{ pending_review_count }}{% else %}✓{% endif %}</span></td>
+        <td>Tinjau hasil lemah</td>
+        <td class="r">{% if last %}<a class="btn sm" href="{% url 'batch_detail' last.pk %}">buka batch</a>{% else %}<span class="faint">—</span>{% endif %}</td></tr>
+      <tr><td><span class="badge {% if um_d.n %}bad{% else %}ok{% endif %} plain">{% if um_d.n %}{{ um_d.n }}{% else %}✓{% endif %}</span></td>
+        <td>Periksa uang tanpa pasangan (D)</td>
+        <td class="r">{% if last %}<a class="btn sm" href="{% url 'batch_uang' last.pk %}?k=d">periksa</a>{% else %}<span class="faint">—</span>{% endif %}</td></tr>
+    </table>
+  </div>
+  <div class="card reveal">
+    <div class="h-row"><h3>Transaksi per Sumber</h3>
+      <span class="faint" style="font-size:12px">{{ tx_total|intcomma }} baris · {{ upload_total }} file · {{ run_total }} run</span></div>
     {% for s in by_source %}
-    <div style="margin-bottom:15px">
-      <div style="display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:6px">
+    <div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px">
         <span><span class="badge src plain">{{ s.source_type__key }}</span> {{ s.source_type__name }}</span>
         <b class="num">{{ s.n|intcomma }}</b>
       </div>
-      <div style="height:8px;border-radius:99px;background:#eef1f6;overflow:hidden">
+      <div style="height:7px;border-radius:99px;background:#eef1f6;overflow:hidden">
         <div style="height:100%;width:{% widthratio s.n tx_total 100 %}%;background:var(--grad);border-radius:99px"></div>
       </div>
     </div>
     {% empty %}<p class="muted">Belum ada data. <a class="grad-text" href="{% url 'upload' %}">Upload file →</a></p>{% endfor %}
   </div>
-
-  <div class="card reveal">
-    <h3>Rekonsiliasi Terkini</h3>
-    {% for run in runs %}
-    <a href="{% url 'run_detail' run.pk %}" style="display:block;padding:13px 0;border-bottom:1px solid var(--line)">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <b style="font-size:14px">{{ run.get_relation_display }}</b>
-        <span class="faint" style="font-size:12px">{{ run.created_at|date:"d/m H:i" }}</span>
-      </div>
-      {% if run.summary %}<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-        <span class="badge ok">{{ run.summary.cocok|intcomma }} cocok</span>
-        <span class="badge warn">{{ run.summary.perlu_tinjau|intcomma }} tinjau</span>
-        <span class="badge bad">{{ run.summary.tidak_cocok|intcomma }} tidak</span>
-      </div>{% endif %}
-    </a>
-    {% empty %}<p class="muted">Belum ada rekonsiliasi. <a class="grad-text" href="{% url 'reconcile' %}">Jalankan →</a></p>{% endfor %}
-  </div>
 </div>
 
-<div class="card reveal" style="margin-top:16px;padding:0;overflow:hidden">
-  <div style="padding:18px 20px 6px"><h3 style="margin:0">Upload Terakhir</h3></div>
-  <div class="twrap" style="border:none">
-  <table>
-    <thead><tr><th>File</th><th>Sumber</th><th>Flow</th><th class="r">Baris</th><th class="r">Duplikat</th><th>Waktu</th></tr></thead>
-    <tbody>
-    {% for u in uploads %}
-      <tr><td>{{ u.original_name }}</td><td><span class="badge src plain">{{ u.source_type.key }}</span></td>
-      <td class="faint">{{ u.flow|default:"—" }}</td><td class="r num">{{ u.rows_parsed|intcomma }}</td>
-      <td class="r num faint">{{ u.rows_duplicate|intcomma }}</td><td class="faint">{{ u.created_at|date:"d/m/Y H:i" }}</td></tr>
-    {% empty %}<tr><td colspan="6" class="muted" style="padding:24px">Belum ada file.</td></tr>{% endfor %}
-    </tbody>
-  </table>
+{# ---- AKTIVITAS TERKINI ---- #}
+<div class="grid cols-2" style="margin-top:16px">
+  <div class="card pad0 reveal">
+    <div style="padding:15px 18px 4px"><h3 style="margin:0">Upload Terakhir</h3></div>
+    <table>
+      <thead><tr><th>File</th><th>Sumber</th><th class="r">Baris</th><th class="r">Dup</th></tr></thead>
+      <tbody>
+      {% for u in uploads %}
+      <tr><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ u.original_name }}">{{ u.original_name }}</td>
+        <td><span class="badge src plain">{{ u.source_type.key }}</span></td>
+        <td class="r num">{{ u.rows_parsed|intcomma }}</td><td class="r num faint">{{ u.rows_duplicate|intcomma }}</td></tr>
+      {% empty %}<tr><td colspan="4" class="muted" style="text-align:center;padding:18px">Belum ada file.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card pad0 reveal">
+    <div style="padding:15px 18px 4px"><h3 style="margin:0">Rekonsiliasi Terkini</h3></div>
+    <table>
+      <thead><tr><th>Relasi</th><th class="r">Cocok</th><th class="r">Tinjau</th><th class="r">Tidak</th></tr></thead>
+      <tbody>
+      {% for run in runs %}
+      <tr><td><a href="{% url 'run_detail' run.pk %}">{{ run.get_relation_display }}</a>
+          {% if run.batch and run.batch.recon_date %}<span class="faint" style="font-size:11.5px"> · {{ run.batch.recon_date|date:"d/m" }}</span>{% endif %}</td>
+        <td class="r num" style="color:var(--ok)">{{ run.summary.cocok|default:0|intcomma }}</td>
+        <td class="r num" style="color:var(--warn)">{{ run.summary.perlu_tinjau|default:0|intcomma }}</td>
+        <td class="r num" style="color:var(--bad)">{{ run.summary.tidak_cocok|default:0|intcomma }}</td></tr>
+      {% empty %}<tr><td colspan="4" class="muted" style="text-align:center;padding:18px">Belum ada rekonsiliasi.</td></tr>{% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+  var el = document.getElementById('tren-data'); if(!el) return;
+  var rows = el.textContent.trim().split(';').filter(Boolean).map(function(r){ return r.split('|'); });
+  var svg = document.querySelector('.spark'); if(!svg || !rows.length) return;
+  var W=300, H=100, n=rows.length, gw=W/n, html='';
+  rows.forEach(function(r,i){
+    var x=i*gw, bw=Math.max(3,(gw-8)/2);
+    var hdp=Math.max(2, r[1]*0.86), hwd=Math.max(2, r[2]*0.86);
+    html+='<g><rect x="'+(x+3)+'" y="'+(H-9-hdp)+'" width="'+bw+'" height="'+hdp+'" rx="2" fill="#2563eb" opacity=".9"><title>'+r[0]+' · DP '+Number(r[3]).toLocaleString('id-ID')+'</title></rect>';
+    html+='<rect x="'+(x+5+bw)+'" y="'+(H-9-hwd)+'" width="'+bw+'" height="'+hwd+'" rx="2" fill="#b45309" opacity=".85"><title>'+r[0]+' · WD '+Number(r[4]).toLocaleString('id-ID')+'</title></rect>';
+    html+='<text x="'+(x+gw/2)+'" y="'+(H-1)+'" font-size="7" text-anchor="middle" fill="#8a93a3">'+r[0]+'</text></g>';
+  });
+  svg.innerHTML = html;
+})();
+</script>
 {% endblock %}

@@ -86,7 +86,7 @@
     <thead><tr><th>Ticket</th><th>Username</th><th class="num">Nominal</th><th>Status</th><th>Batch asal</th></tr></thead>
     <tbody>
     {% for r in resolved_here %}
-      <tr>
+      <tr {% if forloop.counter > 12 %}class="late-extra" hidden{% endif %}>
         <td class="mono">{{ r.left.ticket_no|default:"—" }}</td>
         <td>{{ r.left.username|default:r.left.counterparty|default:"—" }}</td>
         <td class="num">{{ r.right.money_delta|floatformat:0|intcomma }}</td>
@@ -97,6 +97,13 @@
     </tbody>
   </table>
   </div>
+  {% if resolved_here|length > 12 %}
+  <div style="padding:10px 20px 16px">
+    <button type="button" class="btn sm" id="lateToggle"
+      onclick="document.querySelectorAll('.late-extra').forEach(function(t){t.hidden=!t.hidden});this.textContent=this.textContent.indexOf('semua')>-1?'Sembunyikan':'Tampilkan semua ({{ resolved_here|length }})'">
+      Tampilkan semua ({{ resolved_here|length }})</button>
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 

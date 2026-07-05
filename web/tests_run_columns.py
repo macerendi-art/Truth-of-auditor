@@ -82,18 +82,18 @@ class SplitPanelColumnsTests(_Base):
         cells = _row_cells(resp.content.decode(), r.pk)
         # 12 kolom: Status, Panel, User ID, Full Name, Player Bank, Bank Title,
         # Handler, Amount, Kanan, Amount, Alasan, Aksi
-        self.assertEqual(len(cells), 12)
-        # Sel PANEL: hanya ticket + tanggal — TANPA username / nama lengkap.
-        self.assertIn("D0012345", cells[1])
-        self.assertIn("27/06 10:00", cells[1])
-        self.assertNotIn("budi123", cells[1])
-        self.assertNotIn("BUDI SANTOSO", cells[1])
+        self.assertEqual(len(cells), 13)  # +1 checkbox bulk-review
+        # Sel PANEL (indeks +1: kolom 0 = checkbox bulk): ticket + tanggal saja.
+        self.assertIn("D0012345", cells[2])
+        self.assertIn("27/06 10:00", cells[2])
+        self.assertNotIn("budi123", cells[2])
+        self.assertNotIn("BUDI SANTOSO", cells[2])
         # Masing-masing nilai di kolomnya sendiri.
-        self.assertIn("budi123", cells[2])
-        self.assertIn("BUDI SANTOSO", cells[3])
-        self.assertIn("DANA|fajar Pratama |083822153879", cells[4])
-        self.assertIn("BCA|HENDI|7126201591", cells[5])
-        self.assertIn("Mozart K25", cells[6])
+        self.assertIn("budi123", cells[3])
+        self.assertIn("BUDI SANTOSO", cells[4])
+        self.assertIn("DANA|fajar Pratama |083822153879", cells[5])
+        self.assertIn("BCA|HENDI|7126201591", cells[6])
+        self.assertIn("Mozart K25", cells[7])
 
     def test_sisi_kiri_bracket_tanpa_field_panel_render_strip(self):
         """Relasi dgn kiri=Bracket (tanpa username/raw panel) → sel berisi — tanpa error."""
@@ -108,13 +108,13 @@ class SplitPanelColumnsTests(_Base):
         resp = self.client.get(reverse("run_detail", args=[run.pk]))
         self.assertEqual(resp.status_code, 200)
         cells = _row_cells(resp.content.decode(), r.pk)
-        self.assertEqual(len(cells), 12)
-        for i in (2, 3, 4, 5, 6):  # User ID, Full Name, Player Bank, Bank Title, Handler
+        self.assertEqual(len(cells), 13)  # +1 checkbox bulk-review
+        for i in (3, 4, 5, 6, 7):  # User ID, Full Name, Player Bank, Bank Title, Handler
             self.assertEqual(cells[i], "—")
 
     def test_empty_state_colspan_12(self):
         resp = self.client.get(reverse("run_detail", args=[self.run.pk]))
-        self.assertContains(resp, 'colspan="12"')
+        self.assertContains(resp, 'colspan="13"')
 
 
 class RunBatchLabelTests(TestCase):

@@ -77,6 +77,12 @@ def set_toko(request):
 
 @login_required
 def dashboard(request):
+    """Kokpit harian auditor: status hari, kalender rekon, tren selisih,
+    daftar kerja — bukan sekadar statistik."""
+    from datetime import timedelta
+
+    from reconciliation.engine import check_completeness, pending_settlement_count
+
     active = _active_toko(request)
     if active is None:
         return render(request, "web/no_toko.html")
@@ -88,14 +94,78 @@ def dashboard(request):
         .annotate(n=Count("id"))
         .order_by("-n")
     )
+
+    batches = list(
+        ReconBatch.objects.filter(toko=active, recon_date__isnull=False)
+        .order_by("recon_date")
+    )
+    by_date = {b.recon_date: b for b in batches}
+    total_b = ReconBatch.objects.filter(toko=active).count()
+
+    def selisih(b):
+        s = b.summary or {}
+        dp = abs((s.get("dp") or {}).get("selisih") or 0)
+        wd = abs((s.get("wd") or {}).get("selisih") or 0)
+        return dp + wd
+
+    # --- kalender 14 hari terakhir (anchor: recon terakhir atau hari ini) ---
+    today = date_cls.today()
+    anchor = max(batches[-1].recon_date, today) if batches else today
+    kal = []
+    for i in range(13, -1, -1):
+        d = anchor - timedelta(days=i)
+        b = by_date.get(d)
+        if b is None:
+            st = ""
+        else:
+            tot = selisih(b)
+            st = "ok" if tot == 0 else ("warn" if tot < 10_000_000 else "bad")
+        kal.append({
+            "d": d, "batch": b, "st": st, "today": d == today,
+            "no": (ReconBatch.objects.filter(toko=active, id__lte=b.id).count() if b else None),
+        })
+
+    # --- tren selisih 14 batch terakhir (bar SVG dihitung di sini) ---
+    tren_src = batches[-14:]
+    mx = max((selisih(b) for b in tren_src), default=0) or 1
+    tren = []
+    for b in tren_src:
+        s = b.summary or {}
+        dp = abs((s.get("dp") or {}).get("selisih") or 0)
+        wd = abs((s.get("wd") or {}).get("selisih") or 0)
+        tren.append({
+            "b": b, "dp": dp, "wd": wd,
+            "hdp": round(100 * dp / mx), "hwd": round(100 * wd / mx),
+        })
+
+    # --- kartu status ---
+    last = batches[-1] if batches else None
+    last_no = total_b if last else None
+    last_sel = selisih(last) if last else 0
+    pending = pending_settlement_count(active)
+    um_d = {}
+    if last is not None:
+        um = (last.summary or {}).get("unmatched_money") or {}
+        um_d = um.get("d") or {}
+
+    comp = check_completeness(active)
+    next_date = (last.recon_date + timedelta(days=1)) if last else today
+
     ctx = {
         "active_toko": active,
         "tx_total": tx.count(),
         "upload_total": uploads.count(),
         "run_total": runs.count(),
         "by_source": by_source,
-        "uploads": uploads.select_related("source_type").order_by("-id")[:8],
-        "runs": runs.order_by("-id")[:8],
+        "uploads": uploads.select_related("source_type").order_by("-id")[:6],
+        "runs": runs.select_related("batch").order_by("-id")[:6],
+        "kal": kal,
+        "tren": tren,
+        "last": last, "last_no": last_no, "last_sel": last_sel,
+        "pending": pending,
+        "um_d": um_d,
+        "comp": comp,
+        "next_date": next_date,
     }
     return render(request, "web/dashboard.html", ctx)
 
@@ -158,9 +228,12 @@ def upload(request):
             "flows": ["", "dp", "wd"], "active_toko": active,
             "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
         })
+    from reconciliation.engine import check_completeness
+
     return render(request, "web/upload.html", {
         "parsers": sorted(PARSERS.keys()), "active_toko": active,
         "uploads": Upload.objects.filter(toko=active).select_related("source_type").order_by("-id")[:20],
+        "comp": check_completeness(active),
     })
 
 
@@ -449,6 +522,13 @@ def run_detail(request, pk):
     bucket = request.GET.get("bucket", "")
     if bucket:
         qs = qs.filter(bucket=bucket)
+    # Chip filter per alasan — dihitung DALAM bucket terpilih supaya angkanya jujur.
+    reasons = list(
+        qs.values("reason_code").annotate(n=Count("id")).order_by("-n")
+    )
+    reason = request.GET.get("reason", "")
+    if reason:
+        qs = qs.filter(reason_code=reason)
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
     left_label, right_label = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
     # Nomor batch per-toko (posisi urut, bukan pk global) — konsisten dgn batch_detail.
@@ -460,8 +540,38 @@ def run_detail(request, pk):
         "run": run, "page": page, "bucket": bucket, "bucket_meta": BUCKET_META,
         "left_label": left_label, "right_label": right_label,
         "batch": batch, "batch_no": batch_no,
+        "reasons": reasons, "reason": reason,
     }
     return render(request, "web/run_detail.html", ctx)
+
+
+@login_required
+@require_POST
+def bulk_review(request, pk):
+    """Setujui / tandai-tinjau banyak hasil sekaligus (per halaman terfilter).
+    Setiap baris tetap tercatat ReviewAction-nya sendiri — jejak audit utuh."""
+    run = get_object_or_404(MatchRun, pk=pk, batch__toko__in=tokos_for(request.user))
+    action = request.POST.get("action", "")
+    buckets = {"mark_matched": MatchResult.Bucket.COCOK,
+               "mark_review": MatchResult.Bucket.TINJAU}
+    if action not in buckets:
+        return HttpResponseBadRequest("Aksi tidak dikenal.")
+    ids = [i for i in request.POST.getlist("result_ids") if i.isdigit()]
+    rows = list(MatchResult.objects.filter(run=run, id__in=ids))
+    for r in rows:
+        r.bucket = buckets[action]
+        r.reason_code = "manual_override"
+        r.save(update_fields=["bucket", "reason_code"])
+        ReviewAction.objects.create(
+            result=r, action=action, reason="bulk", reviewer=request.user
+        )
+    messages.success(request, f"{len(rows)} hasil diperbarui.")
+    nxt = request.POST.get("next") or reverse("run_detail", args=[run.pk])
+    if not url_has_allowed_host_and_scheme(
+        nxt, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        nxt = reverse("run_detail", args=[run.pk])
+    return redirect(nxt)
 
 
 @login_required

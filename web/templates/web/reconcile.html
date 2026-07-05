@@ -59,16 +59,17 @@
   </div>
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>Batch</th><th>Tanggal</th><th>Waktu</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th>Cocok</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
+    <thead><tr><th>Batch</th><th>Tanggal</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th class="r">Cocok</th><th class="r">Tinjau</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
     <tbody>
     {% for b in batches %}
       <tr>
-        <td><a class="grad-text" style="font-weight:600" href="{% url 'batch_detail' b.pk %}">#{{ b.no }}</a></td>
+        <td><a class="grad-text" style="font-weight:600" href="{% url 'batch_detail' b.pk %}">#{{ b.no }}</a>
+          <span class="faint" style="font-size:11px;display:block">{{ b.created_at|date:"d/m H:i" }}</span></td>
         <td>{{ b.recon_date|date:"d/m/Y"|default:"—" }}</td>
-        <td class="faint">{{ b.created_at|date:"d/m H:i" }}</td>
-        <td class="num">{{ b.summary.dp.selisih|default:0|floatformat:0|intcomma }}</td>
-        <td class="num">{{ b.summary.wd.selisih|default:0|floatformat:0|intcomma }}</td>
-        <td><span class="badge ok">{{ b.summary.buckets.cocok|default:0|intcomma }}</span></td>
+        <td class="num">{% if b.summary.dp.selisih == 0 %}<span class="badge ok plain">0 ✓</span>{% else %}{{ b.summary.dp.selisih|default:0|floatformat:0|intcomma }}{% endif %}</td>
+        <td class="num">{% if b.summary.wd.selisih == 0 %}<span class="badge ok plain">0 ✓</span>{% else %}{{ b.summary.wd.selisih|default:0|floatformat:0|intcomma }}{% endif %}</td>
+        <td class="r num" style="color:var(--ok);font-weight:600">{{ b.summary.buckets.cocok|default:0|intcomma }}</td>
+        <td class="r num" style="color:var(--warn)">{{ b.summary.buckets.perlu_tinjau|default:0|intcomma }}</td>
         {% if is_admin_user %}
         <td class="r">
           <form method="post" action="{% url 'delete_batch' b.pk %}" style="display:inline"
@@ -79,7 +80,7 @@
         </td>
         {% endif %}
       </tr>
-    {% empty %}<tr><td colspan="{% if is_admin_user %}7{% else %}6{% endif %}" class="faint">{% if bank %}Tidak ada batch dengan sumber ini.{% else %}Belum ada batch.{% endif %}</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="{% if is_admin_user %}7{% else %}6{% endif %}" class="faint" style="text-align:center;padding:20px">{% if bank %}Tidak ada batch dengan sumber ini.{% else %}Belum ada batch.{% endif %}</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>
