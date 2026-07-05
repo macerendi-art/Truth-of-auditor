@@ -20,14 +20,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get(
-    'SECRET_KEY',
-    'django-insecure-wb5cb68!r##d-ht+w%ahp=(1ot)$o$p-rz&h6uj3stjc@+)ql5',
+# DEBUG fail-safe: di Railway (env RAILWAY_* ada) default False — env DEBUG
+# hilang tidak boleh membocorkan stack trace + settings ke publik. Lokal tetap
+# default True supaya `runserver` zero-config.
+_on_railway = bool(
+    os.environ.get('RAILWAY_PUBLIC_DOMAIN') or os.environ.get('RAILWAY_ENVIRONMENT')
 )
+DEBUG = os.environ.get('DEBUG', 'False' if _on_railway else 'True').lower() == 'true'
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
+# SECURITY WARNING: keep the secret key used in production secret!
+# Produksi (DEBUG=False) tanpa env SECRET_KEY = ImproperlyConfigured saat boot.
+from truth_auditor.security import resolve_secret_key  # noqa: E402
+
+SECRET_KEY = resolve_secret_key(os.environ, DEBUG)
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', 'testserver']
 _railway_host = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
@@ -58,6 +63,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'core.middleware.ContentSecurityPolicyMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -165,6 +171,14 @@ CSRF_FAILURE_VIEW = 'web.views.csrf_failure'
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# --- Sesi: data finansial, jangan hidup 2 minggu (default Django) ---
+SESSION_COOKIE_AGE = 8 * 3600          # idle timeout 8 jam...
+SESSION_SAVE_EVERY_REQUEST = True      # ...digeser tiap request (rolling)
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
+# Picker folder (webkitdirectory) bisa kirim ratusan file; default Django 100.
+DATA_UPLOAD_MAX_NUMBER_FILES = 500
+
 # --- Produksi / Railway ---
 CSRF_TRUSTED_ORIGINS = []
 if _railway_host:
@@ -176,6 +190,6 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True').lower() == 'true'
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '0'))
+    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '31536000'))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_HSTS_SECONDS > 0
     SECURE_HSTS_PRELOAD = SECURE_HSTS_SECONDS > 0

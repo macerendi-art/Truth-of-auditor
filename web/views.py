@@ -215,6 +215,10 @@ def _auto_rematch(toko, money_uploads, user=None):
 _UPLOAD_EXTS = {".xlsx", ".xls", ".csv", ".pdf"}
 _ZIP_MAX_FILES = 200
 _ZIP_MAX_BYTES = 200 * 1024 * 1024
+# Cap ukuran: per-file dan total satu request analyze — volume staging jangan
+# bisa dipenuhi satu upload liar (export mutasi riil terbesar masih < 20MB).
+_FILE_MAX_BYTES = 50 * 1024 * 1024
+_REQ_MAX_BYTES = 300 * 1024 * 1024
 
 
 def _is_junk_name(name):
@@ -366,7 +370,23 @@ def upload(request):
     if request.method == "POST" and request.POST.get("action") == "analyze":
         preview = []
         dilewati = 0
-        for f in request.FILES.getlist("files"):
+        berkas = request.FILES.getlist("files")
+        total = sum(f.size for f in berkas)
+        if total > _REQ_MAX_BYTES:
+            messages.error(
+                request,
+                f"Total upload terlalu besar ({total // (1024 * 1024)}MB) — "
+                f"maksimal {_REQ_MAX_BYTES // (1024 * 1024)}MB per sekali analisis.",
+            )
+            berkas = []
+        for f in berkas:
+            if f.size > _FILE_MAX_BYTES:
+                messages.error(
+                    request,
+                    f"{f.name}: terlalu besar ({f.size // (1024 * 1024)}MB) — "
+                    f"maksimal {_FILE_MAX_BYTES // (1024 * 1024)}MB per file.",
+                )
+                continue
             if f.name.lower().endswith(".zip"):
                 isi, n_skip, err = _extract_zip(f)
                 dilewati += n_skip
