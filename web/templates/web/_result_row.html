@@ -1,7 +1,7 @@
 {% load humanize %}
 {% load web_extras %}
 <tr id="res-{{ r.pk }}">
-  <td><input type="checkbox" name="result_ids" value="{{ r.pk }}" form="bulk-form" style="width:auto" aria-label="Pilih hasil {{ r.pk }}"></td>
+  <td><input type="checkbox" name="result_ids" value="{{ r.pk }}" form="bulk-form" aria-label="Pilih hasil {{ r.pk }}"></td>
   <td>{% if r.bucket == 'cocok' %}<span class="badge ok">{% elif r.bucket == 'perlu_tinjau' %}<span class="badge warn">{% else %}<span class="badge bad">{% endif %}{{ r.get_bucket_display }}</span></td>
   <td>{% if r.left %}<div class="mono">{{ r.left.ticket_no|default:"—" }}</div>
     {% if r.left.occurred_at %}<div class="faint" style="font-size:12px">{{ r.left.occurred_at|date:"d/m H:i" }}</div>{% endif %}

@@ -12,7 +12,7 @@
   <form method="post" action="{% url 'delete_batch' batch.pk %}"
         onsubmit="return confirm('Hapus Batch #{{ batch_no }}? Semua hasil rekonsiliasinya terhapus (transaksi tetap utuh).')">
     {% csrf_token %}
-    <button class="btn" type="submit" style="color:var(--bad)">Hapus Laporan</button>
+    <button class="btn danger" type="submit">Hapus Laporan</button>
   </form>
   {% endif %}
 </div>
@@ -27,7 +27,7 @@
   {% with dp=s.dp %}
   <div class="card reveal">
     <h3 style="margin:0 0 12px">Deposit (DP)</h3>
-    <table>
+    <table class="kv">
       <tr><td>Panel (koin)</td><td>{{ dp.panel|default:0|floatformat:0|intcomma }}</td></tr>
       {# money_matched baru; batch lama pakai 'money'. Keduanya di-|default sendiri agar aman saat summary kosong. #}
       <tr><td>Uang real (matched)</td><td>{% if dp.money_matched != None %}{{ dp.money_matched|floatformat:0|intcomma }}{% else %}{{ dp.money|default:0|floatformat:0|intcomma }}{% endif %}</td></tr>
@@ -39,7 +39,7 @@
   {% with wd=s.wd %}
   <div class="card reveal">
     <h3 style="margin:0 0 12px">Withdraw (WD)</h3>
-    <table>
+    <table class="kv">
       <tr><td>Panel (koin)</td><td>{{ wd.panel|default:0|floatformat:0|intcomma }}</td></tr>
       <tr><td>Uang real (matched)</td><td>{% if wd.money_matched != None %}{{ wd.money_matched|floatformat:0|intcomma }}{% else %}{{ wd.money|default:0|floatformat:0|intcomma }}{% endif %}</td></tr>
       <tr><td class="faint">Uang real (gross)</td><td class="faint">{{ wd.money_gross|default:0|floatformat:0|intcomma }}</td></tr>
@@ -51,8 +51,7 @@
 
 {% if s.unmatched_money %}
 {% with um=s.unmatched_money %}
-<a class="card reveal" href="{% url 'batch_uang' batch.pk %}"
-   style="display:block;margin-top:16px;text-decoration:none;border-color:var(--accent,#378add)">
+<a class="card click reveal" href="{% url 'batch_uang' batch.pk %}" style="margin-top:16px">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
     <div>
       <h3 style="margin:0 0 4px">Uang tanpa pasangan</h3>
@@ -70,10 +69,10 @@
 {% endif %}
 
 {% if resolved_here %}
-<div class="card reveal" style="padding:0;overflow:hidden">
-  <div style="padding:18px 20px 6px">
+<div class="card pad0 reveal">
+  <div class="card-head" style="display:block">
     <h3 style="margin:0 0 4px">Settlement tertunda dari tanggal sebelumnya</h3>
-    <p class="faint" style="margin:0 0 8px;font-size:.86rem">
+    <p class="sub" style="margin:0">
       {% with ls=s.late_settlement %}
       DP: {{ ls.dp.count|default:0 }} transaksi / Rp {{ ls.dp.amount|default:0|floatformat:0|intcomma }} ·
       WD: {{ ls.wd.count|default:0 }} transaksi / Rp {{ ls.wd.amount|default:0|floatformat:0|intcomma }}
@@ -121,17 +120,19 @@
 
 <div class="card reveal">
   <h3 style="margin:0 0 12px">Ringkasan Bucket</h3>
-  <span class="badge ok">{{ s.buckets.cocok|default:0|intcomma }} cocok</span>
-  <span class="badge warn">{{ s.buckets.perlu_tinjau|default:0|intcomma }} tinjau</span>
-  <span class="badge bad">{{ s.buckets.tidak_cocok|default:0|intcomma }} tidak cocok</span>
-  {% if s.skipped %}<p class="faint" style="margin-top:10px">Dilewati (data tidak ada): {{ s.skipped|join:", " }}</p>{% endif %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <span class="badge ok">{{ s.buckets.cocok|default:0|intcomma }} cocok</span>
+    <span class="badge warn">{{ s.buckets.perlu_tinjau|default:0|intcomma }} tinjau</span>
+    <span class="badge bad">{{ s.buckets.tidak_cocok|default:0|intcomma }} tidak cocok</span>
+  </div>
+  {% if s.skipped %}<p class="faint" style="margin:10px 0 0">Dilewati (data tidak ada): {{ s.skipped|join:", " }}</p>{% endif %}
 </div>
 
-<div class="card reveal" style="padding:0;overflow:hidden">
-  <div style="padding:18px 20px 6px"><h3 style="margin:0">Relasi</h3></div>
+<div class="card pad0 reveal">
+  <div class="card-head"><h3>Relasi</h3></div>
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>Relasi</th><th>Cocok</th><th>Tinjau</th><th>Tidak</th><th></th></tr></thead>
+    <thead><tr><th>Relasi</th><th>Cocok</th><th>Tinjau</th><th>Tidak</th><th class="r">Aksi</th></tr></thead>
     <tbody>
     {% for run in runs %}
       <tr>
@@ -139,9 +140,9 @@
         <td><span class="badge ok">{{ run.summary.cocok|default:0|intcomma }}</span></td>
         <td><span class="badge warn">{{ run.summary.perlu_tinjau|default:0|intcomma }}</span></td>
         <td><span class="badge bad">{{ run.summary.tidak_cocok|default:0|intcomma }}</span></td>
-        <td><a class="btn sm" href="{% url 'run_detail' run.pk %}">Detail →</a> <a class="btn sm ghost" href="{% url 'export_run' run.pk %}">Excel</a></td>
+        <td class="r" style="white-space:nowrap"><a class="btn sm" href="{% url 'run_detail' run.pk %}">Detail →</a> <a class="btn sm ghost" href="{% url 'export_run' run.pk %}">Excel</a></td>
       </tr>
-    {% empty %}<tr><td colspan="5" class="faint">Tidak ada relasi dijalankan.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="5" class="cell-empty">Tidak ada relasi dijalankan.</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>

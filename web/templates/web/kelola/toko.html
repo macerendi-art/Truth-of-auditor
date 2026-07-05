@@ -4,8 +4,10 @@
 {% block crumb %}Admin · Kelola Toko{% endblock %}
 {% block content %}
 <div class="page-head reveal">
-  <h1>Kelola Toko</h1>
-  <p>Tambah kode toko baru atau nonaktifkan yang tidak dipakai. Data per toko tetap tersimpan.</p>
+  <div>
+    <h1>Kelola Toko</h1>
+    <p>Tambah kode toko baru atau nonaktifkan yang tidak dipakai. Data per toko tetap tersimpan.</p>
+  </div>
 </div>
 
 <div class="card reveal" style="max-width:430px">
@@ -20,18 +22,18 @@
 </div>
 
 <div class="card reveal pad0" style="margin-top:16px">
-  <div style="padding:18px 20px 6px"><h3 style="margin:0">Daftar Toko ({{ tokos|length }})</h3></div>
+  <div class="card-head"><h3>Daftar Toko <span class="faint" style="font-weight:500">({{ tokos|length }})</span></h3></div>
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>Kode</th><th class="r">Transaksi</th><th class="r">Upload</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Kode</th><th class="num">Transaksi</th><th class="num">Upload</th><th>Status</th><th class="r">Aksi</th></tr></thead>
     <tbody>
     {% for t in tokos %}
       <tr>
-        <td style="font-weight:600">{{ t.name }}</td>
-        <td class="r num">{{ t.n_tx|intcomma }}</td>
-        <td class="r num">{{ t.n_up|intcomma }}</td>
+        <td><span style="display:flex;align-items:center;gap:9px"><span class="avatar-ini">{{ t.name|first|upper }}</span><b>{{ t.name }}</b></span></td>
+        <td class="num mono">{{ t.n_tx|intcomma }}</td>
+        <td class="num mono">{{ t.n_up|intcomma }}</td>
         <td>{% if t.is_active %}<span class="badge ok">aktif</span>{% else %}<span class="badge bad">nonaktif</span>{% endif %}</td>
-        <td class="r">
+        <td class="r" style="white-space:nowrap">
           <form method="post" style="display:inline">
             {% csrf_token %}
             <input type="hidden" name="action" value="toggle">
@@ -41,11 +43,11 @@
           <form method="post" action="{% url 'delete_toko' t.id %}" style="display:inline"
                 onsubmit="return confirm('Hapus PERMANEN Toko {{ t.name }} beserta SEMUA transaksi, upload, dan batch-nya? Tindakan ini tidak bisa dibatalkan.')">
             {% csrf_token %}
-            <button class="btn sm" type="submit" style="color:#dc2828">Hapus</button>
+            <button class="btn sm ghost danger" type="submit">Hapus</button>
           </form>
         </td>
       </tr>
-    {% empty %}<tr><td colspan="5" class="faint">Belum ada toko.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="5" class="cell-empty">Belum ada toko.</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>

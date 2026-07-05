@@ -16,7 +16,7 @@
   <div class="card stat" title="{{ c.desc }}">
     <div class="k">{{ c.key|upper }} · {{ c.label }}</div>
     <div class="v">{{ c.n|intcomma }}</div>
-    <div class="faint" style="font-size:.8rem">Rp {{ c.amt|floatformat:0|intcomma }}</div>
+    <div class="sub num">Rp {{ c.amt|floatformat:0|intcomma }}</div>
   </div>
   {% endfor %}
 </div>
@@ -29,9 +29,10 @@
 </div>
 
 <div class="card pad0 reveal">
+  <div class="twrap tall" style="border:none">
   <table>
     <thead>
-      <tr><th>Kat</th><th>Tanggal</th><th>Sumber</th><th>File/Rekening</th><th>Ticket</th><th>Username</th><th>Pengirim/Penerima</th><th style="text-align:right">Nominal</th></tr>
+      <tr><th>Kat</th><th>Tanggal</th><th>Sumber</th><th>File/Rekening</th><th>Ticket</th><th>Username</th><th>Pengirim/Penerima</th><th class="num">Nominal</th></tr>
     </thead>
     <tbody>
       {% for t in page.object_list %}
@@ -43,17 +44,18 @@
         <td>{{ t.ticket_no|default:"—" }}</td>
         <td>{{ t.username|default:"—" }}</td>
         <td>{{ t.counterparty|default:"—" }}</td>
-        <td style="text-align:right{% if t.money_delta < 0 %};color:var(--bad){% endif %}">{{ t.money_delta|floatformat:0|intcomma }}</td>
+        <td class="num mono" {% if t.money_delta < 0 %}style="color:var(--bad)"{% endif %}>{{ t.money_delta|floatformat:0|intcomma }}</td>
       </tr>
       {% empty %}
-      <tr><td colspan="8" class="faint" style="text-align:center;padding:24px">Tidak ada — semua uang batch ini berpasangan. ✓</td></tr>
+      <tr><td colspan="8" class="cell-empty">Tidak ada — semua uang batch ini berpasangan. ✓</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 
 {% if page.has_other_pages %}
-<div class="reveal" style="display:flex;gap:12px;align-items:center;justify-content:center;margin-top:16px">
+<div class="pager reveal">
   {% if page.has_previous %}<a class="btn sm" href="?k={{ kat }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
   <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
   {% if page.has_next %}<a class="btn sm" href="?k={{ kat }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}

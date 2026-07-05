@@ -99,7 +99,7 @@
         <span><span class="badge src plain">{{ s.source_type__key }}</span> {{ s.source_type__name }}</span>
         <b class="num">{{ s.n|intcomma }}</b>
       </div>
-      <div style="height:7px;border-radius:99px;background:#eef1f6;overflow:hidden">
+      <div style="height:7px;border-radius:99px;background:var(--line);overflow:hidden">
         <div style="height:100%;width:{% widthratio s.n tx_total 100 %}%;background:var(--grad);border-radius:99px"></div>
       </div>
     </div>
@@ -110,7 +110,7 @@
 {# ---- AKTIVITAS TERKINI ---- #}
 <div class="grid cols-2" style="margin-top:16px">
   <div class="card pad0 reveal">
-    <div style="padding:15px 18px 4px"><h3 style="margin:0">Upload Terakhir</h3></div>
+    <div class="card-head"><h3>Upload Terakhir</h3><a class="sub" href="{% url 'upload' %}">semua →</a></div>
     <table>
       <thead><tr><th>File</th><th>Sumber</th><th class="r">Baris</th><th class="r">Dup</th></tr></thead>
       <tbody>
@@ -118,12 +118,12 @@
       <tr><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ u.original_name }}">{{ u.original_name }}</td>
         <td><span class="badge src plain">{{ u.source_type.key }}</span></td>
         <td class="r num">{{ u.rows_parsed|intcomma }}</td><td class="r num faint">{{ u.rows_duplicate|intcomma }}</td></tr>
-      {% empty %}<tr><td colspan="4" class="muted" style="text-align:center;padding:18px">Belum ada file.</td></tr>{% endfor %}
+      {% empty %}<tr><td colspan="4" class="cell-empty">Belum ada file.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
   <div class="card pad0 reveal">
-    <div style="padding:15px 18px 4px"><h3 style="margin:0">Rekonsiliasi Terkini</h3></div>
+    <div class="card-head"><h3>Rekonsiliasi Terkini</h3><a class="sub" href="{% url 'reconcile' %}">semua →</a></div>
     <table>
       <thead><tr><th>Relasi</th><th class="r">Cocok</th><th class="r">Tinjau</th><th class="r">Tidak</th></tr></thead>
       <tbody>
@@ -133,7 +133,7 @@
         <td class="r num" style="color:var(--ok)">{{ run.summary.cocok|default:0|intcomma }}</td>
         <td class="r num" style="color:var(--warn)">{{ run.summary.perlu_tinjau|default:0|intcomma }}</td>
         <td class="r num" style="color:var(--bad)">{{ run.summary.tidak_cocok|default:0|intcomma }}</td></tr>
-      {% empty %}<tr><td colspan="4" class="muted" style="text-align:center;padding:18px">Belum ada rekonsiliasi.</td></tr>{% endfor %}
+      {% empty %}<tr><td colspan="4" class="cell-empty">Belum ada rekonsiliasi.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
@@ -149,9 +149,9 @@
   rows.forEach(function(r,i){
     var x=i*gw, bw=Math.max(3,(gw-8)/2);
     var hdp=Math.max(2, r[1]*0.86), hwd=Math.max(2, r[2]*0.86);
-    html+='<g><rect x="'+(x+3)+'" y="'+(H-9-hdp)+'" width="'+bw+'" height="'+hdp+'" rx="2" fill="#2563eb" opacity=".9"><title>'+r[0]+' · DP '+Number(r[3]).toLocaleString('id-ID')+'</title></rect>';
-    html+='<rect x="'+(x+5+bw)+'" y="'+(H-9-hwd)+'" width="'+bw+'" height="'+hwd+'" rx="2" fill="#b45309" opacity=".85"><title>'+r[0]+' · WD '+Number(r[4]).toLocaleString('id-ID')+'</title></rect>';
-    html+='<text x="'+(x+gw/2)+'" y="'+(H-1)+'" font-size="7" text-anchor="middle" fill="#8a93a3">'+r[0]+'</text></g>';
+    html+='<g><rect x="'+(x+3)+'" y="'+(H-9-hdp)+'" width="'+bw+'" height="'+hdp+'" rx="2" style="fill:var(--brand)" opacity=".9"><title>'+r[0]+' · DP '+Number(r[3]).toLocaleString('id-ID')+'</title></rect>';
+    html+='<rect x="'+(x+5+bw)+'" y="'+(H-9-hwd)+'" width="'+bw+'" height="'+hwd+'" rx="2" style="fill:var(--warn)" opacity=".85"><title>'+r[0]+' · WD '+Number(r[4]).toLocaleString('id-ID')+'</title></rect>';
+    html+='<text x="'+(x+gw/2)+'" y="'+(H-1)+'" font-size="7" text-anchor="middle" style="fill:var(--faint)">'+r[0]+'</text></g>';
   });
   svg.innerHTML = html;
 })();

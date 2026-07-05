@@ -35,11 +35,6 @@ details.adv>summary::-webkit-details-marker{display:none}
 details.adv>summary .chev{margin-left:auto;transition:transform .16s}
 details.adv[open]>summary .chev{transform:rotate(180deg)}
 details.adv .adv-body{padding:2px 14px 14px}
-.empty{text-align:center;padding:48px 20px}
-.empty .ic{width:56px;height:56px;border-radius:16px;background:var(--info-bg);color:var(--brand);display:grid;place-items:center;margin:0 auto 14px}
-.empty .ic svg{width:26px;height:26px}
-.empty h4{margin:0 0 6px;font-family:'Sora';font-size:16px}
-.empty p{margin:0 auto 16px;max-width:340px;color:var(--muted);font-size:13.5px}
 .run-btn{width:100%;justify-content:center;padding:12px;font-size:14.5px}
 </style>
 {% endblock %}
@@ -106,7 +101,7 @@ details.adv .adv-body{padding:2px 14px 14px}
   {# ---- JALANKAN ---- #}
   <div class="card reveal">
     <h3 style="margin:0 0 14px">Jalankan Rekonsiliasi</h3>
-    <form method="post" id="jalankan-form">
+    <form method="post" id="jalankan-form" data-busy>
       {% csrf_token %}
       <div class="field"><label>Tanggal rekonsiliasi</label>
         <input type="date" name="recon_date" value="{{ recon_date }}" required>
@@ -136,8 +131,8 @@ details.adv .adv-body{padding:2px 14px 14px}
 
 {# ---- RIWAYAT BATCH ---- #}
 <div class="card pad0 reveal" style="margin-top:16px">
-  <div style="padding:16px 18px 6px;display:flex;align-items:center;justify-content:space-between;gap:12px">
-    <h3 style="margin:0">Riwayat Batch</h3>
+  <div class="card-head">
+    <h3>Riwayat Batch</h3>
     {% if batches or bank %}
     <form method="get" style="margin:0">
       {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
@@ -169,7 +164,7 @@ details.adv .adv-body{padding:2px 14px 14px}
           <form method="post" action="{% url 'delete_batch' b.pk %}" style="display:inline"
                 onsubmit="return confirm('Hapus Batch #{{ b.no }}? Semua hasil rekonsiliasinya terhapus (transaksi tetap utuh).')">
             {% csrf_token %}
-            <button class="btn sm ghost" type="submit" style="color:var(--bad)">Hapus</button>
+            <button class="btn sm ghost danger" type="submit">Hapus</button>
           </form>
         </td>
         {% endif %}

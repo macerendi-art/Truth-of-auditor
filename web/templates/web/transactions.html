@@ -4,8 +4,10 @@
 {% block crumb %}Transaksi{% endblock %}
 {% block content %}
 <div class="page-head reveal">
-  <h1>Transaksi</h1>
-  <p>{{ total|intcomma }} baris kanonik untuk <b>{{ active_toko.name }}</b>.</p>
+  <div>
+    <h1>Transaksi</h1>
+    <p>{{ total|intcomma }} baris kanonik untuk <b>{{ active_toko.name }}</b>.</p>
+  </div>
 </div>
 
 <div class="card reveal" style="margin-bottom:18px">
@@ -19,7 +21,7 @@
     <div class="field" style="flex:2"><label>Cari (username / ticket / referensi / nama)</label>
       <input name="q" value="{{ q }}" placeholder="mis. Wacor20 atau D1757153"></div>
     {% if bank %}<input type="hidden" name="bank" value="{{ bank }}">{% endif %}
-    <button class="btn primary" type="submit" style="flex:0 0 auto;align-self:flex-end;margin-bottom:15px">Filter</button>
+    <button class="btn primary" type="submit">Filter</button>
   </form>
   {% if bank_options %}
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -33,8 +35,15 @@
 </div>
 
 <div class="card pad0 reveal">
-  <div class="table-wrap" style="border:none">
-  <table>
+  <div class="card-head">
+    <h3>Daftar Transaksi</h3>
+    <span style="display:flex;align-items:center;gap:10px">
+      <span class="sub">{{ total|intcomma }} baris · halaman {{ page.number }}/{{ page.paginator.num_pages }}</span>
+      <button class="btn sm" type="button" data-dense="#tx-table" title="Perkecil tinggi baris">Padat</button>
+    </span>
+  </div>
+  <div class="table-wrap tall" style="border:none">
+  <table id="tx-table">
     <thead><tr><th>Waktu</th><th>Sumber</th><th>Jenis</th><th class="num">Amount</th><th class="num">Δ Uang</th><th>Ticket</th><th>Username</th><th>Nama Lengkap</th><th>Counterparty</th></tr></thead>
     <tbody>
     {% for t in page %}
@@ -49,7 +58,7 @@
         <td>{% if t.is_money %}{% if t.matched_panel.counterparty %}<span class="faint" title="Dari pasangan rekonsiliasi">≈ {{ t.matched_panel.counterparty|truncatechars:26 }}</span>{% else %}—{% endif %}{% else %}{{ t.counterparty|truncatechars:26|default:"—" }}{% endif %}</td>
         <td class="faint">{{ t.counterparty|truncatechars:26|default:"—" }}</td>
       </tr>
-    {% empty %}<tr><td colspan="9" class="muted" style="padding:28px;text-align:center">Tidak ada transaksi. Coba ubah filter atau <a class="grad-text" href="{% url 'upload' %}">upload file</a>.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="9" class="cell-empty">Tidak ada transaksi. Coba ubah filter atau <a class="grad-text" href="{% url 'upload' %}">upload file</a>.</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>

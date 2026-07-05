@@ -52,9 +52,13 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
   border-radius:99px;padding:1px 8px;font-variant-numeric:tabular-nums}
 .side a.link .cnt.hot{background:var(--bad);color:#fff}
 .side .spacer{flex:1}
-.side .who{border-top:1px solid rgba(255,255,255,.08);margin-top:10px;padding:12px 12px 2px;font-size:13px}
-.side .who b{color:#fff;font-weight:600}
-.side .who .logout-link{background:none;border:none;padding:0;cursor:pointer;font-family:inherit;color:var(--side-muted);font-size:12.5px}
+.side .who{display:flex;align-items:center;gap:10px;border-top:1px solid rgba(255,255,255,.08);margin-top:10px;padding:14px 10px 4px;font-size:13px}
+.side .who .avatar{width:32px;height:32px;border-radius:50%;background:var(--grad);color:#fff;display:grid;place-items:center;
+  font-weight:700;font-size:13px;flex-shrink:0;box-shadow:0 4px 12px -4px rgba(37,99,235,.6)}
+.side .who .who-meta{flex:1;min-width:0}
+.side .who .who-meta b{display:block;color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side .who .who-meta small{color:var(--side-muted);font-size:11px}
+.side .who .logout-link{background:none;border:none;padding:0;cursor:pointer;font-family:inherit;color:var(--side-muted);font-size:12.5px;white-space:nowrap}
 .side .who .logout-link:hover{color:var(--side-ink)}
 .scrim{display:none}
 
@@ -66,6 +70,7 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
   place-items:center;cursor:pointer;color:var(--ink);flex-shrink:0}
 .burger svg{width:18px;height:18px}
 .topbar .crumb{font-size:13px;color:var(--faint);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar .crumb a:hover{color:var(--ink);text-decoration:underline}
 .topbar .spacer{flex:1}
 .toko-pick{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line-2);
   border-radius:11px;padding:6px 10px;box-shadow:var(--shadow);flex-shrink:0}
@@ -86,6 +91,8 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 @media(max-width:1080px){.cols-4{grid-template-columns:repeat(2,1fr)}.cols-3{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:760px){.cols-2,.cols-3{grid-template-columns:1fr}.cols-4{grid-template-columns:repeat(2,1fr)}}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+a.card.click{display:block;border-color:rgba(37,99,235,.35);transition:border-color .15s,box-shadow .15s}
+a.card.click:hover{border-color:var(--brand);box-shadow:var(--shadow-lg)}
 .card h3{margin:0 0 12px;font-size:14.5px;font-weight:600;font-family:'Inter';letter-spacing:0}
 .card .h-row{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px;gap:10px;flex-wrap:wrap}
 .card .h-row h3{margin:0}
@@ -108,6 +115,8 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .badge.ok{color:var(--ok);background:var(--ok-bg)} .badge.warn{color:var(--warn);background:var(--warn-bg)} .badge.bad{color:var(--bad);background:var(--bad-bg)}
 .badge.src{color:var(--info);background:var(--info-bg)}
 .badge.muted{color:var(--muted);background:var(--panel-2);border:1px solid var(--line)}
+.avatar-ini{width:28px;height:28px;border-radius:50%;background:var(--info-bg);color:var(--brand);
+  display:inline-grid;place-items:center;font-weight:700;font-size:12px;flex-shrink:0}
 
 /* ---- BUTTON ---- */
 .btn{display:inline-flex;align-items:center;gap:8px;padding:9px 15px;border-radius:11px;font-family:inherit;
@@ -120,6 +129,14 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .btn.sm{padding:5px 11px;font-size:12.5px;border-radius:9px}
 .btn.ghost{background:transparent;box-shadow:none;border-color:transparent}
 .btn.ghost:hover{background:var(--panel-2)}
+.btn.danger{color:var(--bad)}
+.btn.danger:hover{background:var(--bad-bg);border-color:#f4c6c6}
+.btn:focus-visible,.tabs a:focus-visible,.side a.link:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+/* status sibuk: form[data-busy] menandai tombol submit saat dikirim */
+.btn.is-busy{opacity:.65;pointer-events:none}
+.btn.is-busy:after{content:"";width:13px;height:13px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+.btn.htmx-request{opacity:.55;pointer-events:none}
+@keyframes spin{to{transform:rotate(1turn)}}
 
 /* ---- FORM ---- */
 label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:500}
@@ -127,7 +144,9 @@ label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-wei
 input,select,.f{width:100%;padding:9px 12px;border:1px solid var(--line-2);border-radius:10px;font-family:inherit;
   font-size:14px;background:var(--panel);color:var(--ink);transition:border-color .14s,box-shadow .14s}
 input:focus,select.f:focus,.f:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.14)}
-.row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1;min-width:150px}
+input[type=checkbox],input[type=radio]{width:auto;accent-color:var(--brand)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}.row>*{flex:1;min-width:150px}
+.row>.btn{flex:0 0 auto;margin-bottom:14px}
 
 /* ---- TABLE ---- */
 .twrap,.table-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--line);background:var(--panel);
@@ -145,6 +164,20 @@ tbody tr:last-child td{border-bottom:none}
 tbody tr:hover{background:var(--panel-2)}
 table.flush{border:none} table.flush thead th{background:none;position:static}
 .r{text-align:right}
+th.num,td.num{text-align:right}
+.twrap.tall,.table-wrap.tall{max-height:72vh;overflow:auto}
+table.dense tbody td{padding:6px 14px;font-size:12.5px}
+td.cell-empty{text-align:center;padding:30px 16px;color:var(--muted);font-size:13.5px}
+/* tabel ringkasan label→nilai (batch DP/WD) */
+table.kv td{padding:9px 2px;font-size:13.5px}
+table.kv td:first-child{color:var(--muted)}
+table.kv td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-weight:600}
+table.kv b{color:var(--ink)}
+table.kv tbody tr:hover{background:none}
+/* header seksi untuk kartu ber-tabel flush (.card.pad0) */
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:15px 18px 11px}
+.card-head h3{margin:0;font-size:14.5px;font-weight:600;font-family:'Inter',sans-serif;letter-spacing:0}
+.card-head .sub{font-size:12px;color:var(--faint)}
 
 /* ---- TABS / PILLS ---- */
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
@@ -152,12 +185,27 @@ table.flush{border:none} table.flush thead th{background:none;position:static}
 .tabs a:hover{color:var(--ink)}
 .tabs a.active{color:#fff;background:var(--brand);border-color:var(--brand)}
 .tabs a .n{opacity:.75;font-weight:500;margin-left:4px}
+.tabs.sub{gap:6px}
+.tabs.sub a{font-size:12px;padding:5px 11px}
 
 /* ---- MSG ---- */
 .msg{padding:12px 16px;border-radius:11px;margin-bottom:12px;font-size:14px;font-weight:500;border:1px solid transparent;display:flex;gap:9px;align-items:center}
 .msg.success{background:var(--ok-bg);color:#146c44;border-color:#bfe6cf}
 .msg.error{background:var(--bad-bg);color:#b42222;border-color:#f4c6c6}
 .msg.warning{background:var(--warn-bg);color:#8a5208;border-color:#f0d9a8}
+
+/* ---- EMPTY STATE & SKELETON ---- */
+.empty{text-align:center;padding:48px 20px}
+.empty .ic{width:56px;height:56px;border-radius:16px;background:var(--info-bg);color:var(--brand);display:grid;place-items:center;margin:0 auto 14px}
+.empty .ic svg{width:26px;height:26px}
+.empty h4{margin:0 0 6px;font-family:'Sora';font-size:16px}
+.empty p{margin:0 auto 16px;max-width:340px;color:var(--muted);font-size:13.5px}
+.skel{position:relative;overflow:hidden;background:var(--panel-2);border-radius:8px;color:transparent!important;pointer-events:none}
+.skel:after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.7),transparent);animation:shimmer 1.2s infinite}
+@keyframes shimmer{to{transform:translateX(100%)}}
+tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
+@media(prefers-reduced-motion:reduce){.skel:after{animation:none}}
 
 /* ---- REVEAL (CSS only, cepat, hormati reduced-motion) ---- */
 .reveal{animation:rise .28s ease-out both}
@@ -218,6 +266,7 @@ table.flush{border:none} table.flush thead th{background:none;position:static}
   .content{padding-top:16px}
   .stat .v{font-size:21px}
   thead th{position:static}
+  .twrap.tall,.table-wrap.tall{max-height:none}
   .cal a{width:40px}
 }
 @media(prefers-reduced-motion:reduce){.side{transition:none}.scrim{transition:none}}
@@ -251,7 +300,11 @@ table.flush{border:none} table.flush thead th{background:none;position:static}
   {% endif %}
   {% endwith %}
   <div class="spacer"></div>
-  <div class="who"><b>{{ request.user.username }}</b><br><form method="post" action="{% url 'logout' %}" style="display:inline">{% csrf_token %}<button type="submit" class="logout-link">Keluar →</button></form></div>
+  <div class="who">
+    <span class="avatar">{{ request.user.username|first|upper }}</span>
+    <span class="who-meta"><b>{{ request.user.username }}</b><small>{{ request.user.get_role_display }}</small></span>
+    <form method="post" action="{% url 'logout' %}" style="display:inline">{% csrf_token %}<button type="submit" class="logout-link">Keluar →</button></form>
+  </div>
 </aside>
 <div class="scrim" id="scrim"></div>
 
@@ -293,6 +346,24 @@ table.flush{border:none} table.flush thead th{background:none;position:static}
   burger.addEventListener('click', function(){ toggle(!side.classList.contains('open')); });
   scrim.addEventListener('click', function(){ toggle(false); });
   document.addEventListener('keydown', function(e){ if(e.key === 'Escape') toggle(false); });
+
+  // Mode padat tabel — preferensi tampilan, disimpan di localStorage.
+  document.querySelectorAll('[data-dense]').forEach(function(btn){
+    var t = document.querySelector(btn.getAttribute('data-dense'));
+    if(!t) return;
+    function apply(on){ t.classList.toggle('dense', on); btn.classList.toggle('primary', on);
+      try{ localStorage.setItem('toa_dense', on ? '1' : ''); }catch(e){} }
+    btn.addEventListener('click', function(){ apply(!t.classList.contains('dense')); });
+    try{ if(localStorage.getItem('toa_dense')) apply(true); }catch(e){}
+  });
+
+  // Tandai tombol submit sibuk saat form dikirim (upload/rekonsiliasi butuh waktu).
+  document.querySelectorAll('form[data-busy]').forEach(function(f){
+    f.addEventListener('submit', function(){
+      var b = f.querySelector('button[type="submit"]');
+      if(b) b.classList.add('is-busy');
+    });
+  });
 })();
 </script>
 {% if show_toko_reminder %}
