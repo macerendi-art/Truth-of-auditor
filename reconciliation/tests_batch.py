@@ -521,3 +521,75 @@ class StringDateTests(TestCase):
     def test_run_batch_tanggal_string_tak_valid_error_jelas(self):
         with self.assertRaises(ValueError):
             run_batch(self.lbs, self.tol, date_from="26/06/2026", date_to="26/06/2026")
+
+
+class GatewayOrphanWindowTests(TestCase):
+    """Orphan `gateway_no_panel` HANYA untuk uang QR dalam window batch [from,to].
+
+    Pool sisi uang dilebarkan T+n supaya settlement telat tetap bisa BERPASANGAN —
+    tapi uang QR bertanggal D+1 yang belum punya deposit Panel itu milik batch
+    BESOK, bukan orphan hari ini. Bug asli (staging K25): batch-27 mengecap 6.679
+    baris gateway-28 sebagai gateway_no_panel lalu MENGONSUMSINYA (spillover tanpa
+    guard left) → batch-28 kehilangan uangnya → no_money massal + selisih ratusan juta.
+    """
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.tol = ToleranceProfile.objects.get_or_create(name="Default")[0]
+        self.tol.date_window_days = 3
+        self.tol.save()
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.gw = SourceType.objects.get_or_create(key="gateway", defaults={"name": "Gateway"})[0]
+        self.up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+
+    def _tx(self, st, money, rh, day, **kw):
+        raw = dict(kw.pop("raw", {}))
+        if st is self.gw:
+            raw.setdefault("Payment Status", "PAID")
+        return Transaction.objects.create(
+            upload=self.up, source_type=st, toko=self.lbs, jenis="depo",
+            amount=Decimal(abs(int(money))), money_delta=Decimal(money),
+            occurred_at=datetime(2026, 6, day, 21, 0), row_hash=rh, raw=raw, **kw,
+        )
+
+    def test_gateway_besok_bukan_orphan_dan_tak_dikonsumsi(self):
+        # Hari 27: 1 panel + gateway pasangannya. Hari 28: gateway TANPA panel (panelnya
+        # baru diupload besok). Batch-27 tak boleh mengecap/mengonsumsi uang 28.
+        self._tx(self.panel, "50000", "p27", 27, ticket_no="D1", username="a")
+        self._tx(self.gw, "50000", "g27", 27, ticket_no="D1", username="a")
+        g28 = self._tx(self.gw, "70000", "g28", 28, ticket_no="D2", username="b")
+
+        b27 = run_batch(self.lbs, self.tol, date_from=date(2026, 6, 27), date_to=date(2026, 6, 27))
+        pb = b27.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+        self.assertFalse(pb.results.filter(reason_code="gateway_no_panel").exists())
+        g28.refresh_from_db()
+        self.assertIsNone(g28.consumed_by_batch)
+
+        # Besok: panel-28 datang → uang g28 masih aktif, match sempurna, selisih 0.
+        self._tx(self.panel, "70000", "p28", 28, ticket_no="D2", username="b")
+        b28 = run_batch(self.lbs, self.tol, date_from=date(2026, 6, 28), date_to=date(2026, 6, 28))
+        pb28 = b28.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+        self.assertEqual(pb28.summary["cocok"], 1)
+        self.assertEqual(b28.summary["dp"]["selisih"], 0.0)
+        g28.refresh_from_db()
+        self.assertEqual(g28.consumed_by_batch_id, b28.pk)
+
+    def test_orphan_dalam_window_tetap_dilaporkan(self):
+        # Sinyal audit asli TIDAK hilang: uang QR settle DALAM window tanpa panel
+        # tetap gateway_no_panel dan dikonsumsi batch (in-window consume).
+        self._tx(self.panel, "50000", "p27", 27, ticket_no="D1", username="a")
+        self._tx(self.gw, "50000", "g27", 27, ticket_no="D1", username="a")
+        orphan = self._tx(self.gw, "99000", "gx", 27, ticket_no="D9", username="x")
+        b27 = run_batch(self.lbs, self.tol, date_from=date(2026, 6, 27), date_to=date(2026, 6, 27))
+        pb = b27.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+        r = pb.results.get(reason_code="gateway_no_panel")
+        self.assertEqual(r.right_id, orphan.id)
+        orphan.refresh_from_db()
+        self.assertEqual(orphan.consumed_by_batch_id, b27.pk)
+
+    def test_tanpa_window_perilaku_lama(self):
+        # from=to=None (CLI penuh) → tak ada clamp; orphan tetap dilaporkan.
+        self._tx(self.gw, "99000", "gx", 27, ticket_no="D9", username="x")
+        b = run_batch(self.lbs, self.tol)
+        pb = b.runs.get(relation=MatchRun.Relation.PANEL_BANK)
+        self.assertTrue(pb.results.filter(reason_code="gateway_no_panel").exists())

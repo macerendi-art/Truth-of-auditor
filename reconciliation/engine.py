@@ -349,8 +349,14 @@ class _MoneyMatcher:
 
         # ===== Orphan: uang QR SETTLE tanpa deposit Panel (uang masuk, tak ada record) =====
         # Sinyal audit paling penting. Hanya yang SETTLED — UNPAID tak dihitung uang.
+        # HANYA dalam window run [from,to]: pool right dilebarkan T+n untuk PAIRING,
+        # tapi uang QR bertanggal D+1 tanpa panel itu milik batch besok — bukan
+        # orphan hari ini (kalau ikut dicap, batch hari ini mencuri uang besok).
+        dto = _as_date(run.date_to)
         for b in gw_settled:
             if b.id not in used:
+                if dto is not None and b.occurred_at.date() > dto:
+                    continue
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=None, right=b,
                                        score=0, reason_code="gateway_no_panel",
                                        reason_detail="Uang QR settle tanpa deposit Panel"))
@@ -598,6 +604,7 @@ def _run_batch_locked(batch, toko, tolerance, date_from, date_to, user, include)
     spill = list(
         MatchResult.objects.filter(
             run__batch=batch,
+            left__isnull=False,  # hanya yang BERPASANGAN — orphan bukan spillover
             right__isnull=False,
             right__source_type__key__in=MONEY_SOURCES,
             right__consumed_by_batch__isnull=True,
