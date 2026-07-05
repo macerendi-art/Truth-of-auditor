@@ -20,6 +20,8 @@
       {% for val,lbl in jenis_choices %}<option value="{{ val }}" {% if jenis == val %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></div>
     <div class="field" style="flex:2"><label>Cari (username / ticket / referensi / nama)</label>
       <input name="q" value="{{ q }}" placeholder="mis. Wacor20 atau D1757153"></div>
+    <div class="field"><label>Dari tanggal</label><input type="date" name="date_from" value="{{ date_from }}"></div>
+    <div class="field"><label>Sampai tanggal</label><input type="date" name="date_to" value="{{ date_to }}"></div>
     {% if bank %}<input type="hidden" name="bank" value="{{ bank }}">{% endif %}
     <button class="btn primary" type="submit">Filter</button>
   </form>
@@ -44,7 +46,14 @@
   </div>
   <div class="table-wrap tall" style="border:none">
   <table id="tx-table">
-    <thead><tr><th>Waktu</th><th>Sumber</th><th>Jenis</th><th class="num">Amount</th><th class="num">Δ Uang</th><th>Ticket</th><th>Username</th><th>Nama Lengkap</th><th>Counterparty</th></tr></thead>
+    <thead><tr>
+      <th><a class="th-sort" href="?{{ qbase }}&sort=waktu&dir={% if sort == 'waktu' and dir == 'asc' %}desc{% else %}asc{% endif %}">Waktu{% if sort == 'waktu' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
+      <th><a class="th-sort" href="?{{ qbase }}&sort=sumber&dir={% if sort == 'sumber' and dir == 'asc' %}desc{% else %}asc{% endif %}">Sumber{% if sort == 'sumber' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
+      <th><a class="th-sort" href="?{{ qbase }}&sort=jenis&dir={% if sort == 'jenis' and dir == 'asc' %}desc{% else %}asc{% endif %}">Jenis{% if sort == 'jenis' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
+      <th class="num"><a class="th-sort" href="?{{ qbase }}&sort=amount&dir={% if sort == 'amount' and dir == 'asc' %}desc{% else %}asc{% endif %}">Amount{% if sort == 'amount' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
+      <th class="num"><a class="th-sort" href="?{{ qbase }}&sort=delta&dir={% if sort == 'delta' and dir == 'asc' %}desc{% else %}asc{% endif %}">Δ Uang{% if sort == 'delta' %} {% if dir == 'asc' %}▲{% else %}▼{% endif %}{% endif %}</a></th>
+      <th>Ticket</th><th>Username</th><th>Nama Lengkap</th><th>Counterparty</th>
+    </tr></thead>
     <tbody>
     {% for t in page %}
       <tr>
@@ -66,9 +75,9 @@
 
 {% if page.has_other_pages %}
 <div class="pager">
-  {% if page.has_previous %}<a class="btn sm" href="?source={{ src }}&jenis={{ jenis }}&q={{ q|urlencode }}&bank={{ bank|urlencode }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
+  {% if page.has_previous %}<a class="btn sm" href="?{{ qpage }}&page={{ page.previous_page_number }}">← Sebelumnya</a>{% endif %}
   <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
-  {% if page.has_next %}<a class="btn sm" href="?source={{ src }}&jenis={{ jenis }}&q={{ q|urlencode }}&bank={{ bank|urlencode }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
+  {% if page.has_next %}<a class="btn sm" href="?{{ qpage }}&page={{ page.next_page_number }}">Berikutnya →</a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}

@@ -42,6 +42,23 @@ REL_LABELS = {
 }
 
 
+def _apply_sort(request, qs, allowed, default_order, default_active=None):
+    """Sort server-side ber-whitelist. `allowed`={ui_key: orm_field}.
+    `default_order`=list field ORM saat sort tak valid. `default_active`=(ui_key,dir)
+    untuk menandai kolom default aktif. Return (qs, sort_key, direction)."""
+    sort = request.GET.get("sort", "")
+    direction = request.GET.get("dir", "")
+    if sort not in allowed:
+        if default_active and default_active[0] in allowed:
+            sort, direction = default_active
+        else:
+            return qs.order_by(*default_order), "", ""
+    if direction not in ("asc", "desc"):
+        direction = "asc"
+    prefix = "" if direction == "asc" else "-"
+    return qs.order_by(f"{prefix}{allowed[sort]}", "id"), sort, direction
+
+
 def csrf_failure(request, reason=""):
     """Token CSRF basi (tab lama / setelah redeploy) — jangan 403 mentah.
 
@@ -245,12 +262,13 @@ def transactions(request):
     qs = (
         Transaction.objects.filter(toko=active)
         .select_related("source_type", "account", "upload", "upload__account")
-        .order_by("-occurred_at")
     )
     src = request.GET.get("source", "")
     jenis = request.GET.get("jenis", "")
     q = request.GET.get("q", "").strip()
     bank = request.GET.get("bank", "").strip()
+    date_from = request.GET.get("date_from", "").strip()
+    date_to = request.GET.get("date_to", "").strip()
     if src:
         qs = qs.filter(source_type__key=src)
     if jenis:
@@ -262,6 +280,16 @@ def transactions(request):
             | Q(reference__icontains=q)
             | Q(counterparty__icontains=q)
         )
+    try:
+        if date_from:
+            qs = qs.filter(occurred_at__date__gte=date_cls.fromisoformat(date_from))
+    except ValueError:
+        date_from = ""
+    try:
+        if date_to:
+            qs = qs.filter(occurred_at__date__lte=date_cls.fromisoformat(date_to))
+    except ValueError:
+        date_to = ""
 
     # Tombol filter per-bank: label diturunkan dari data upload toko ini
     # (account.provider / provider / nama file) — bukan daftar hardcode.
@@ -279,6 +307,24 @@ def transactions(request):
             )
     else:
         bank = ""
+
+    qs, sort, sort_dir = _apply_sort(
+        request, qs,
+        allowed={
+            "waktu": "occurred_at", "amount": "amount", "delta": "money_delta",
+            "sumber": "source_type__key", "jenis": "jenis",
+        },
+        default_order=["-occurred_at", "id"],
+        default_active=("waktu", "desc"),
+    )
+
+    params = request.GET.copy()
+    for k in ("sort", "dir", "page"):
+        params.pop(k, None)
+    qbase = params.urlencode()
+    params_page = request.GET.copy()
+    params_page.pop("page", None)
+    qpage = params_page.urlencode()
 
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
 
@@ -313,6 +359,9 @@ def transactions(request):
         "bank": bank,
         "bank_options": bank_options,
         "total": page.paginator.count,
+        "date_from": date_from, "date_to": date_to,
+        "sort": sort, "dir": sort_dir,
+        "qbase": qbase, "qpage": qpage,
     }
     return render(request, "web/transactions.html", ctx)
 
