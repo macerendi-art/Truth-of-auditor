@@ -533,6 +533,16 @@ def _consume_scope(toko, date_from, date_to, include):
 def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, include=None):
     date_from, date_to = _as_date(date_from), _as_date(date_to)
     tolerance = tolerance or ToleranceProfile.objects.get(name="Default")
+    with db_tx.atomic():
+        # Lock per-toko: dua reconcile bersamaan pada toko sama diserialisasi
+        # (Postgres; sqlite mengunci DB level file). Sekaligus menjadikan
+        # seluruh run atomic — gagal di tengah = rollback total, tanpa batch
+        # cangkang dan tanpa konsumsi setengah jadi.
+        toko = type(toko).objects.select_for_update().get(pk=toko.pk)
+        return _run_batch_locked(toko, tolerance, date_from, date_to, user, include)
+
+
+def _run_batch_locked(toko, tolerance, date_from, date_to, user, include):
     comp = check_completeness(toko, date_from, date_to, tol=tolerance)
     batch = ReconBatch.objects.create(
         toko=toko, tolerance=tolerance, date_from=date_from, date_to=date_to,
@@ -587,6 +597,9 @@ def rematch_batch(batch, user=None):
     """
     n_targets = n_paired = n_cocok = n_tinjau = 0
     with db_tx.atomic():
+        # Lock per-toko yang sama dengan run_batch — re-match & reconcile
+        # bersamaan pada satu toko tak boleh berebut pool uang aktif.
+        type(batch.toko).objects.select_for_update().get(pk=batch.toko_id)
         for run in batch.runs.filter(relation=MatchRun.Relation.PANEL_BANK):
             matcher = MATCHERS[run.relation]()
             # Target = baris tidak_cocok yang PUNYA sisi kiri (skip orphan/gateway_no_panel).
