@@ -49,6 +49,29 @@
   {% endwith %}
 </div>
 
+{% if per_bank %}
+<div class="card pad0 reveal" style="margin-top:16px">
+  <div class="card-head"><h3>Per Sumber Uang</h3><span class="sub">{{ per_bank|length }} sumber</span></div>
+  <div class="twrap" style="border:none">
+  <table>
+    <thead><tr><th>Sumber</th><th class="num">Transaksi</th><th class="num">DP masuk</th><th class="num">WD keluar</th><th class="num">Berpasangan</th><th class="num">Tanpa pasangan</th></tr></thead>
+    <tbody>
+    {% for b in per_bank %}
+      <tr>
+        <td><span class="badge src plain">{{ b.label }}</span></td>
+        <td class="num mono">{{ b.n|intcomma }}</td>
+        <td class="num mono">{{ b.dp|floatformat:0|intcomma }}</td>
+        <td class="num mono">{{ b.wd|floatformat:0|intcomma }}</td>
+        <td class="num mono" style="color:var(--ok)">{{ b.paired|intcomma }}</td>
+        <td class="num mono">{% if b.unpaired %}<a href="{% url 'batch_uang' batch.pk %}">{{ b.unpaired|intcomma }}</a>{% else %}0{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
 {% if s.unmatched_money %}
 {% with um=s.unmatched_money %}
 <a class="card click reveal" href="{% url 'batch_uang' batch.pk %}" style="margin-top:16px">

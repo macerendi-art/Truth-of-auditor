@@ -553,9 +553,47 @@ def batch_detail(request, pk):
         MatchResult.objects.filter(run__batch=batch, resolved_by_batch__isnull=False)
         .select_related("resolved_by_batch", "left", "right")
     )
+
+    # Ringkasan per sumber uang (dihitung on-the-fly; batch lama otomatis kebagian).
+    from django.db.models import Exists, OuterRef
+
+    from transactions.models import specific_source_label
+
+    paired_q = MatchResult.objects.filter(left__isnull=False, right_id=OuterRef("id"))
+    money_rows = (
+        Transaction.objects.filter(
+            consumed_by_batch=batch, source_type__key__in=["bank", "gateway"]
+        )
+        .exclude(jenis="admin")
+        .annotate(berpasangan=Exists(paired_q))
+        .select_related("source_type", "upload", "upload__account")
+    )
+    agg = {}
+    for t in money_rows:
+        label = specific_source_label(
+            t.source_type.key,
+            account=t.upload.account if t.upload else None,
+            upload=t.upload,
+        )
+        row = agg.setdefault(
+            label, {"label": label, "n": 0, "dp": 0.0, "wd": 0.0, "paired": 0, "unpaired": 0}
+        )
+        row["n"] += 1
+        md = float(t.money_delta)
+        if md > 0:
+            row["dp"] += md
+        elif md < 0:
+            row["wd"] += -md
+        if t.berpasangan:
+            row["paired"] += 1
+        else:
+            row["unpaired"] += 1
+    per_bank = sorted(agg.values(), key=lambda r: r["label"])
+
     return render(request, "web/batch_detail.html", {
         "batch": batch, "batch_no": batch_no, "s": batch.summary or {}, "runs": batch.runs.all(),
         "resolved_here": resolved_here, "settled_elsewhere": settled_elsewhere,
+        "per_bank": per_bank,
     })
 
 
