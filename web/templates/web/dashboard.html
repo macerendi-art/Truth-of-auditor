@@ -24,12 +24,12 @@
     <div class="sub"><a href="{% url 'batch_detail' last.pk %}">Batch #{{ last_no }}</a> · selisih {{ last_sel|floatformat:0|intcomma }}</div>
     {% else %}<div class="v faint">—</div><div class="sub">belum ada rekonsiliasi</div>{% endif %}
   </div>
-  <div class="card stat">
+  <a class="card stat click" href="{% url 'transactions' %}?carry=1">
     <div class="top"><span class="k">Menunggu settlement</span>
       <span class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span></div>
     <div class="v {% if pending %}a{% endif %}">{{ pending|intcomma }}</div>
     <div class="sub">kredit menunggu uang tiba di run berikutnya</div>
-  </div>
+  </a>
   <div class="card stat">
     <div class="top"><span class="k">Antrean tinjau</span>
       <span class="ic {% if pending_review_count %}a{% else %}g{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span></div>

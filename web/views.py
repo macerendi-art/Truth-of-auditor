@@ -282,6 +282,11 @@ def transactions(request):
             | Q(reference__icontains=q)
             | Q(counterparty__icontains=q)
         )
+    carry = request.GET.get("carry") == "1"
+    if carry:
+        from reconciliation.engine import _carried_results
+
+        qs = qs.filter(id__in=list(_carried_results(active).keys()))
     try:
         if date_from:
             qs = qs.filter(occurred_at__date__gte=date_cls.fromisoformat(date_from))
@@ -378,6 +383,7 @@ def transactions(request):
         "date_from": date_from, "date_to": date_to,
         "sort": sort, "dir": sort_dir,
         "qbase": qbase, "qpage": qpage,
+        "carry": carry,
     }
     return render(request, "web/transactions.html", ctx)
 
