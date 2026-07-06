@@ -121,13 +121,133 @@ function init(renderer) {
       varying float vSeed;
       void main(){
         float d = length(gl_PointCoord - .5); if (d > .5) discard;
-        vec3 bone = vec3(.914, .894, .839);
-        vec3 verdigris = vec3(.247, .642, .471);
-        vec3 col = mix(bone, verdigris, step(.93, vSeed));  // ~7% partikel "matched"
+        vec3 bone      = vec3(.914, .894, .839);   // #E9E4D6 --text  (badan wordmark)
+        vec3 verdigris = vec3(.247, .642, .471);   // #3FA478 --brand  (partikel "matched")
+        vec3 amber     = vec3(.788, .541, .169);   // #C98A2B --brand2 (aksen sekunder, selaras interior)
+        vec3 col = bone;
+        col = mix(col, verdigris, step(.92, vSeed));   // ~8% hijau "matched"
+        col = mix(col, amber,     step(.96, vSeed));   // ~4% amber di atasnya → mirror duo hijau+amber interior
         gl_FragColor = vec4(col, smoothstep(.5, .15, d) * .9);
       }`
   });
-  scene.add(new THREE.Points(geo, mat));
+  const word = new THREE.Points(geo, mat); word.renderOrder = 0; scene.add(word);
+
+  // ── Bintang kelap-kelip (starfield jauh, tiap bintang berkedip independen) ──
+  //    Selaras palet interior: mayoritas bone/cream, sebagian kecil kilau hijau/amber.
+  const STAR_N = isMobile ? 110 : 210;
+  const sPos = new Float32Array(STAR_N * 3), sSeed = new Float32Array(STAR_N), sTone = new Float32Array(STAR_N);
+  for (let i = 0; i < STAR_N; i++) {
+    sPos[i * 3]     = (Math.random() - .5) * 52;      // sebar jauh melebihi viewport → kepadatan rendah
+    sPos[i * 3 + 1] = (Math.random() - .5) * 32;
+    sPos[i * 3 + 2] = -7 - Math.random() * 16;         // jauh di belakang wordmark (z=0)
+    sSeed[i] = Math.random();
+    const r = Math.random();
+    sTone[i] = r > .94 ? 2 : (r > .86 ? 1 : 0);        // ~6% amber, ~8% hijau, sisanya bone
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3));
+  starGeo.setAttribute('aSeed', new THREE.BufferAttribute(sSeed, 1));
+  starGeo.setAttribute('aTone', new THREE.BufferAttribute(sTone, 1));
+  const starUni = { uTime: { value: 0 }, uPr: { value: renderer.getPixelRatio() * .5 } };
+  const starMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: starUni,
+    vertexShader: `
+      attribute float aSeed; attribute float aTone;
+      uniform float uTime; uniform float uPr;
+      varying float vTw; varying float vTone;
+      void main(){
+        vTone = aTone;
+        float sp = .6 + aSeed * 1.7;                          // kecepatan kedip per bintang
+        float tw = .5 + .5 * sin(uTime * sp + aSeed * 6.283);  // 0..1 independen (fase acak)
+        vTw = tw;
+        vec4 mv = modelViewMatrix * vec4(position, 1.);
+        float sz = (.35 + aSeed * .8) * (1. + tw * .35);       // pinpoint kecil, berkedip halus
+        gl_PointSize = sz * uPr * ${isMobile ? '54.' : '70.'} / -mv.z;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      varying float vTw; varying float vTone;
+      void main(){
+        float d = length(gl_PointCoord - .5); if (d > .5) discard;
+        vec3 bone      = vec3(.914, .894, .839);
+        vec3 verdigris = vec3(.247, .642, .471);
+        vec3 amber     = vec3(.788, .541, .169);
+        vec3 col = vTone > 1.5 ? amber : (vTone > .5 ? verdigris : bone);
+        float a = smoothstep(.5, .08, d) * (.18 + .55 * vTw);  // faint→terang, kedip lembut
+        gl_FragColor = vec4(col, a);
+      }`
+  });
+  const stars = new THREE.Points(starGeo, starMat); stars.renderOrder = -1; scene.add(stars);
+
+  // ── Komet berinterval (seperti di luar angkasa) ──
+  //    Satu komet melintas tiap COMET_EVERY (± jitter). Ekor memudar bone→amber (ember hangat).
+  const COMET_EVERY = 9.0;     // detik antar komet — diatur di sini
+  const COMET_JITTER = 3.0;    // ± variasi acak
+  const COMET_DUR = 1.7;       // durasi satu lintasan
+  const TRAIL_N = 44;
+  const tIdx = new Float32Array(TRAIL_N);
+  for (let i = 0; i < TRAIL_N; i++) tIdx[i] = i;
+  const cometGeo = new THREE.BufferGeometry();
+  cometGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_N * 3), 3)); // dihitung di shader dari uHead
+  cometGeo.setAttribute('aIdx', new THREE.BufferAttribute(tIdx, 1));
+  const cometUni = {
+    uHead: { value: new THREE.Vector3(0, 0, -1.5) }, uDir: { value: new THREE.Vector3(1, 0, 0) },
+    uSpacing: { value: .032 }, uN: { value: TRAIL_N }, uActive: { value: 0 },
+    uPr: { value: renderer.getPixelRatio() * .5 }
+  };
+  const cometMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
+    uniforms: cometUni,
+    vertexShader: `
+      attribute float aIdx;
+      uniform vec3 uHead; uniform vec3 uDir; uniform float uSpacing; uniform float uN; uniform float uPr;
+      varying float vT;
+      void main(){
+        float f = aIdx / (uN - 1.);                  // 0 kepala → 1 ekor
+        vT = f;
+        vec3 p = uHead - uDir * (aIdx * uSpacing);    // ekor tertinggal di belakang kepala
+        vec4 mv = modelViewMatrix * vec4(p, 1.);
+        gl_PointSize = mix(4.6, .3, f) * uPr * 40. / -mv.z;  // kepala besar → ekor kecil
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      uniform float uActive;
+      varying float vT;
+      void main(){
+        float d = length(gl_PointCoord - .5); if (d > .5) discard;
+        vec3 headCol = vec3(.98, .96, .90);           // kepala putih hangat
+        vec3 amber   = vec3(.788, .541, .169);        // ekor amber
+        vec3 col = mix(headCol, amber, vT);
+        float a = uActive * pow(1. - vT, 1.6) * smoothstep(.5, .05, d);  // ekor memudar
+        gl_FragColor = vec4(col, a);
+      }`
+  });
+  const comet = new THREE.Points(cometGeo, cometMat); comet.renderOrder = 2; comet.frustumCulled = false; scene.add(comet);
+
+  let cometActive = false, cometT0 = 0, cometNext = 4.0;   // komet pertama ~4 dtk (biar wordmark rakit dulu)
+  const cStart = new THREE.Vector3(), cEnd = new THREE.Vector3();
+  function spawnComet() {
+    const vw = lay.visW, vh = lay.visH, fromLeft = Math.random() < .5;
+    const sx = (fromLeft ? -1 : 1) * vw * (.45 + Math.random() * .2);
+    const sy = vh * (.44 + Math.random() * .12);                        // mulai di langit atas
+    cStart.set(sx, sy, -1.5);
+    cEnd.set(-sx * (.5 + Math.random() * .45), vh * (.30 + Math.random() * .12), -1.5); // turun landai, tetap di atas wordmark
+    cometUni.uDir.value.copy(cEnd).sub(cStart).normalize();
+    cometActive = true; cometUni.uActive.value = 0;
+  }
+  function updateComet(t) {
+    if (!cometActive) { if (t >= cometNext) { cometT0 = t; spawnComet(); } return; }
+    const p = (t - cometT0) / COMET_DUR;
+    if (p >= 1) {
+      cometActive = false; cometUni.uActive.value = 0;
+      cometNext = t + COMET_EVERY + (Math.random() * 2 - 1) * COMET_JITTER;
+      return;
+    }
+    const e = p < .5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;   // easeInOut halus
+    cometUni.uHead.value.lerpVectors(cStart, cEnd, e);
+    cometUni.uActive.value = Math.min(1, Math.min(p * 6, (1 - p) * 6)); // fade in/out di ujung lintasan
+  }
 
   const ndc = new THREE.Vector2(99, 99);
   addEventListener('pointermove', (e) => {
@@ -162,13 +282,17 @@ function init(renderer) {
   let raf = null, running = false;
   const clock = new THREE.Clock();
   function tick() {
-    uni.uTime.value = clock.getElapsedTime();
+    const et = clock.getElapsedTime();
+    uni.uTime.value = et;
+    starUni.uTime.value = et;
+    updateComet(et);
     renderer.render(scene, cam);
     raf = requestAnimationFrame(tick);
   }
   // load di background tab: jangan start loop dulu — start di visible pertama (hindari chain RAF beku menumpuk)
   if (!document.hidden) { running = true; raf = requestAnimationFrame(tick); }
-  addEventListener('pagehide', () => { cancelAnimationFrame(raf); running = false; geo.dispose(); mat.dispose(); renderer.dispose(); });
+  addEventListener('pagehide', () => { cancelAnimationFrame(raf); running = false;
+    geo.dispose(); mat.dispose(); starGeo.dispose(); starMat.dispose(); cometGeo.dispose(); cometMat.dispose(); renderer.dispose(); });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { cancelAnimationFrame(raf); running = false; }
     else if (!running) { running = true; raf = requestAnimationFrame(tick); } // guard: satu chain saja
