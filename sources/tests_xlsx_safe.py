@@ -1,5 +1,7 @@
 import io, os, tempfile, zipfile
+from datetime import datetime
 from django.test import SimpleTestCase
+from openpyxl import Workbook
 from sources.parsers.base import read_xlsx_rows, _raw_xlsx_rows
 
 _CT = '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'
@@ -41,3 +43,19 @@ class XlsxSafeTests(SimpleTestCase):
         self.assertEqual(len(dicts), 1)
         self.assertEqual(dicts[0]["Transaction ID"], "abc-123")
         self.assertEqual(str(dicts[0]["Amount"]), "50000")
+
+    def test_wellformed_data_mempertahankan_nilai_typed(self):
+        # File well-formed dengan baris data TIDAK boleh jatuh ke raw reader (yang
+        # mengembalikan string) — nilai typed (float/datetime) harus utuh.
+        wb = Workbook(); ws = wb.active
+        ws.append(["Amount", "Date"])
+        ws.append([50000.5, datetime(2026, 7, 7, 10, 0)])
+        fd, path = tempfile.mkstemp(suffix=".xlsx"); os.close(fd)
+        wb.save(path)
+        try:
+            _, dicts = read_xlsx_rows(path, header_row=1)
+        finally:
+            os.remove(path)
+        self.assertEqual(len(dicts), 1)
+        self.assertEqual(dicts[0]["Amount"], 50000.5)
+        self.assertEqual(dicts[0]["Date"], datetime(2026, 7, 7, 10, 0))

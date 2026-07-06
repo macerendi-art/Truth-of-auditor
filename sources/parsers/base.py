@@ -108,8 +108,16 @@ def read_xlsx_rows(path, header_row=1, sheet=None):
         wb.close()
     except Exception:
         grid = None
-    if grid is None or len(grid) <= header_row:
-        grid = _raw_xlsx_rows(path)
+    if grid is None:
+        grid = _raw_xlsx_rows(path)  # openpyxl gagal total (mis. styles.xml rusak)
+    elif len(grid) <= header_row:
+        # openpyxl sukses tapi <= baris header (0 baris data). Bisa file well-formed
+        # yang memang tanpa data, ATAU exporter non-standar (tanpa <dimension>) yang
+        # terbaca 0 baris. Pakai raw HANYA bila menemukan LEBIH banyak baris — jangan
+        # buang hasil openpyxl (nilai typed float/tanggal) untuk file well-formed.
+        raw = _raw_xlsx_rows(path)
+        if len(raw) > len(grid):
+            grid = raw
     headers, out = None, []
     for i, row in enumerate(grid, start=1):
         if i < header_row:
