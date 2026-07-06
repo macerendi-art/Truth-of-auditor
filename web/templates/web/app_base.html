@@ -174,13 +174,25 @@ input[type=checkbox],input[type=radio]{width:auto;accent-color:var(--brand)}
 .pad0 .twrap,.pad0.twrap{border:none;border-radius:0}
 .card.pad0{overflow-x:auto}
 .twrap .num,.table-wrap .num{text-align:right}
-.pager{display:flex;gap:10px;align-items:center;justify-content:center;margin-top:20px;color:var(--muted);font-size:13px}
+.pager{display:flex;gap:6px;align-items:center;justify-content:center;margin-top:22px;flex-wrap:wrap;color:var(--muted);font-size:13px}
+.pg{display:inline-grid;place-items:center;min-width:36px;height:36px;padding:0 10px;border-radius:10px;
+  border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:13px;font-weight:600;
+  font-variant-numeric:tabular-nums;box-shadow:var(--shadow);transition:background .14s,color .14s,border-color .14s,box-shadow .14s}
+.pg:hover{color:var(--ink);border-color:var(--line-2);background:var(--panel-2)}
+.pg.cur{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 6px 16px -8px rgba(37,99,235,.7)}
+.pg.nav{color:var(--faint)}
+.pg.nav svg{width:15px;height:15px}
+.pg.gap{border:none;background:none;box-shadow:none;color:var(--faint);min-width:22px;cursor:default}
+.pg.disabled{opacity:.4;pointer-events:none;box-shadow:none}
+.pg:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 thead th{position:sticky;top:0;z-index:2;text-align:left;padding:9px 12px;background:var(--panel-2);color:var(--faint);font-weight:600;
-  font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line);white-space:nowrap}
+  font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line-2);white-space:nowrap}
 tbody td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
 tbody tr:last-child td{border-bottom:none}
+tbody tr{transition:background .12s}
 tbody tr:hover{background:var(--panel-2)}
+tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
 table.flush{border:none} table.flush thead th{background:none;position:static}
 .r{text-align:right}
 th.num,td.num{text-align:right}

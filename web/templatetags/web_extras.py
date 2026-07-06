@@ -49,7 +49,7 @@ def reason_tone(code):
 
 
 @register.inclusion_tag("web/_pager.html", takes_context=True)
-def pager(context, page, on_each_side=4, on_ends=1):
+def pager(context, page, on_each_side=5, on_ends=1):
     """Pager bernomor jendela-geser (elided) yang mempertahankan semua query kecuali `page`."""
     request = context.get("request")
     try:
