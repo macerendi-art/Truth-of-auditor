@@ -68,6 +68,16 @@ class DetectMultiBrandTests(SimpleTestCase):
             os.remove(path)
         self.assertIn("cor_panel_qris", keys)
 
+    def test_deteksi_cor_panel_qris_withdraw_tanpa_bonus(self):
+        path = _xlsx([["#","Approved Date","Requested Date","Username","Transaction ID",
+                       "Destination Bank","Amount","Status","By"],
+                      ["1","x","x","user1","uuid-1","BCA - 1 - A","50000","success","op"]])
+        try:
+            keys = [d["parser_key"] for d in detect_source(path, "QRIS_withdraw_transactions.xlsx")]
+        finally:
+            os.remove(path)
+        self.assertEqual(keys[0], "cor_panel_qris")
+
     def test_qhoki_dan_cor_panel_qris_tidak_tabrakan(self):
         # Header asli QHoki (Task 8 brief): py qhoki punya "transaction id" + "nmid",
         # TANPA "bonus" -> tidak boleh ikut kena deteksi cor_panel_qris.

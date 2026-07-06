@@ -34,6 +34,14 @@ class XlsxSafeTests(SimpleTestCase):
         self.assertEqual(rows[0][:2], ["Transaction ID", "Amount"])
         self.assertEqual(rows[1][:2], ["abc-123", "50000"])
 
+    def test_raw_reader_nrows_early_stop(self):
+        path = _make_nodim_xlsx()
+        try:
+            rows = _raw_xlsx_rows(path, nrows=1)
+        finally:
+            os.remove(path)
+        self.assertEqual(len(rows), 1)
+
     def test_read_xlsx_rows_tahan_tanpa_dimension(self):
         path = _make_nodim_xlsx()
         try:

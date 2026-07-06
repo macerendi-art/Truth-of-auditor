@@ -48,7 +48,7 @@ def _xlsx_col_idx(ref):
     return n - 1
 
 
-def _raw_xlsx_rows(path):
+def _raw_xlsx_rows(path, nrows=None):
     """Baca xlsx via zip+xml langsung (abaikan styles.xml). -> list[list[str]]."""
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
@@ -93,6 +93,8 @@ def _raw_xlsx_rows(path):
                 cells[idx] = v; maxc = max(maxc, idx)
             rows.append([cells.get(i, "") for i in range(maxc + 1)])
             el.clear()
+            if nrows is not None and len(rows) >= nrows:
+                break
         return rows
 
 

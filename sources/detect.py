@@ -23,11 +23,14 @@ def _xlsx_tokens(path, max_rows=3):
         wb.close()
     except Exception:
         grid = None
-    if not grid:
+    # openpyxl kadang mengembalikan baris 'garbled' (sel mayoritas None) untuk
+    # exporter non-standar -> pakai reader mentah bila sel terisi < 2.
+    n_cells = sum(1 for row in (grid or []) for c in row if c not in (None, ""))
+    if n_cells < 2:
         try:
-            grid = _raw_xlsx_rows(path)[:max_rows]
+            grid = _raw_xlsx_rows(path, nrows=max_rows)
         except Exception:
-            grid = []
+            grid = grid or []
     for row in grid:
         for c in row:
             if c is not None and c != "":
@@ -76,8 +79,8 @@ def detect_source(path, filename=""):
             add("qhoki", 0.95)
         if _has(t, "from bank") and _has(t, "destination bank") and _has(t, "approved date"):
             add("cor_panel_bank", 0.95)
-        if _has(t, "transaction id") and _has(t, "amount") and _has(t, "bonus") \
-                and not _has(t, "kategori"):
+        if _has(t, "transaction id") and _has(t, "username") and _has(t, "requested date") \
+                and not _has(t, "kategori") and not _has(t, "orderid"):
             add("cor_panel_qris", 0.90)
     elif ext == ".csv":
         c = _csv_text(path)
