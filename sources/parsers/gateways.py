@@ -79,3 +79,42 @@ class QRFlyerParser(BaseParser):
             row["row_hash"] = row_hash("qrflyer", [ticket, ref, amt])
             out.append(row)
         return out
+
+
+class QHokiParser(BaseParser):
+    """QRIS HOKI (gateway MUL). Whitelabel Transaction ID = Ticket Panel (D...),
+    Transaction ID = UUID (juga muncul di Remarks panel)."""
+
+    source_key = "gateway"
+
+    def parse(self, path, flow=""):
+        _, rows = read_xlsx_rows(path, header_row=1)
+        out = []
+        for r in rows:
+            if str(r.get("Status", "") or "").strip().lower() != "success":
+                continue
+            wl = str(r.get("Whitelabel Transaction ID", "") or "").strip()
+            txid = str(r.get("Transaction ID", "") or "").strip()
+            amt = abs(parse_decimal(r.get("Amount")))
+            occurred = parse_dt(r.get("Transaction Date"))
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date() if occurred else None,
+                "jenis": "wd" if flow == "wd" else "depo",
+                "amount": amt,
+                "credit_delta": Decimal("0"),
+                "money_delta": _money(amt, flow),
+                "fee": parse_decimal(r.get("Downline Fee Amount")),
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": wl,
+                "username": str(r.get("Member ID", "") or "").strip(),
+                "reference": txid,
+                "counterparty": "",
+                "description": f"QHOKI {r.get('Rrn','')}".strip(),
+                "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
+            }
+            row["row_hash"] = row_hash("qhoki", [txid, wl, amt])
+            out.append(row)
+        return out
