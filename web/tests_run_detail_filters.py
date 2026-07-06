@@ -130,3 +130,30 @@ class AmountLabelTests(_Base):
         c = self._get().context
         self.assertEqual(c["left_amt_label"], "Kredit/Koin")
         self.assertEqual(c["right_amt_label"], "Saldo Bank")
+
+
+class MutasiBankCellTests(_Base):
+    """Kolom Mutasi Bank: bank spesifik (BRI/BCA/Mandiri) + nama rekening + NOREK,
+    bukan sekadar 'bank' generik."""
+
+    def _row(self):
+        bri = Upload.objects.create(source_type=self.bank, toko=self.lbs, provider="BRI")
+        left = self._tx(self.panel, "mb1", ticket_no="D9", amount=Decimal("10000"))
+        right = self._tx(
+            self.bank, "mb2", upload=bri, amount=Decimal("10000"),
+            counterparty="MARIO KARO-KARO", raw={"NOREK": "384801026030509"},
+        )
+        return self._res("cocok", left, right, "ticket")
+
+    def test_cell_tampilkan_bank_spesifik_nama_dan_norek(self):
+        self._row()
+        html = self._get().content.decode()
+        self.assertIn("BRI", html)                 # bank spesifik, bukan "bank"
+        self.assertIn("MARIO KARO-KARO", html)     # nama rekening (counterparty)
+        self.assertIn("384801026030509", html)     # nomor rekening (NOREK)
+
+    def test_tanpa_norek_tetap_render_aman(self):
+        left = self._tx(self.panel, "mb3", ticket_no="D8", amount=Decimal("5000"))
+        right = self._tx(self.bank, "mb4", amount=Decimal("5000"), counterparty="")
+        self._res("cocok", left, right, "ticket")
+        self.assertEqual(self._get().status_code, 200)
