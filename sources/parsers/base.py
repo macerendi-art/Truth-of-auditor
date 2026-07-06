@@ -244,6 +244,18 @@ def derive_bank_fields(source_key, raw):
     return bank_code(raw.get(pkey), psep), bank_code(raw.get(tkey), tsep)
 
 
+def parse_bank_triplet(value):
+    """String COR "KODE - NOREK - NAMA" -> (kode, norek, nama). Nama boleh memuat
+    ' - ' internal (mis. '.../ WITHDRAW BCA') -> hanya split 2 pemisah pertama."""
+    s = str(value or "").strip()
+    if not s:
+        return "", "", ""
+    parts = [p.strip() for p in s.split(" - ", 2)]
+    while len(parts) < 3:
+        parts.append("")
+    return parts[0].upper(), parts[1], parts[2]
+
+
 class BaseParser:
     """Interface parser. Subclass set `source_key` & implement `parse`."""
 
