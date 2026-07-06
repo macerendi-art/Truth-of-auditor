@@ -141,10 +141,10 @@ tbody tr:last-child td{border-bottom:none}
 {% block head %}{% endblock %}
 </head>
 <body>
-<div id="preloader"><div class="pl-brand"><span class="dot"></span> Truth<span class="grad-text">Auditor</span></div><div class="pl-bar"></div></div>
+<div id="preloader"><div class="pl-brand"><span class="dot"></span> Truth of <span class="grad-text">Auditor</span></div><div class="pl-bar"></div></div>
 {% block chrome %}
 <nav class="nav">
-  <a href="{% url 'dashboard' %}" class="brand"><span class="dot"></span> Truth<span class="grad-text">Auditor</span></a>
+  <a href="{% url 'dashboard' %}" class="brand"><span class="dot"></span> Truth of <span class="grad-text">Auditor</span></a>
   <a href="{% url 'dashboard' %}" class="link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">Dashboard</a>
   <a href="{% url 'transactions' %}" class="link {% if request.resolver_match.url_name == 'transactions' %}active{% endif %}">Transaksi</a>
   <a href="{% url 'reconcile' %}" class="link {% if request.resolver_match.url_name == 'reconcile' or request.resolver_match.url_name == 'run_detail' %}active{% endif %}">Rekonsiliasi</a>

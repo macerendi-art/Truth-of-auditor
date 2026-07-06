@@ -61,7 +61,7 @@ function sampleText(text) {
 
 function init(renderer) {
   const CAP = isMobile ? 7000 : 20000;
-  const sampled = sampleText('TRUTH AUDITOR');
+  const sampled = sampleText('TRUTH OF AUDITOR');
   const halfW = sampled.halfW;
   let pts = sampled.pts;
   if (pts.length > CAP) pts = pts.filter((_, i) => i % Math.ceil(pts.length / CAP) === 0);
@@ -114,7 +114,7 @@ function init(renderer) {
         float r = length(d);
         if (r < 1.2) base.xy += normalize(d) * (1.2 - r) * .7;
         vec4 mv = modelViewMatrix * vec4(base, 1.);
-        gl_PointSize = (2.4 - aSeed) * (3.2 / -mv.z) * uPr * ${isMobile ? '46.' : '76.'};
+        gl_PointSize = (2.4 - aSeed) * (3.2 / -mv.z) * uPr * ${isMobile ? '55.' : '80.'};
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
