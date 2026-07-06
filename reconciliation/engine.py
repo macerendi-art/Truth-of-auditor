@@ -297,16 +297,20 @@ class _MoneyMatcher:
 
         bidx = defaultdict(list)
         gw_ticket = defaultdict(list)
+        gw_ref = defaultdict(list)
         owners = {}
         for b in right:
             bidx[(int(abs(b.money_delta)), b.money_delta > 0)].append(b)
             if b.source_type.key == "gateway" and b.ticket_no:
                 gw_ticket[b.ticket_no].append(b)
+            if b.source_type.key == "gateway" and b.reference:
+                gw_ref[b.reference].append(b)
             if b.upload_id not in owners:
                 owners[b.upload_id] = _norm_owner(
                     b.upload.original_name if b.upload else ""
                 )
         panel_tickets = {p.ticket_no for p in left if p.ticket_no}
+        panel_refs = {p.reference for p in left if p.reference}
 
         def emit(p, b, bucket, score, reason, detail=""):
             matched.add(p.id)
@@ -329,9 +333,25 @@ class _MoneyMatcher:
                     emit(p, b, MatchResult.Bucket.TINJAU, 90, "ticket_amount",
                          f"ticket sama, selisih nominal {diff:,}")
                 break
-        # Gateway ber-ticket yang TAK dikenal panel bukan kandidat fuzzy siapa pun.
+        # --- pass 0b: reference-join gateway (kunci pasti non-ticket, mis. UUID QRIS) ---
+        for p in left:
+            if p.id in matched or not p.reference:
+                continue
+            for b in gw_ref.get(p.reference, []):
+                if b.id in used or (p.money_delta > 0) != (b.money_delta > 0):
+                    continue
+                diff = abs(int(abs(p.money_delta)) - int(abs(b.money_delta)))
+                if diff == 0:
+                    emit(p, b, MatchResult.Bucket.COCOK, 100, "reference")
+                else:
+                    emit(p, b, MatchResult.Bucket.TINJAU, 90, "reference_amount",
+                         f"reference sama, selisih nominal {diff:,}")
+                break
+        # Gateway ber-ticket/ber-reference yang TAK dikenal panel bukan kandidat fuzzy siapa pun.
         blocked = {
             b.id for t, lst in gw_ticket.items() if t not in panel_tickets for b in lst
+        } | {
+            b.id for ref, lst in gw_ref.items() if ref not in panel_refs for b in lst
         }
 
         def kandidat(p, *, lo=0, hi=None, tol_amt=0):
