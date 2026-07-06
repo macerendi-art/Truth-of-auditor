@@ -23,11 +23,12 @@
 {% endif %}
 
 {% if run.summary %}
-<div class="grid cols-4 reveal">
+<div class="grid cols-5 reveal">
   <div class="card stat"><div class="k">{{ left_label }}</div><div class="v">{{ run.summary.left|intcomma }}</div></div>
   <div class="card stat"><div class="k" style="color:var(--ok)">Cocok</div><div class="v" style="color:var(--ok)">{{ run.summary.cocok|intcomma }}</div></div>
   <div class="card stat"><div class="k" style="color:var(--warn)">Perlu Ditinjau</div><div class="v" style="color:var(--warn)">{{ run.summary.perlu_tinjau|intcomma }}</div></div>
-  <div class="card stat"><div class="k" style="color:var(--bad)">Tidak Cocok</div><div class="v" style="color:var(--bad)">{{ run.summary.tidak_cocok|intcomma }}</div></div>
+  <div class="card stat"><div class="k" style="color:var(--bad)">Tidak Cocok</div><div class="v" style="color:var(--bad)">{{ n_tidak_cocok|intcomma }}</div></div>
+  <div class="card stat"><div class="k" style="color:var(--info)">{{ orphan_label }}</div><div class="v" style="color:var(--info)">{{ n_tidak_ada_panel|intcomma }}</div></div>
 </div>
 {% endif %}
 
@@ -37,6 +38,7 @@
     <a href="?bucket=cocok&flow={{ flow }}" class="{% if bucket == 'cocok' %}active{% endif %}">Cocok</a>
     <a href="?bucket=perlu_tinjau&flow={{ flow }}" class="{% if bucket == 'perlu_tinjau' %}active{% endif %}">Perlu Ditinjau</a>
     <a href="?bucket=tidak_cocok&flow={{ flow }}" class="{% if bucket == 'tidak_cocok' %}active{% endif %}">Tidak Cocok</a>
+    <a href="?bucket=tidak_ada_panel&flow={{ flow }}" class="{% if bucket == 'tidak_ada_panel' %}active{% endif %}">{{ orphan_label }}</a>
   </div>
   <div class="seg" role="group" aria-label="Pilah arus Deposit atau Withdraw">
     <a href="?bucket={{ bucket }}" class="{% if not flow %}active{% endif %}">Semua</a>
@@ -45,13 +47,41 @@
   </div>
 </div>
 
-{% if reasons|length > 1 %}
-<div class="tabs sub reveal" style="margin-top:12px;margin-bottom:0">
-  <a href="?bucket={{ bucket }}&flow={{ flow }}" class="{% if not reason %}active{% endif %}">semua alasan</a>
-  {% for rc in reasons %}
-  <a href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ rc.reason_code|urlencode }}" class="{% if reason == rc.reason_code %}active{% endif %}">
-    {{ rc.reason_code|reason_label }}<span class="n">{{ rc.n|intcomma }}</span></a>
-  {% endfor %}
+{% if reasons|length > 1 or banks or btitles %}
+<div class="reveal" style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+  {% if reasons|length > 1 %}
+  <details class="filter-fold"{% if reason %} open{% endif %}>
+    <summary><span class="chev" aria-hidden="true">›</span>Filter alasan{% if reason %} <span class="n">· 1 aktif</span>{% endif %}</summary>
+    <div class="fold-body tabs sub">
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}" class="{% if not reason %}active{% endif %}">semua alasan</a>
+      {% for rc in reasons %}
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&reason={{ rc.reason_code|urlencode }}" class="{% if reason == rc.reason_code %}active{% endif %}">{{ rc.reason_code|reason_label }}<span class="n">{{ rc.n|intcomma }}</span></a>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+  {% if banks %}
+  <details class="filter-fold"{% if bank %} open{% endif %}>
+    <summary><span class="chev" aria-hidden="true">›</span>Filter bank pemain{% if bank %} <span class="n">· {{ bank }}</span>{% endif %}</summary>
+    <div class="fold-body tabs sub">
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&btitle={{ btitle|urlencode }}" class="{% if not bank %}active{% endif %}">semua bank</a>
+      {% for b in banks %}
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&btitle={{ btitle|urlencode }}&bank={{ b.code|urlencode }}" class="{% if bank == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+  {% if btitles %}
+  <details class="filter-fold"{% if btitle %} open{% endif %}>
+    <summary><span class="chev" aria-hidden="true">›</span>Filter bank title{% if btitle %} <span class="n">· {{ btitle }}</span>{% endif %}</summary>
+    <div class="fold-body tabs sub">
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}" class="{% if not btitle %}active{% endif %}">semua title</a>
+      {% for b in btitles %}
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}&btitle={{ b.code|urlencode }}" class="{% if btitle == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -73,8 +103,8 @@
   <div class="table-wrap tall" style="border:none">
   <table id="hasil-table">
     <thead><tr><th style="width:28px"></th><th>Status</th><th>{{ left_label }}</th><th>Username</th><th>Nama Lengkap</th><th class="col-hide">Player Bank</th><th class="col-hide">Bank Title</th><th class="col-hide">Handler</th>
-      <th class="num"><a class="th-sort" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort=amount&dir={% if sort == 'amount' and dir == 'asc' %}desc{% else %}asc{% endif %}">Nominal{% if sort == 'amount' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
-      <th>{{ right_label }}</th><th class="num">Nominal</th>
+      <th class="num"><a class="th-sort" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort=amount&dir={% if sort == 'amount' and dir == 'asc' %}desc{% else %}asc{% endif %}">{{ left_amt_label }}{% if sort == 'amount' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
+      <th>{{ right_label }}</th><th class="num">{{ right_amt_label }}</th>
       <th><a class="th-sort" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort=skor&dir={% if sort == 'skor' and dir == 'asc' %}desc{% else %}asc{% endif %}">Alasan{% if sort == 'skor' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
       <th style="text-align:center">Aksi</th></tr></thead>
     <tbody>
@@ -85,6 +115,12 @@
   </div>
 </div>
 </form>
+
+<div class="totbar reveal">
+  <span><span class="lbl">Baris</span> <span class="val">{{ totals.n|default:0|intcomma }}</span></span>
+  <span><span class="lbl">Total {{ left_amt_label }}</span> <span class="val" style="color:var(--ok)">Rp {{ totals.kredit|default:0|floatformat:0|intcomma }}</span></span>
+  <span><span class="lbl">Total {{ right_amt_label }}</span> <span class="val" style="color:var(--info)">Rp {{ totals.saldo|default:0|floatformat:0|intcomma }}</span></span>
+</div>
 
 {% if page.has_other_pages %}
 <div class="pager">

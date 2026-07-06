@@ -1,4 +1,4 @@
-"""Filter sumber uang (Bank/Gateway) di Riwayat Batch — nomor batch tetap posisi asli.
+"""Filter sumber uang (Mutasi Bank) di Riwayat Batch — nomor batch tetap posisi asli.
 
 Pola setup (user + toko + session + login) mengikuti tests_batch_number.py.
 """

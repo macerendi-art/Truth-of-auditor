@@ -86,10 +86,10 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 
 /* ---- GRID / CARD ---- */
 .grid{display:grid;gap:14px}
-.cols-2{grid-template-columns:1fr 1fr}.cols-3{grid-template-columns:repeat(3,1fr)}.cols-4{grid-template-columns:repeat(4,1fr)}
+.cols-2{grid-template-columns:1fr 1fr}.cols-3{grid-template-columns:repeat(3,1fr)}.cols-4{grid-template-columns:repeat(4,1fr)}.cols-5{grid-template-columns:repeat(5,1fr)}
 .cols-a{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
-@media(max-width:1080px){.cols-4{grid-template-columns:repeat(2,1fr)}.cols-3{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:760px){.cols-2,.cols-3{grid-template-columns:1fr}.cols-4{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:1080px){.cols-4{grid-template-columns:repeat(2,1fr)}.cols-3{grid-template-columns:repeat(2,1fr)}.cols-5{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:760px){.cols-2,.cols-3{grid-template-columns:1fr}.cols-4,.cols-5{grid-template-columns:repeat(2,1fr)}}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
 a.card.click{display:block;border-color:rgba(37,99,235,.35);transition:border-color .15s,box-shadow .15s}
 a.card.click:hover{border-color:var(--brand);box-shadow:var(--shadow-lg)}
@@ -200,6 +200,20 @@ table.kv tbody tr:hover{background:none}
 .tabs a .n{opacity:.75;font-weight:500;margin-left:4px}
 .tabs.sub{gap:6px}
 .tabs.sub a{font-size:12px;padding:5px 11px}
+/* Filter collapse (alasan / bank pemain / bank title) */
+.filter-fold>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:6px 13px;user-select:none;-webkit-user-select:none}
+.filter-fold>summary::-webkit-details-marker{display:none}
+.filter-fold>summary::marker{content:""}
+.filter-fold>summary:hover{color:var(--ink)}
+.filter-fold[open]>summary{color:var(--ink);border-color:var(--brand)}
+.filter-fold>summary .chev{transition:transform .15s ease;font-weight:700}
+.filter-fold[open]>summary .chev{transform:rotate(90deg)}
+.filter-fold>summary .n{opacity:.7;font-weight:500}
+.filter-fold .fold-body{margin-top:10px;flex-wrap:wrap}
+/* Ringkasan total terfilter di bawah tabel hasil */
+.totbar{margin-top:14px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 26px;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
+.totbar .lbl{font-size:12px;color:var(--muted);font-weight:600;margin-right:6px}
+.totbar .val{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
 
 /* ---- MSG ---- */
 .msg{padding:12px 16px;border-radius:11px;margin-bottom:12px;font-size:14px;font-weight:500;border:1px solid transparent;display:flex;gap:9px;align-items:center}

@@ -105,7 +105,7 @@ class RunDetailLabelTests(TestCase):
     def test_run_detail_pakai_label_sumber_asli_bukan_kiri_panel(self):
         r = self.client.get(reverse("run_detail", args=[self.run.pk]))
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "Bank/Gateway")
+        self.assertContains(r, "Mutasi Bank")
         self.assertEqual(r.context["left_label"], "Panel")
         self.assertNotContains(r, "Kiri (Panel)")
 

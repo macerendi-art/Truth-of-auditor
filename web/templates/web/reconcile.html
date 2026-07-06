@@ -42,7 +42,7 @@ details.adv .adv-body{padding:2px 14px 14px}
 <div class="page-head reveal">
   <div>
     <h1>Rekonsiliasi — {{ active_toko.name }}</h1>
-    <p>Jalankan Panel↔Bracket &amp; Panel↔Bank/Gateway sekaligus. Cek kelengkapan dulu.</p>
+    <p>Jalankan Panel↔Bracket &amp; Panel↔Mutasi Bank sekaligus. Cek kelengkapan dulu.</p>
   </div>
 </div>
 
@@ -91,7 +91,7 @@ details.adv .adv-body{padding:2px 14px 14px}
       </div>
     </div>
 
-    {% if not c.minimum_met %}<div class="msg warning" style="margin-top:14px;font-size:13px">Minimum belum terpenuhi (butuh Panel + minimal 1 Bank/Gateway). Kamu masih boleh menjalankan.</div>{% endif %}
+    {% if not c.minimum_met %}<div class="msg warning" style="margin-top:14px;font-size:13px">Minimum belum terpenuhi (butuh Panel + minimal 1 Mutasi Bank). Kamu masih boleh menjalankan.</div>{% endif %}
     {% if pending_settlement %}<div style="margin-top:12px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--warn)">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
       <span><b>{{ pending_settlement }}</b> transaksi menunggu settlement — ikut dicocokkan otomatis di run ini.</span>

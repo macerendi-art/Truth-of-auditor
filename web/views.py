@@ -46,9 +46,18 @@ TX_EXPORT_LIMIT = 100_000
 
 REL_LABELS = {
     MatchRun.Relation.PANEL_BRACKET.value: ("Panel", "Bracket"),
-    MatchRun.Relation.PANEL_BANK.value: ("Panel", "Bank/Gateway"),
-    MatchRun.Relation.BRACKET_BANK.value: ("Bracket", "Bank/Gateway"),
+    MatchRun.Relation.PANEL_BANK.value: ("Panel", "Mutasi Bank"),
+    MatchRun.Relation.BRACKET_BANK.value: ("Bracket", "Mutasi Bank"),
     MatchRun.Relation.SALDO.value: ("Kiri", "Kanan"),
+}
+
+# Label kolom nominal per relasi: kiri selalu kredit; kanan = Saldo Bank utk relasi
+# uang, tetap Kredit/Koin utk panel<->bracket.
+REL_AMOUNT_LABELS = {
+    MatchRun.Relation.PANEL_BRACKET.value: ("Kredit/Koin", "Kredit/Koin"),
+    MatchRun.Relation.PANEL_BANK.value: ("Kredit/Koin", "Saldo Bank"),
+    MatchRun.Relation.BRACKET_BANK.value: ("Kredit/Koin", "Saldo Bank"),
+    MatchRun.Relation.SALDO.value: ("Nominal", "Nominal"),
 }
 
 
@@ -884,10 +893,23 @@ def batch_uang(request, pk):
 @login_required
 def run_detail(request, pk):
     run = get_object_or_404(MatchRun, pk=pk, batch__toko__in=tokos_for(request.user))
-    qs = MatchResult.objects.filter(run=run).select_related("left", "right")
+    base = MatchResult.objects.filter(run=run).select_related("left", "right")
+
+    # Kartu status: 'Tidak Cocok' (masih ada baris kredit / no_money) dipisah dari
+    # 'Tidak Ada di Panel' (orphan uang tanpa kredit / no_panel) — dihitung live.
+    TIDAK = MatchResult.Bucket.TIDAK
+    n_tidak_cocok = base.filter(bucket=TIDAK, left__isnull=False).count()
+    n_tidak_ada_panel = base.filter(bucket=TIDAK, left__isnull=True).count()
+
+    qs = base
     bucket = request.GET.get("bucket", "")
-    if bucket:
+    if bucket == "tidak_cocok":
+        qs = qs.filter(bucket=TIDAK, left__isnull=False)
+    elif bucket == "tidak_ada_panel":
+        qs = qs.filter(bucket=TIDAK, left__isnull=True)
+    elif bucket:
         qs = qs.filter(bucket=bucket)
+
     # Filter arus Deposit/Withdraw: pakai jenis sisi kiri; hasil tanpa kiri
     # (mis. no_panel) dinilai dari sisi uangnya.
     flow = request.GET.get("flow", "")
@@ -895,6 +917,7 @@ def run_detail(request, pk):
         flow = ""
     if flow:
         qs = qs.filter(Q(left__jenis=flow) | Q(left__isnull=True, right__jenis=flow))
+
     # Chip filter per alasan — dihitung DALAM bucket+flow terpilih supaya angkanya jujur.
     reasons = list(
         qs.values("reason_code").annotate(n=Count("id")).order_by("-n")
@@ -902,6 +925,32 @@ def run_detail(request, pk):
     reason = request.GET.get("reason", "")
     if reason:
         qs = qs.filter(reason_code=reason)
+
+    # Chip filter bank pemain (dalam bucket+flow+alasan). Kosong/orphan dikecualikan.
+    banks = [
+        {"code": r["left__player_bank"], "n": r["n"]}
+        for r in qs.filter(left__player_bank__gt="")
+        .values("left__player_bank").annotate(n=Count("id")).order_by("-n")
+    ]
+    bank = request.GET.get("bank", "")
+    if bank:
+        qs = qs.filter(left__player_bank=bank)
+
+    # Chip filter bank title / tujuan (dalam bucket+flow+alasan+bank).
+    btitles = [
+        {"code": r["left__bank_title"], "n": r["n"]}
+        for r in qs.filter(left__bank_title__gt="")
+        .values("left__bank_title").annotate(n=Count("id")).order_by("-n")
+    ]
+    btitle = request.GET.get("btitle", "")
+    if btitle:
+        qs = qs.filter(left__bank_title=btitle)
+
+    # Ringkasan total pada set terfilter penuh (sebelum paginasi).
+    totals = qs.aggregate(
+        kredit=Sum("left__amount"), saldo=Sum("right__amount"), n=Count("id")
+    )
+
     qs, sort, sort_dir = _apply_sort(
         request, qs,
         allowed={"amount": "left__amount", "skor": "score", "waktu": "left__occurred_at"},
@@ -909,6 +958,10 @@ def run_detail(request, pk):
     )
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
     left_label, right_label = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
+    left_amt_label, right_amt_label = REL_AMOUNT_LABELS.get(
+        run.relation, ("Kredit/Koin", "Saldo Bank")
+    )
+    orphan_label = f"Tidak Ada di {left_label}"
     # Nomor batch per-toko (posisi urut, bukan pk global) — konsisten dgn batch_detail.
     batch = run.batch
     batch_no = (
@@ -921,8 +974,13 @@ def run_detail(request, pk):
     ctx = {
         "run": run, "page": page, "bucket": bucket, "bucket_meta": BUCKET_META,
         "left_label": left_label, "right_label": right_label,
+        "left_amt_label": left_amt_label, "right_amt_label": right_amt_label,
+        "orphan_label": orphan_label,
+        "n_tidak_cocok": n_tidak_cocok, "n_tidak_ada_panel": n_tidak_ada_panel,
         "batch": batch, "batch_no": batch_no,
         "reasons": reasons, "reason": reason, "flow": flow,
+        "banks": banks, "bank": bank, "btitles": btitles, "btitle": btitle,
+        "totals": totals,
         "sort": sort, "dir": sort_dir, "is_hollow": is_hollow,
     }
     return render(request, "web/run_detail.html", ctx)

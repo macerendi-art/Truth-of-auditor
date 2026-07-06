@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from .base import (
     BaseParser,
+    derive_bank_fields,
     extract_ref,
     first_part,
     parse_decimal,
@@ -51,6 +52,8 @@ class PanelParser(BaseParser):
                 continue
             remarks = str(r.get("Remarks", "") or "")
 
+            raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
+            player_bank, bank_title = derive_bank_fields("panel", raw)
             row = {
                 "source_type": "panel",
                 "occurred_at": occurred,
@@ -67,7 +70,9 @@ class PanelParser(BaseParser):
                 "reference": extract_ref(remarks) or str(r.get("Reference", "") or "").strip(),
                 "counterparty": str(r.get("Full Name", "") or "").strip(),
                 "description": remarks,
-                "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
+                "player_bank": player_bank,
+                "bank_title": bank_title,
+                "raw": raw,
             }
             row["row_hash"] = row_hash("panel", [ticket, row["username"], row["amount"]])
             out.append(row)

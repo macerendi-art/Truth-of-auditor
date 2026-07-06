@@ -24,8 +24,8 @@ class ToleranceProfile(TimeStampedModel):
 class MatchRun(TimeStampedModel):
     class Relation(models.TextChoices):
         PANEL_BRACKET = "panel_bracket", "Panel ↔ Bracket"
-        PANEL_BANK = "panel_bank", "Panel ↔ Bank/Gateway"
-        BRACKET_BANK = "bracket_bank", "Bracket ↔ Bank/Gateway"
+        PANEL_BANK = "panel_bank", "Panel ↔ Mutasi Bank"
+        BRACKET_BANK = "bracket_bank", "Bracket ↔ Mutasi Bank"
         SALDO = "saldo", "Rekonsiliasi Saldo"
 
     relation = models.CharField(max_length=20, choices=Relation.choices)

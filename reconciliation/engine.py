@@ -97,7 +97,7 @@ def _route_ok(expected, owner, source_key):
 
 # Detail baku hasil no_money — juga dipakai untuk MENGEMBALIKAN hasil yang
 # di-flip late settlement, jadi string ini harus tetap satu sumber kebenaran.
-NO_MONEY_DETAIL = "Tak ada padanan nominal+tanggal di Bank/Gateway"
+NO_MONEY_DETAIL = "Tak ada padanan nominal+tanggal di Mutasi Bank"
 
 
 def _included_money_sources(include):

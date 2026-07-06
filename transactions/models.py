@@ -130,6 +130,11 @@ class Transaction(TimeStampedModel):
     counterparty = models.CharField(
         max_length=200, blank=True, help_text="nama pengirim/penerima di bank"
     )
+    # Kode bank/dompet pemain (sisi kredit) untuk filter: player_bank dari
+    # Player Bank / No. Rek Bank Member, bank_title dari Bank Title / Bank.
+    # Kosong utk sumber uang (bank/gateway). Tanpa index: query selalu ter-scope run.
+    player_bank = models.CharField(max_length=40, blank=True)
+    bank_title = models.CharField(max_length=40, blank=True)
 
     description = models.TextField(blank=True)
     raw = models.JSONField(default=dict, help_text="baris asli (telusur balik)")

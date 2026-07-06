@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from .base import (
     BaseParser,
+    derive_bank_fields,
     extract_ref,
     extract_ticket,
     parse_decimal,
@@ -52,6 +53,8 @@ class BracketParser(BaseParser):
             posted = parse_dt(r.get("Tanggal"), dayfirst=True)
             saldo = r.get("Saldo Akhir")
 
+            raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
+            player_bank, bank_title = derive_bank_fields("bracket", raw)
             row = {
                 "source_type": "bracket",
                 "occurred_at": occurred,
@@ -68,7 +71,9 @@ class BracketParser(BaseParser):
                 "reference": extract_ref(desc),
                 "counterparty": str(r.get("Member", "") or "").strip(),
                 "description": desc,
-                "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
+                "player_bank": player_bank,
+                "bank_title": bank_title,
+                "raw": raw,
             }
             row["row_hash"] = row_hash(
                 "bracket",

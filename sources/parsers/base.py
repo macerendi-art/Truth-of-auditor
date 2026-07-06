@@ -134,6 +134,34 @@ def first_part(value, sep=","):
     return str(value or "").split(sep)[0].strip()
 
 
+def bank_code(value, sep="|"):
+    """Kode bank/dompet = segmen pertama sebelum `sep`, huruf besar. '' bila kosong.
+
+    Contoh: "DANA|Mhd Ilyas|0822" -> "DANA"; "BCA 7126201591" (sep=" ") -> "BCA".
+    """
+    return first_part(value, sep).upper()
+
+
+# Sumber -> (key player_bank, sep, key bank_title, sep). Dipakai parser & backfill.
+_BANK_FIELDS = {
+    "panel": ("Player Bank", "|", "Bank Title", "|"),
+    "bracket": ("No. Rek Bank Member", " ", "Bank", "|"),
+}
+
+
+def derive_bank_fields(source_key, raw):
+    """(player_bank, bank_title) dari `raw` sesuai sumber. ('', '') bila tak berlaku.
+
+    Sisi kredit (panel/bracket) saja; sumber uang (bank/gateway) -> ('', '').
+    """
+    spec = _BANK_FIELDS.get(source_key)
+    if not spec:
+        return "", ""
+    raw = raw or {}
+    pkey, psep, tkey, tsep = spec
+    return bank_code(raw.get(pkey), psep), bank_code(raw.get(tkey), tsep)
+
+
 class BaseParser:
     """Interface parser. Subclass set `source_key` & implement `parse`."""
 

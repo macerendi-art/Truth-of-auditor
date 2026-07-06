@@ -14,7 +14,7 @@
 <div class="card pad0 reveal">
   <div class="table-wrap tall" style="border:none">
   <table>
-    <thead><tr><th style="width:28px"></th><th>Status</th><th>Panel</th><th>Username</th><th>Nama Lengkap</th><th class="col-hide">Player Bank</th><th class="col-hide">Bank Title</th><th class="col-hide">Handler</th><th class="num">Nominal</th><th>Bank/Gateway</th><th class="num">Nominal</th><th>Alasan</th><th>Batch/Run</th><th style="text-align:center">Aksi</th></tr></thead>
+    <thead><tr><th style="width:28px"></th><th>Status</th><th>Panel</th><th>Username</th><th>Nama Lengkap</th><th class="col-hide">Player Bank</th><th class="col-hide">Bank Title</th><th class="col-hide">Handler</th><th class="num">Kredit/Koin</th><th>Mutasi Bank</th><th class="num">Saldo Bank</th><th>Alasan</th><th>Batch/Run</th><th style="text-align:center">Aksi</th></tr></thead>
     <tbody>
     {% for r in page %}{% include "web/_result_row.html" with show_run_col=1 %}{% empty %}
       <tr><td colspan="14" class="cell-empty">Antrean kosong — semua hasil sudah ditinjau.</td></tr>{% endfor %}
