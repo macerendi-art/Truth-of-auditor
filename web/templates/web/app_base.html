@@ -81,12 +81,15 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .content{padding:24px var(--pad) 70px;max-width:1280px;width:100%;margin:0 auto}
 /* Wide mode: halaman padat-data (rekonsiliasi) memakai ruang kosong kiri-kanan */
 .content.wide{max-width:min(1680px,100%)}
-/* Sel teks panjang: potong visual + tetap utuh via tooltip (title=) */
-td.cell-tr{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* Tabel hasil rekonsiliasi: lebar kolom dipatuhi (fixed) → 13 kolom muat tanpa scroll samping */
+/* Sel teks panjang: BUNGKUS ke bawah (wrap) — tampilkan PENUH, jangan dipotong */
+td.cell-tr{overflow-wrap:break-word}
+/* Tabel hasil rekonsiliasi: lebar kolom dipatuhi (fixed) → 13 kolom muat tanpa scroll samping.
+   Isi panjang membungkus ke bawah (baris meninggi) — utuh, tak terpotong, tetap tanpa scroll samping. */
 #hasil-table{table-layout:fixed}
-#hasil-table td,#hasil-table th{padding-left:9px;padding-right:9px;overflow:hidden;text-overflow:ellipsis}
-#hasil-table .badge{font-size:11px;padding:2px 8px;max-width:100%;overflow:hidden}
+#hasil-table td,#hasil-table th{padding-left:9px;padding-right:9px;white-space:normal;overflow-wrap:break-word;vertical-align:top}
+#hasil-table thead th{vertical-align:bottom}
+#hasil-table td.num{white-space:nowrap}
+#hasil-table .badge{font-size:11px;padding:3px 8px;white-space:normal;text-align:left;max-width:100%}
 .page-head{margin:0 0 20px;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .page-head h1{margin:0 0 4px;font-size:24px;font-weight:700}
 .page-head p{margin:0;color:var(--muted);font-size:14px}

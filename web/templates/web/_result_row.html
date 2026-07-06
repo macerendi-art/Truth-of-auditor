@@ -14,15 +14,15 @@
   <td class="faint col-hide" style="font-size:12px">{% if hd %}{{ hd }}{% else %}—{% endif %}</td>
   {% endwith %}
   <td class="num mono">{% if r.left %}{{ r.left.amount|floatformat:0|intcomma }}{% endif %}</td>
-  <td>{% if r.right %}<div class="mono">{{ r.right.counterparty|default:r.right.ticket_no|default:"—"|truncatechars:24 }}</div>
+  <td>{% if r.right %}<div class="mono">{{ r.right.counterparty|default:r.right.ticket_no|default:"—" }}</div>
     <div class="faint" style="font-size:12px"><b style="color:var(--ink)">{{ r.right.source_label }}</b>{% with norek=r.right.raw|raw_get:"NOREK" %}{% if norek %} · <span title="No. rekening">{{ norek }}</span>{% endif %}{% endwith %}{% if r.right.occurred_at %} · {{ r.right.occurred_at|date:"d/m H:i" }}{% endif %}</div>{% else %}<span class="faint">—</span>{% endif %}</td>
   <td class="num mono">{% if r.right %}{{ r.right.amount|floatformat:0|intcomma }}{% endif %}</td>
   <td>
-    <span style="display:inline-flex;align-items:center;gap:6px">
+    <span style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">
       <span class="badge {{ r.reason_code|reason_tone }}" style="font-size:11.5px;padding:2px 9px">{{ r.reason_code|reason_label }}</span>
       {% if r.score %}<span class="faint mono" style="font-size:11px">{{ r.score|floatformat:0 }}</span>{% endif %}
     </span>
-    {% if r.reason_detail %}<div class="faint" style="font-size:11.5px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ r.reason_detail }}">{{ r.reason_detail }}</div>{% endif %}
+    {% if r.reason_detail %}<div class="faint" style="font-size:11.5px;margin-top:3px">{{ r.reason_detail }}</div>{% endif %}
   </td>
   {% if show_run_col %}<td style="font-size:12px"><a class="grad-text" style="font-weight:600" href="{% url 'run_detail' r.run_id %}">#{{ r.home_no }}</a><div class="faint">{{ r.run.get_relation_display }}</div></td>{% endif %}
   <td>
