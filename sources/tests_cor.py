@@ -4,6 +4,7 @@ from openpyxl import Workbook
 from sources.parsers.base import parse_bank_triplet
 from sources.parsers.cor import CORPanelBankParser
 from sources.parsers.cor import CORPanelQRISParser
+from sources.parsers.cor import CORQRISGatewayParser
 
 class BankTripletTests(SimpleTestCase):
     def test_triplet_bank(self):
@@ -113,3 +114,30 @@ class CORPanelQRISTests(SimpleTestCase):
             self.assertEqual(CORPanelQRISParser().parse(path, flow="dp"), [])
         finally:
             os.remove(path)
+
+
+class CORQRISGatewayTests(SimpleTestCase):
+    HEADER = ["BranchName", "GrandTotal", "BranchNominal", "OrderId",
+              "TransactionTime", "RRN", "IssuerName", "CustomerName",
+              "Channel", "Order Id Merchant"]
+
+    def test_gateway_reference_gross_fee(self):
+        path = _xlsx([
+            self.HEADER,
+            ["QRIS-7-Beta-TMG3", "85000", "83980", "03f747e8-ac9c-48e0-a",
+             "01-Jul-2026 23:59:56", "1pysbjp67783", "-", "-", "Channel 7",
+             "03f747e8-ac9c-48e0-a"],
+        ])
+        try:
+            rows = CORQRISGatewayParser().parse(path, flow="dp")
+        finally:
+            os.remove(path)
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["source_type"], "gateway")
+        self.assertEqual(r["jenis"], "depo")
+        self.assertEqual(str(r["amount"]), "85000")          # gross
+        self.assertEqual(str(r["money_delta"]), "85000")
+        self.assertEqual(str(r["fee"]), "1020")              # 85000 - 83980
+        self.assertEqual(r["reference"], "03f747e8-ac9c-48e0-a")
+        self.assertEqual(r["ticket_no"], "")

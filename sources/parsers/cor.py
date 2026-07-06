@@ -117,3 +117,40 @@ class CORPanelQRISParser(BaseParser):
             row["row_hash"] = row_hash("cor_panel_qris", [txid, username, amt])
             out.append(row)
         return out
+
+
+class CORQRISGatewayParser(BaseParser):
+    source_key = "gateway"
+
+    def parse(self, path, flow=""):
+        _, rows = read_xlsx_rows(path, header_row=1)
+        out = []
+        for r in rows:
+            order = str(r.get("OrderId", "") or "").strip()
+            if not order:
+                continue
+            gross = parse_decimal(r.get("GrandTotal"))
+            net = parse_decimal(r.get("BranchNominal"))
+            occurred = parse_dt(r.get("TransactionTime"))
+            money_delta = -gross if flow == "wd" else gross
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date() if occurred else None,
+                "jenis": "wd" if flow == "wd" else "depo",
+                "amount": gross,
+                "credit_delta": Decimal("0"),
+                "money_delta": money_delta,
+                "fee": gross - net,
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": "",
+                "username": "",
+                "reference": order,
+                "counterparty": "",
+                "description": f"QRIS COR {r.get('RRN','')}".strip(),
+                "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
+            }
+            row["row_hash"] = row_hash("cor_qris_gw", [order, gross])
+            out.append(row)
+        return out
