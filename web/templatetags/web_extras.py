@@ -46,3 +46,29 @@ def reason_tone(code):
     if not code:
         return "muted"
     return REASON_LABELS.get(code, (code, "muted"))[1]
+
+
+@register.inclusion_tag("web/_pager.html", takes_context=True)
+def pager(context, page, on_each_side=4, on_ends=1):
+    """Pager bernomor jendela-geser (elided) yang mempertahankan semua query kecuali `page`."""
+    request = context.get("request")
+    try:
+        nums = list(
+            page.paginator.get_elided_page_range(
+                page.number, on_each_side=on_each_side, on_ends=on_ends
+            )
+        )
+    except Exception:
+        nums = []
+    if request is not None:
+        params = request.GET.copy()
+        params.pop("page", None)
+        base_qs = params.urlencode()
+    else:
+        base_qs = ""
+    return {
+        "page": page,
+        "nums": nums,
+        "base_qs": base_qs,
+        "ellipsis": page.paginator.ELLIPSIS,
+    }
