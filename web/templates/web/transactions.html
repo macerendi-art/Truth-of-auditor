@@ -1,5 +1,6 @@
 {% extends "web/app_base.html" %}
 {% load humanize %}
+{% load web_extras %}
 {% block title %}Transaksi · Truth of Auditor{% endblock %}
 {% block crumb %}Transaksi{% endblock %}
 {% block content %}
@@ -90,11 +91,5 @@
   </div>
 </div>
 
-{% if page.has_other_pages %}
-<div class="pager">
-  {% if page.has_previous %}<a class="btn sm" href="?{{ qpage }}&page={{ page.previous_page_number }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>Sebelumnya</a>{% endif %}
-  <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
-  {% if page.has_next %}<a class="btn sm" href="?{{ qpage }}&page={{ page.next_page_number }}">Berikutnya<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>{% endif %}
-</div>
-{% endif %}
+{% pager page %}
 {% endblock %}
