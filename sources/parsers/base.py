@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import re
+import zipfile
+import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
@@ -30,23 +33,94 @@ def clean_name(text):
     return re.sub(r"\s+", " ", s).strip()
 
 
+# --- Reader mentah xlsx (tahan exporter non-standar tanpa <dimension>/styles) ---
+def _xlsx_local(tag):
+    return tag.rsplit("}", 1)[-1]
+
+
+def _xlsx_col_idx(ref):
+    m = re.match(r"([A-Z]+)", ref or "")
+    if not m:
+        return 0
+    n = 0
+    for ch in m.group(1):
+        n = n * 26 + (ord(ch) - 64)
+    return n - 1
+
+
+def _raw_xlsx_rows(path):
+    """Baca xlsx via zip+xml langsung (abaikan styles.xml). -> list[list[str]]."""
+    with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+        sheet = "xl/worksheets/sheet1.xml"
+        if sheet not in names:
+            cand = sorted(n for n in names
+                          if n.startswith("xl/worksheets/") and n.endswith(".xml"))
+            sheet = cand[0] if cand else None
+        sst = []
+        if "xl/sharedStrings.xml" in names:
+            for _, el in ET.iterparse(io.BytesIO(z.read("xl/sharedStrings.xml"))):
+                if _xlsx_local(el.tag) == "si":
+                    sst.append("".join(t.text or "" for t in el.iter()
+                                       if _xlsx_local(t.tag) == "t"))
+                    el.clear()
+        rows = []
+        for _, el in ET.iterparse(io.BytesIO(z.read(sheet))):
+            if _xlsx_local(el.tag) != "row":
+                continue
+            cells, maxc = {}, 0
+            for c in el:
+                if _xlsx_local(c.tag) != "c":
+                    continue
+                idx = _xlsx_col_idx(c.attrib.get("r", "")); t = c.attrib.get("t", "")
+                v, vt, ist = "", None, None
+                for ch in c:
+                    lt = _xlsx_local(ch.tag)
+                    if lt == "v":
+                        vt = ch.text
+                    elif lt == "is":
+                        ist = "".join(x.text or "" for x in ch.iter()
+                                      if _xlsx_local(x.tag) == "t")
+                if t == "s" and vt is not None:
+                    try:
+                        v = sst[int(vt)]
+                    except (ValueError, IndexError):
+                        v = vt
+                elif t == "inlineStr" and ist is not None:
+                    v = ist
+                elif vt is not None:
+                    v = vt
+                cells[idx] = v; maxc = max(maxc, idx)
+            rows.append([cells.get(i, "") for i in range(maxc + 1)])
+            el.clear()
+        return rows
+
+
 def read_xlsx_rows(path, header_row=1, sheet=None):
-    """Baca xlsx -> (headers, list_of_dict). header_row 1-based."""
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    ws = wb[sheet] if sheet else wb[wb.sheetnames[0]]
-    headers = None
-    out = []
-    for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
+    """Baca xlsx -> (headers, list_of_dict). header_row 1-based.
+    Fallback ke reader mentah bila openpyxl gagal / hanya kebaca <= header_row baris
+    (exporter non-standar tanpa <dimension>)."""
+    grid = None
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        ws = wb[sheet] if sheet else wb[wb.sheetnames[0]]
+        grid = [list(r) for r in ws.iter_rows(values_only=True)]
+        wb.close()
+    except Exception:
+        grid = None
+    if grid is None or len(grid) <= header_row:
+        grid = _raw_xlsx_rows(path)
+    headers, out = None, []
+    for i, row in enumerate(grid, start=1):
         if i < header_row:
             continue
         if i == header_row:
             headers = [str(c).strip() if c is not None else "" for c in row]
             continue
-        if row is None or all(c is None for c in row):
+        if row is None or all(c is None or c == "" for c in row):
             continue
         out.append({h: c for h, c in zip(headers, row) if h})
-    wb.close()
-    return headers, out
+    return headers, (out or [])
 
 
 def parse_decimal(value, number_format="intl"):
