@@ -211,6 +211,8 @@ class PanelBracketMatcher:
             bidx.setdefault(b.ticket_no, []).append(b)
         used, out = set(), []
         for p in left:
+            if not p.ticket_no:   # baris tanpa ticket dinilai money-matcher, bukan bracket
+                continue
             chosen = next((b for b in bidx.get(p.ticket_no, []) if b.id not in used), None)
             if chosen:
                 used.add(chosen.id)
@@ -891,8 +893,13 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
         created_by=user, completeness=comp, recon_date=recon_date,
     )
     relations, skipped = [], []
-    # PANEL_BRACKET hanya jika bracket ADA dan dicentang.
-    if comp["bracket"] and _inc(include, "bracket"):
+    # PANEL_BRACKET hanya jika bracket ADA, dicentang, DAN ada panel ber-ticket
+    # (panel tanpa ticket—mis. COR—tak bisa di-join baris demi baris ke bracket).
+    panel_has_ticket = _active(
+        _toko_filter(Transaction.objects.filter(
+            source_type__key="panel", is_duplicate=False), toko)
+    ).exclude(ticket_no="").exists()
+    if comp["bracket"] and _inc(include, "bracket") and panel_has_ticket:
         relations.append(MatchRun.Relation.PANEL_BRACKET)
     else:
         skipped.append(MatchRun.Relation.PANEL_BRACKET.value)
