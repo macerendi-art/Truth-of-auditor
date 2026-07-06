@@ -203,6 +203,11 @@ th.num,td.num{text-align:right}
 .th-sort:hover{color:var(--ink)}
 .twrap.tall,.table-wrap.tall{max-height:72vh;overflow:auto}
 table.dense tbody td{padding:6px 14px;font-size:12.5px}
+/* Mode "Rapatkan" untuk tabel hasil: serapat mungkin tapi tetap terbaca */
+#hasil-table.dense td,#hasil-table.dense th{padding-top:3px;padding-bottom:3px}
+#hasil-table.dense td{line-height:1.25}
+#hasil-table.dense td .faint{line-height:1.2}
+#hasil-table.dense .badge{padding-top:1px;padding-bottom:1px}
 td.cell-empty{text-align:center;padding:42px 16px;color:var(--muted);font-size:13.5px}
 /* tabel ringkasan label→nilai (batch DP/WD) */
 table.kv td{padding:9px 2px;font-size:13.5px}
