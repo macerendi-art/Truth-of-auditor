@@ -11,7 +11,8 @@ from .models import SourceType, Upload
 from .parsers.banks import BCACSVParser, BRIParser, MandiriParser
 from .parsers.bca_pdf import BCAPDFParser
 from .parsers.bracket import BracketParser
-from .parsers.gateways import NXPayParser, QRFlyerParser
+from .parsers.cor import CORPanelBankParser, CORPanelQRISParser, CORQRISGatewayParser
+from .parsers.gateways import NXPayParser, QRFlyerParser, QHokiParser
 from .parsers.panel import PanelParser
 
 # parser_key -> kelas parser (parser.source_key menentukan SourceType-nya)
@@ -24,6 +25,10 @@ PARSERS = {
     "mandiri": MandiriParser,
     "nxpay": NXPayParser,
     "qrflyer": QRFlyerParser,
+    "cor_panel_bank": CORPanelBankParser,
+    "cor_panel_qris": CORPanelQRISParser,
+    "cor_qris_gateway": CORQRISGatewayParser,
+    "qhoki": QHokiParser,
 }
 
 # Magic bytes: OLE2/CDFV2 compound-file header (e-statement terenkripsi "agile encryption").
@@ -116,6 +121,8 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
                         reference=row["reference"],
                         counterparty=row["counterparty"],
                         description=row["description"],
+                        player_bank=row.get("player_bank", ""),
+                        bank_title=row.get("bank_title", ""),
                         raw=row["raw"],
                         row_hash=rh,
                     )

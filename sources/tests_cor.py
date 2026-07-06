@@ -1,10 +1,12 @@
 import os, tempfile
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from openpyxl import Workbook
 from sources.parsers.base import parse_bank_triplet
 from sources.parsers.cor import CORPanelBankParser
 from sources.parsers.cor import CORPanelQRISParser
 from sources.parsers.cor import CORQRISGatewayParser
+from sources import services
+from transactions.models import Transaction
 
 class BankTripletTests(SimpleTestCase):
     def test_triplet_bank(self):
@@ -141,3 +143,20 @@ class CORQRISGatewayTests(SimpleTestCase):
         self.assertEqual(str(r["fee"]), "1020")              # 85000 - 83980
         self.assertEqual(r["reference"], "03f747e8-ac9c-48e0-a")
         self.assertEqual(r["ticket_no"], "")
+
+
+class IngestBankFieldsTests(TestCase):
+    def test_ingest_panel_mengisi_player_bank(self):
+        path = _xlsx([
+            CORPanelBankTests.HEADER,
+            ["1", "01 Jul 2026 23:52:18", "01 Jul 2026 23:50:06", "febri72",
+             "DANA - 081270670097 - FEBRIA MEGASARI",
+             "BCA - 2941413058 - BAGAS ARMANDO", "200000", "approved", "gacor25sub59"],
+        ])
+        try:
+            services.ingest("cor_panel_bank", path, flow="dp")
+        finally:
+            os.remove(path)
+        t = Transaction.objects.get()
+        self.assertEqual(t.player_bank, "DANA")
+        self.assertEqual(t.bank_title, "BCA")
