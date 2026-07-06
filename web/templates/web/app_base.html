@@ -308,6 +308,19 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
 .reminder-card .credit a{color:var(--brand)}
 .reminder-card .btn.primary{width:100%;justify-content:center;margin-top:6px}
 
+/* ---- TOAST MOTIVASI (non-blocking, muncul & hilang sendiri) ---- */
+.motiv-toast{position:fixed;right:20px;bottom:20px;z-index:70;max-width:340px;display:flex;gap:11px;align-items:flex-start;
+  padding:13px 14px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg);
+  opacity:0;transform:translateY(12px);transition:opacity .3s ease,transform .3s ease}
+.motiv-toast.show{opacity:1;transform:none}
+.motiv-toast .mi{flex-shrink:0;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--info-bg);color:var(--brand)}
+.motiv-toast .mi svg{width:16px;height:16px}
+.motiv-toast .mt{margin:0;font-size:13px;line-height:1.5;color:var(--ink);font-weight:500}
+.motiv-toast .mx{flex-shrink:0;border:none;background:none;color:var(--faint);font-size:18px;line-height:1;cursor:pointer;padding:0 2px}
+.motiv-toast .mx:hover{color:var(--ink)}
+@media(prefers-reduced-motion:reduce){.motiv-toast{transition:none}}
+@media(max-width:640px){.motiv-toast{right:12px;left:12px;bottom:12px;max-width:none}}
+
 /* ---- MOBILE SHELL ---- */
 @media(max-width:960px){
   :root{--pad:14px}
@@ -488,6 +501,29 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
   document.getElementById('reminderClose').addEventListener('click', tutup);
   overlay.addEventListener('click', function(e){ if(e.target === overlay) tutup(); });
   document.addEventListener('keydown', function(e){ if(e.key === 'Escape') tutup(); });
+})();
+</script>
+{% endif %}
+{% if motivation_quote and not show_toko_reminder %}
+<div class="motiv-toast" id="motivToast" role="status" aria-live="polite" hidden>
+  <span class="mi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 6.1H3M21 12.1H3M15.1 18H3"/></svg></span>
+  <p class="mt">{{ motivation_quote }}</p>
+  <button type="button" class="mx" id="motivClose" aria-label="Tutup">&times;</button>
+</div>
+<script>
+(function(){
+  var t = document.getElementById('motivToast');
+  if(!t) return;
+  var KEY = 'toa_motiv_ts', GAP = 60000, LIFE = 7000, tmr;
+  try{ if(Date.now() - (+localStorage.getItem(KEY) || 0) < GAP){ t.remove(); return; } }catch(e){}
+  function hide(){ t.classList.remove('show'); clearTimeout(tmr); setTimeout(function(){ if(t) t.remove(); }, 320); }
+  t.hidden = false;
+  setTimeout(function(){ t.classList.add('show'); }, 20);
+  try{ localStorage.setItem(KEY, Date.now()); }catch(e){}
+  tmr = setTimeout(hide, LIFE);
+  t.addEventListener('mouseenter', function(){ clearTimeout(tmr); });
+  t.addEventListener('mouseleave', function(){ clearTimeout(tmr); tmr = setTimeout(hide, LIFE); });
+  document.getElementById('motivClose').addEventListener('click', hide);
 })();
 </script>
 {% endif %}

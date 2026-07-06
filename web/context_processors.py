@@ -28,3 +28,10 @@ def toko(request):
         "show_toko_reminder": request.session.pop("show_toko_reminder", False),
         "pending_review_count": pending_review,
     }
+
+
+def motivation(request):
+    """Satu kutipan motivasi acak untuk toast (dipakai app_base). Ringan: O(1)."""
+    from web.quotes import random_quote
+
+    return {"motivation_quote": random_quote()}
