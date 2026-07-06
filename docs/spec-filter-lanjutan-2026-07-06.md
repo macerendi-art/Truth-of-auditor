@@ -39,7 +39,7 @@ bagian "Preset tersimpan" sengaja DITUNDA (fase 2, jangan dikerjakan).
 | `channel` | string segmen-1 Player Bank | channel pemain (DANA/GOPAY/BCA/…) |
 | `alasan` | reason_code | filter alasan hasil |
 | `skor` | `55-69` \| `70-84` \| `85-100` | band skor |
-| `malam` | `1` | hanya baris jam ≥ 18:00 |
+| `malam` | `1` | hanya baris jam ≥ 21:00 (konstanta `JAM_MALAM = 21`, satu sumber kebenaran) |
 | `nmin`,`nmax` | int rupiah | rentang nominal (preset UI mengisi ini) |
 | `uang` | `bebas` \| `terpakai` \| `carried` | status penyelesaian baris uang |
 | `arah` | `dp` \| `wd` | arah transaksi |
@@ -129,13 +129,16 @@ Sekalian: label ramah per reason (peta reason→label; fork punya contoh lengkap
 
 ### B3. Toggle jam malam (ekor T+1)
 
-**Kebutuhan.** Baris malam (≥18:00) di hari terakhir window besar kemungkinan ekor
+**Kebutuhan.** Baris malam (≥21:00) di hari terakhir window besar kemungkinan ekor
 settlement besok, bukan selisih riil — auditor perlu memisahkan dua populasi ini cepat.
-Param `malam=1` → `annotate(h=ExtractHour("left__occurred_at")).filter(h__gte=18)`
-(atau `occurred_at__hour__gte=18` bila didukung). Terapkan di run detail + batch detail.
+Param `malam=1` → `annotate(h=ExtractHour("left__occurred_at")).filter(h__gte=JAM_MALAM)`
+(atau `occurred_at__hour__gte=21` bila didukung). Terapkan di run detail + batch detail.
+Ambang = konstanta modul `JAM_MALAM = 21` — satu sumber kebenaran; label UI menyebut
+jamnya eksplisit ("Malam ≥21:00") supaya auditor tak menebak definisi "malam".
 
 **Acceptance.**
-- [ ] Toggle malam menampilkan hanya baris jam 18:00–23:59.
+- [ ] Toggle malam menampilkan hanya baris jam 21:00–23:59.
+- [ ] Label UI menampilkan ambang jam eksplisit.
 - [ ] Kombinasi malam+alasan+channel konsisten dengan tabel dan export.
 
 ---
@@ -174,6 +177,68 @@ Tinjau, Uang Tanpa Pasangan (sebagian halaman sudah punya — samakan nama param
 UI). `jenis="admin"` tak pernah ikut kedua arah.
 
 ---
+
+## Standar UI/UX filter (WAJIB — bukan saran)
+
+Diadaptasi dari taste-skill v2 (github.com/Leonxlnx/taste-skill) untuk UI data-padat.
+Design read halaman-halaman ini: *produk audit ritme-harian untuk operator, density
+tinggi (cockpit), motion rendah, variance rendah* — ruang layar milik DATA, filter
+adalah alat, bukan dekorasi.
+
+### Anatomi (dua baris, tidak lebih)
+
+```
+[ tab bucket (sudah ada) ]
+[ baris-1: kontrol filter — chips channel/alasan · select akun · toggle malam · input nominal ]
+[ baris-2: "filter aktif" — chip bisa dicabut: (Rekening: BCA NIJUN ×) (Malam ≥21:00 ×) · Reset semua ]
+[ tabel ]
+```
+
+1. **State selalu terlihat.** Semua filter aktif tampil sebagai chip di baris-2 TANPA
+   membuka kontrol apa pun — masing-masing bisa dicabut satu-satu (×), plus "Reset
+   semua". Dropdown yang menyembunyikan state aktif = gagal.
+2. **Budget vertikal: maks 2 baris (~88px) di desktop.** Di tabel belasan-ribu baris,
+   setiap piksel vertikal filter dibayar dengan data. Kontrol yang tak muat →
+   **horizontal scroll-snap row**, BUKAN wrap ke baris ke-3/4.
+3. **Kunci bentuk & warna halaman.** Pakai token design system yang SUDAH ada
+   (radius, warna brand); JANGAN perkenalkan radius baru atau aksen baru khusus filter.
+   Filter bukan CTA — state aktif ditandai kombinasi ≥2 kanal visual
+   (isi + border + weight), bukan warna saja (buta warna tetap bisa membedakan).
+4. **State interaktif lengkap** (bukan hanya happy path):
+   - Loading: **skeleton baris tabel** seukuran layout final — bukan spinner generik.
+   - Empty: menyebut filter aktif + tombol reset (sudah di kontrak dependable #5).
+   - Error param tak valid: diabaikan dengan aman + chip-nya tak dirender (tanpa 500).
+   - Tactile: `:active` pada chip → `scale(0.98)` / translate 1px. Cukup itu.
+5. **Motion harus punya alasan.** Satu-satunya animasi yang diizinkan: transisi
+   pergantian isi tabel (opacity ~120ms). Tak ada shimmer/pulse/slide dekoratif pada
+   chip atau bar filter.
+6. **Aksesibilitas keras:**
+   - Chip/kontrol = elemen asli (`<a>`/`<button>`/`<input>`) — bukan div ber-onclick;
+     keyboard-only harus bisa memasang DAN mencabut semua filter.
+   - Kontras WCAG AA di SEMUA state chip (aktif/non-aktif/hover/focus); focus ring terlihat.
+   - Label di ATAS input nominal; placeholder BUKAN label.
+7. **Bahasa manusia, bukan kode.** Label kontrol: "Rekening", "Channel", "Alasan",
+   "Skor", "Malam ≥21:00", "Nominal", "Status uang", "Arah". `reason_code` mentah
+   dilarang tampil — pakai peta label. Sebelum selesai, baca ulang semua string yang
+   terlihat (copy self-audit) — kalimat aneh/ambigu ditulis ulang jadi kalimat fungsional.
+8. **Mobile (≤ breakpoint repo ini):** baris kontrol jadi horizontal scroll; baris
+   "filter aktif" tetap tampil penuh (boleh wrap). Jangan modal filter fullscreen —
+   filter di sini ringan, bukan e-commerce facet 30 dimensi.
+9. **Back button = undo filter.** Tiap perubahan filter menghasilkan entri history
+   (full reload atau `hx-push-url`) — auditor bisa mundur pakai tombol back browser.
+
+### Pre-flight filter (jalankan mekanis sebelum menyatakan selesai)
+
+- [ ] Semua filter aktif terlihat sebagai chip yang bisa dicabut, tanpa membuka kontrol.
+- [ ] Count pada setiap chip = jumlah baris tabel saat chip itu diklik.
+- [ ] Copy-paste URL ke tab baru mereproduksi state persis (filter + sorting + halaman).
+- [ ] Tombol back browser mengembalikan state filter sebelumnya.
+- [ ] Export menghasilkan persis isi tabel terfilter — dicoba minimal 2 kombinasi.
+- [ ] Keyboard-only: pasang 3 filter, cabut 2, reset semua — tanpa mouse.
+- [ ] Kontras AA diverifikasi di semua state chip (aktif/hover/focus).
+- [ ] Filter bar ≤ 2 baris desktop; tak ada layout shift saat chip bertambah/berkurang.
+- [ ] Tak ada spinner generik; loading = skeleton bentuk tabel.
+- [ ] Tak ada `reason_code`/nilai param mentah yang tampil ke user.
 
 ## Urutan pengerjaan yang disarankan (TDD per langkah)
 
