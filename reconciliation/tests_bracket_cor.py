@@ -44,3 +44,39 @@ class PanelBracketTicketlessTests(TestCase):
         rels = [r.relation for r in batch.runs.all()]
         self.assertNotIn(MatchRun.Relation.PANEL_BRACKET, rels)
         self.assertIn(MatchRun.Relation.PANEL_BRACKET.value, batch.summary["skipped"])
+
+
+class PanelBracketAggregateTests(TestCase):
+    def setUp(self):
+        self.tol = ToleranceProfile.objects.get_or_create(
+            name="Default", defaults={"date_window_days": 1})[0]
+        self.toko = Toko.objects.get(key="g25")
+        self.panel, self.bracket = _st("panel"), _st("bracket")
+        self.up_p = Upload.objects.create(source_type=self.panel, toko=self.toko,
+                                          original_name="QRIS_deposit.xlsx")
+        self.up_b = Upload.objects.create(source_type=self.bracket, toko=self.toko,
+                                          original_name="Finance Report.xlsx")
+        self._n = 0
+
+    def tx(self, st, up, amount):
+        self._n += 1
+        return Transaction.objects.create(
+            upload=up, source_type=st, toko=self.toko, jenis="depo",
+            amount=Decimal(amount), money_delta=Decimal(amount),
+            occurred_at=datetime(2026, 7, 1, 10), row_hash=f"a{self._n}")
+
+    def test_warning_muncul_saat_total_beda(self):
+        self.tx(self.panel, self.up_p, "100000")
+        self.tx(self.bracket, self.up_b, "150000")   # beda 50% dari panel
+        batch = run_batch(self.toko, self.tol, date_from=date(2026, 7, 1),
+                          date_to=date(2026, 7, 1), recon_date=date(2026, 7, 1))
+        joined = " ".join(batch.summary.get("warnings", []))
+        self.assertIn("Panel↔Bracket", joined)
+
+    def test_tak_ada_warning_saat_total_sama(self):
+        self.tx(self.panel, self.up_p, "100000")
+        self.tx(self.bracket, self.up_b, "100000")
+        batch = run_batch(self.toko, self.tol, date_from=date(2026, 7, 1),
+                          date_to=date(2026, 7, 1), recon_date=date(2026, 7, 1))
+        joined = " ".join(batch.summary.get("warnings", []))
+        self.assertNotIn("Panel↔Bracket", joined)

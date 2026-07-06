@@ -799,6 +799,26 @@ def _bracket_overlap_warning(runs):
     return None
 
 
+def _panel_bracket_total_warning(toko, date_from, date_to, include):
+    """Cross-check AGREGAT Panel vs Bracket per arah (untuk toko tanpa join ticket,
+    mis. COR): bila total DP/WD beda > 2% padahal kedua sisi ada, beri peringatan."""
+    if not _inc(include, "bracket"):
+        return None
+    base = _date_filter(_active(_toko_filter(
+        Transaction.objects.filter(is_duplicate=False), toko)), date_from, date_to)
+
+    def tot(key, jenis):
+        return float(base.filter(source_type__key=key, jenis=jenis)
+                     .aggregate(x=Sum("amount"))["x"] or 0)
+
+    for flow, jenis in (("DP", "depo"), ("WD", "wd")):
+        p, b = tot("panel", jenis), tot("bracket", jenis)
+        if p > 0 and b > 0 and abs(p - b) / max(p, b) > 0.02:
+            return (f"Panel↔Bracket {flow} total beda: Panel {p:,.0f} vs "
+                    f"Bracket {b:,.0f} (selisih {abs(p - b):,.0f}). Cek kelengkapan file.")
+    return None
+
+
 def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None, exclude_tx_ids=None):
     tx = _date_filter(_active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko)), date_from, date_to)
     if exclude_tx_ids:
@@ -835,6 +855,9 @@ def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None, excl
     w = _bracket_overlap_warning(runs)
     if w:
         warnings.append(w)
+    w2 = _panel_bracket_total_warning(toko, date_from, date_to, include)
+    if w2:
+        warnings.append(w2)
 
     return {
         # money_matched = uang yang berpasangan ke Panel; selisih = panel - matched.
