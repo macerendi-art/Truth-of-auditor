@@ -3,6 +3,7 @@
 {% load web_extras %}
 {% block title %}Run #{{ run.pk }}{% if batch %} · Batch #{{ batch_no }}{% endif %} · Truth of Auditor{% endblock %}
 {% block crumb %}Rekonsiliasi{% if batch %} · <a href="{% url 'batch_detail' batch.pk %}">Batch #{{ batch_no }}</a>{% endif %} · {{ run.get_relation_display }} (Run #{{ run.pk }}){% endblock %}
+{% block content_class %}wide{% endblock %}
 {% block content %}
 <div class="page-head reveal">
   <div>
@@ -92,7 +93,7 @@
     <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;font-size:13px;font-weight:500">
       <input type="checkbox" id="checkAll"> pilih semua di halaman ini</label>
     <span style="flex:1"></span>
-    <button class="btn sm" type="button" data-dense="#hasil-table" title="Perkecil tinggi baris">Padat</button>
+    <button class="btn sm" type="button" data-dense="#hasil-table" title="Rapatkan tinggi baris">Rapatkan</button>
     <button class="btn sm" type="submit" name="action" value="mark_matched"
       onclick="return confirm('Tandai COCOK semua baris terpilih?')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Setujui terpilih</button>
     <button class="btn sm ghost" type="submit" name="action" value="mark_review"
@@ -102,11 +103,11 @@
 <div class="card pad0 reveal">
   <div class="table-wrap tall" style="border:none">
   <table id="hasil-table">
-    <thead><tr><th style="width:28px"></th><th>Status</th><th>{{ left_label }}</th><th>Username</th><th>Nama Lengkap</th><th class="col-hide">Player Bank</th><th class="col-hide">Bank Title</th><th class="col-hide">Handler</th>
-      <th class="num"><a class="th-sort" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort=amount&dir={% if sort == 'amount' and dir == 'asc' %}desc{% else %}asc{% endif %}">{{ left_amt_label }}{% if sort == 'amount' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
-      <th>{{ right_label }}</th><th class="num">{{ right_amt_label }}</th>
-      <th><a class="th-sort" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort=skor&dir={% if sort == 'skor' and dir == 'asc' %}desc{% else %}asc{% endif %}">Alasan{% if sort == 'skor' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
-      <th style="text-align:center">Aksi</th></tr></thead>
+    <thead><tr><th style="width:34px"></th><th style="width:116px">Status</th><th style="width:108px">{{ left_label }}</th><th style="width:92px">Username</th><th>Nama Lengkap</th><th class="col-hide">Player Bank</th><th class="col-hide">Bank Title</th><th class="col-hide" style="width:84px">Handler</th>
+      <th class="num" style="width:100px"><a class="th-sort" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort=amount&dir={% if sort == 'amount' and dir == 'asc' %}desc{% else %}asc{% endif %}">{{ left_amt_label }}{% if sort == 'amount' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
+      <th>{{ right_label }}</th><th class="num" style="width:100px">{{ right_amt_label }}</th>
+      <th style="width:144px"><a class="th-sort" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort=skor&dir={% if sort == 'skor' and dir == 'asc' %}desc{% else %}asc{% endif %}">Alasan{% if sort == 'skor' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
+      <th style="text-align:center;width:82px">Aksi</th></tr></thead>
     <tbody>
     {% for r in page %}{% include "web/_result_row.html" %}{% empty %}
       <tr><td colspan="13" class="cell-empty">Tidak ada hasil pada bucket ini.</td></tr>{% endfor %}
@@ -122,13 +123,7 @@
   <span><span class="lbl">Total {{ right_amt_label }}</span> <span class="val" style="color:var(--info)">Rp {{ totals.saldo|default:0|floatformat:0|intcomma }}</span></span>
 </div>
 
-{% if page.has_other_pages %}
-<div class="pager">
-  {% if page.has_previous %}<a class="btn sm" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort={{ sort }}&dir={{ dir }}&page={{ page.previous_page_number }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>Sebelumnya</a>{% endif %}
-  <span>Halaman {{ page.number }} / {{ page.paginator.num_pages }}</span>
-  {% if page.has_next %}<a class="btn sm" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort={{ sort }}&dir={{ dir }}&page={{ page.next_page_number }}">Berikutnya<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a>{% endif %}
-</div>
-{% endif %}
+{% pager page %}
 {% endblock %}
 {% block scripts %}
 <script>

@@ -64,9 +64,12 @@ class SplitPanelColumnsTests(_Base):
     def test_header_kolom_baru_ada(self):
         resp = self.client.get(reverse("run_detail", args=[self.run.pk]))
         self.assertEqual(resp.status_code, 200)
-        for th in ("<th>Username</th>", "<th>Nama Lengkap</th>", '<th class="col-hide">Player Bank</th>',
-                   '<th class="col-hide">Bank Title</th>', '<th class="col-hide">Handler</th>'):
+        # Header kolom ada (robust thd atribut lebar th untuk wide-mode).
+        for th in (">Username</th>", ">Nama Lengkap</th>", ">Player Bank</th>",
+                   ">Bank Title</th>", ">Handler</th>"):
             self.assertContains(resp, th)
+        # Kolom sekunder tetap disembunyikan di mobile.
+        self.assertContains(resp, "col-hide")
 
     def test_nilai_terpisah_per_sel_dan_sel_panel_hanya_ticket_tanggal(self):
         left = self._tx(

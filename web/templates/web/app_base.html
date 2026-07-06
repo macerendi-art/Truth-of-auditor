@@ -79,6 +79,17 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .toko-pick select{border:none;background:none;font-family:inherit;font-weight:600;font-size:13.5px;color:var(--ink);cursor:pointer;padding:0 2px;max-width:110px}
 .toko-pick select:focus{outline:none}
 .content{padding:24px var(--pad) 70px;max-width:1280px;width:100%;margin:0 auto}
+/* Wide mode: halaman padat-data (rekonsiliasi) memakai ruang kosong kiri-kanan */
+.content.wide{max-width:min(1680px,100%)}
+/* Sel teks panjang: BUNGKUS ke bawah (wrap) — tampilkan PENUH, jangan dipotong */
+td.cell-tr{overflow-wrap:break-word}
+/* Tabel hasil rekonsiliasi: lebar kolom dipatuhi (fixed) → 13 kolom muat tanpa scroll samping.
+   Isi panjang membungkus ke bawah (baris meninggi) — utuh, tak terpotong, tetap tanpa scroll samping. */
+#hasil-table{table-layout:fixed}
+#hasil-table td,#hasil-table th{padding-left:9px;padding-right:9px;white-space:normal;overflow-wrap:break-word;vertical-align:top}
+#hasil-table thead th{vertical-align:bottom}
+#hasil-table td.num{white-space:nowrap}
+#hasil-table .badge{font-size:11px;padding:3px 8px;white-space:normal;text-align:left;max-width:100%}
 .page-head{margin:0 0 20px;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .page-head h1{margin:0 0 4px;font-size:24px;font-weight:700}
 .page-head p{margin:0;color:var(--muted);font-size:14px}
@@ -166,13 +177,25 @@ input[type=checkbox],input[type=radio]{width:auto;accent-color:var(--brand)}
 .pad0 .twrap,.pad0.twrap{border:none;border-radius:0}
 .card.pad0{overflow-x:auto}
 .twrap .num,.table-wrap .num{text-align:right}
-.pager{display:flex;gap:10px;align-items:center;justify-content:center;margin-top:20px;color:var(--muted);font-size:13px}
+.pager{display:flex;gap:6px;align-items:center;justify-content:center;margin-top:22px;flex-wrap:wrap;color:var(--muted);font-size:13px}
+.pg{display:inline-grid;place-items:center;min-width:36px;height:36px;padding:0 10px;border-radius:10px;
+  border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:13px;font-weight:600;
+  font-variant-numeric:tabular-nums;box-shadow:var(--shadow);transition:background .14s,color .14s,border-color .14s,box-shadow .14s}
+.pg:hover{color:var(--ink);border-color:var(--line-2);background:var(--panel-2)}
+.pg.cur{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 6px 16px -8px rgba(37,99,235,.7)}
+.pg.nav{color:var(--faint)}
+.pg.nav svg{width:15px;height:15px}
+.pg.gap{border:none;background:none;box-shadow:none;color:var(--faint);min-width:22px;cursor:default}
+.pg.disabled{opacity:.4;pointer-events:none;box-shadow:none}
+.pg:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 table{width:100%;border-collapse:collapse;font-size:13px}
-thead th{position:sticky;top:0;z-index:2;text-align:left;padding:10px 14px;background:var(--panel-2);color:var(--faint);font-weight:600;
-  font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line);white-space:nowrap}
-tbody td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+thead th{position:sticky;top:0;z-index:2;text-align:left;padding:9px 12px;background:var(--panel-2);color:var(--faint);font-weight:600;
+  font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line-2);white-space:nowrap}
+tbody td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
 tbody tr:last-child td{border-bottom:none}
+tbody tr{transition:background .12s}
 tbody tr:hover{background:var(--panel-2)}
+tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
 table.flush{border:none} table.flush thead th{background:none;position:static}
 .r{text-align:right}
 th.num,td.num{text-align:right}
@@ -180,6 +203,11 @@ th.num,td.num{text-align:right}
 .th-sort:hover{color:var(--ink)}
 .twrap.tall,.table-wrap.tall{max-height:72vh;overflow:auto}
 table.dense tbody td{padding:6px 14px;font-size:12.5px}
+/* Mode "Rapatkan" untuk tabel hasil: serapat mungkin tapi tetap terbaca */
+#hasil-table.dense td,#hasil-table.dense th{padding-top:3px;padding-bottom:3px}
+#hasil-table.dense td{line-height:1.25}
+#hasil-table.dense td .faint{line-height:1.2}
+#hasil-table.dense .badge{padding-top:1px;padding-bottom:1px}
 td.cell-empty{text-align:center;padding:42px 16px;color:var(--muted);font-size:13.5px}
 /* tabel ringkasan label→nilai (batch DP/WD) */
 table.kv td{padding:9px 2px;font-size:13.5px}
@@ -279,6 +307,19 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
 .reminder-card .credit b{color:var(--ink)}
 .reminder-card .credit a{color:var(--brand)}
 .reminder-card .btn.primary{width:100%;justify-content:center;margin-top:6px}
+
+/* ---- TOAST MOTIVASI (non-blocking, muncul & hilang sendiri) ---- */
+.motiv-toast{position:fixed;right:20px;bottom:20px;z-index:70;max-width:340px;display:flex;gap:11px;align-items:flex-start;
+  padding:13px 14px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg);
+  opacity:0;transform:translateY(12px);transition:opacity .3s ease,transform .3s ease}
+.motiv-toast.show{opacity:1;transform:none}
+.motiv-toast .mi{flex-shrink:0;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--info-bg);color:var(--brand)}
+.motiv-toast .mi svg{width:16px;height:16px}
+.motiv-toast .mt{margin:0;font-size:13px;line-height:1.5;color:var(--ink);font-weight:500}
+.motiv-toast .mx{flex-shrink:0;border:none;background:none;color:var(--faint);font-size:18px;line-height:1;cursor:pointer;padding:0 2px}
+.motiv-toast .mx:hover{color:var(--ink)}
+@media(prefers-reduced-motion:reduce){.motiv-toast{transition:none}}
+@media(max-width:640px){.motiv-toast{right:12px;left:12px;bottom:12px;max-width:none}}
 
 /* ---- MOBILE SHELL ---- */
 @media(max-width:960px){
@@ -385,7 +426,7 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
       </select>
     </form>
   </div>
-  <div class="content">
+  <div class="content {% block content_class %}{% endblock %}">
     {% if messages %}{% for m in messages %}<div class="msg {{ m.tags }}">{{ m }}</div>{% endfor %}{% endif %}
     {% block content %}{% endblock %}
   </div>
@@ -460,6 +501,29 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
   document.getElementById('reminderClose').addEventListener('click', tutup);
   overlay.addEventListener('click', function(e){ if(e.target === overlay) tutup(); });
   document.addEventListener('keydown', function(e){ if(e.key === 'Escape') tutup(); });
+})();
+</script>
+{% endif %}
+{% if motivation_quote and not show_toko_reminder %}
+<div class="motiv-toast" id="motivToast" role="status" aria-live="polite" hidden>
+  <span class="mi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 6.1H3M21 12.1H3M15.1 18H3"/></svg></span>
+  <p class="mt">{{ motivation_quote }}</p>
+  <button type="button" class="mx" id="motivClose" aria-label="Tutup">&times;</button>
+</div>
+<script>
+(function(){
+  var t = document.getElementById('motivToast');
+  if(!t) return;
+  var KEY = 'toa_motiv_ts', GAP = 60000, LIFE = 7000, tmr;
+  try{ if(Date.now() - (+localStorage.getItem(KEY) || 0) < GAP){ t.remove(); return; } }catch(e){}
+  function hide(){ t.classList.remove('show'); clearTimeout(tmr); setTimeout(function(){ if(t) t.remove(); }, 320); }
+  t.hidden = false;
+  setTimeout(function(){ t.classList.add('show'); }, 20);
+  try{ localStorage.setItem(KEY, Date.now()); }catch(e){}
+  tmr = setTimeout(hide, LIFE);
+  t.addEventListener('mouseenter', function(){ clearTimeout(tmr); });
+  t.addEventListener('mouseleave', function(){ clearTimeout(tmr); tmr = setTimeout(hide, LIFE); });
+  document.getElementById('motivClose').addEventListener('click', hide);
 })();
 </script>
 {% endif %}
