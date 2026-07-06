@@ -13,19 +13,25 @@ def _ext(filename):
 
 
 def _xlsx_tokens(path, max_rows=3):
+    from .parsers.base import _raw_xlsx_rows
     toks = set()
+    grid = None
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
         ws = wb[wb.sheetnames[0]]
-        for i, row in enumerate(ws.iter_rows(values_only=True), start=1):
-            if i > max_rows:
-                break
-            for c in row:
-                if c is not None:
-                    toks.add(str(c).strip().lower())
+        grid = [list(r) for _, r in zip(range(max_rows), ws.iter_rows(values_only=True))]
         wb.close()
     except Exception:
-        pass
+        grid = None
+    if not grid:
+        try:
+            grid = _raw_xlsx_rows(path)[:max_rows]
+        except Exception:
+            grid = []
+    for row in grid:
+        for c in row:
+            if c is not None and c != "":
+                toks.add(str(c).strip().lower())
     return toks
 
 
@@ -64,6 +70,15 @@ def detect_source(path, filename=""):
             add("qrflyer", 0.85)
         if _has(t, "e-statement") or _has(t, "rekening koran") or "mandiri" in fn:
             add("mandiri", 0.80)
+        if _has(t, "orderid") and _has(t, "grandtotal") and _has(t, "branchnominal"):
+            add("cor_qris_gateway", 0.95)
+        if _has(t, "whitelabel transaction id") and _has(t, "nmid"):
+            add("qhoki", 0.95)
+        if _has(t, "from bank") and _has(t, "destination bank") and _has(t, "approved date"):
+            add("cor_panel_bank", 0.95)
+        if _has(t, "transaction id") and _has(t, "amount") and _has(t, "bonus") \
+                and not _has(t, "kategori"):
+            add("cor_panel_qris", 0.90)
     elif ext == ".csv":
         c = _csv_text(path)
         if "mutasi_debet" in c or "mutasi_kredit" in c or "tgl_tran" in c:

@@ -26,6 +26,78 @@ def _csv(text):
     return p
 
 
+class DetectMultiBrandTests(SimpleTestCase):
+    def _mk(self, header, name):
+        path = _xlsx([header, ["x"] * len(header)])
+        return path, name
+
+    def test_deteksi_cor_qris_gateway(self):
+        path = _xlsx([["BranchName", "GrandTotal", "BranchNominal", "OrderId",
+                       "TransactionTime", "RRN"], ["a", "1", "1", "u", "t", "r"]])
+        try:
+            keys = [d["parser_key"] for d in detect_source(path, "01 DP_QRIS_TRANSACTION.xlsx")]
+        finally:
+            os.remove(path)
+        self.assertEqual(keys[0], "cor_qris_gateway")
+
+    def test_deteksi_qhoki(self):
+        path = _xlsx([["Member ID", "Whitelabel Transaction ID", "NMID",
+                       "Transaction ID", "Status", "Amount"], ["m", "D1", "", "u", "Success", "1"]])
+        try:
+            keys = [d["parser_key"] for d in detect_source(path, "DP QH MUL.xlsx")]
+        finally:
+            os.remove(path)
+        self.assertIn("qhoki", keys)
+
+    def test_deteksi_cor_panel_bank(self):
+        path = _xlsx([["Approved Date", "Requested Date", "Username", "From Bank",
+                       "Destination Bank", "Amount", "Status"], ["a"] * 7])
+        try:
+            keys = [d["parser_key"] for d in detect_source(path, "BANK_approved_deposit.xlsx")]
+        finally:
+            os.remove(path)
+        self.assertIn("cor_panel_bank", keys)
+
+    def test_deteksi_cor_panel_qris(self):
+        path = _xlsx([["#", "Approved Date", "Requested Date", "Username",
+                       "Transaction ID", "Amount", "Bonus", "Status"],
+                      ["1", "a", "a", "u", "t", "1", "", "success"]])
+        try:
+            keys = [d["parser_key"] for d in detect_source(path, "DP_QRIS_PANEL.xlsx")]
+        finally:
+            os.remove(path)
+        self.assertIn("cor_panel_qris", keys)
+
+    def test_qhoki_dan_cor_panel_qris_tidak_tabrakan(self):
+        # Header asli QHoki (Task 8 brief): py qhoki punya "transaction id" + "nmid",
+        # TANPA "bonus" -> tidak boleh ikut kena deteksi cor_panel_qris.
+        path = _xlsx([["Transaction Date", "Paid Date", "Finished Date", "Settlement Date",
+                       "Settled At", "Member ID", "Rrn", "NMID", "Transaction ID",
+                       "Whitelabel Transaction ID", "Status", "Amount", "Downline Fee Amount",
+                       "Total Amount", "Memo", "Payment Method"],
+                      ["2026-07-03", "", "", "", "", "m", "r", "", "u", "D1",
+                       "Success", "1", "0", "1", "", "qris"]])
+        try:
+            keys = [d["parser_key"] for d in detect_source(path, "DP QH MUL.xlsx")]
+        finally:
+            os.remove(path)
+        self.assertIn("qhoki", keys)
+        self.assertNotIn("cor_panel_qris", keys)
+
+    def test_cor_panel_qris_dan_qhoki_tidak_tabrakan(self):
+        # Header asli COR Panel QRIS (Task 8 brief): punya "bonus", TANPA "nmid"/
+        # "whitelabel transaction id" -> tidak boleh ikut kena deteksi qhoki.
+        path = _xlsx([["#", "Approved Date", "Requested Date", "Username",
+                       "Transaction ID", "Amount", "Bonus", "Status"],
+                      ["1", "a", "a", "u", "t", "1", "", "success"]])
+        try:
+            keys = [d["parser_key"] for d in detect_source(path, "DP_QRIS_PANEL.xlsx")]
+        finally:
+            os.remove(path)
+        self.assertIn("cor_panel_qris", keys)
+        self.assertNotIn("qhoki", keys)
+
+
 class DetectTests(SimpleTestCase):
     def test_panel(self):
         p = _xlsx([["HISTORI DP PANEL"], ["Ticket Number", "User Name", "Deposit Amount"]])
