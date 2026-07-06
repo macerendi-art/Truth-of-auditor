@@ -121,19 +121,19 @@ function init(renderer) {
       varying float vSeed;
       void main(){
         float d = length(gl_PointCoord - .5); if (d > .5) discard;
-        vec3 bone      = vec3(.914, .894, .839);   // #E9E4D6 --text  (badan wordmark)
-        vec3 verdigris = vec3(.247, .642, .471);   // #3FA478 --brand  (partikel "matched")
-        vec3 amber     = vec3(.788, .541, .169);   // #C98A2B --brand2 (aksen sekunder, selaras interior)
+        vec3 bone  = vec3(.914, .894, .839);   // #E9E4D6 --text  (badan wordmark)
+        vec3 azure = vec3(.145, .388, .922);   // #2563eb --brand  (partikel "matched")
+        vec3 cyan  = vec3(.133, .827, .933);   // #22d3ee --brand2 (aksen sekunder, selaras interior)
         vec3 col = bone;
-        col = mix(col, verdigris, step(.92, vSeed));   // ~8% hijau "matched"
-        col = mix(col, amber,     step(.96, vSeed));   // ~4% amber di atasnya → mirror duo hijau+amber interior
+        col = mix(col, azure, step(.92, vSeed));   // ~8% biru "matched"
+        col = mix(col, cyan,  step(.96, vSeed));   // ~4% cyan di atasnya → mirror duo biru+cyan interior
         gl_FragColor = vec4(col, smoothstep(.5, .15, d) * .9);
       }`
   });
   const word = new THREE.Points(geo, mat); word.renderOrder = 0; scene.add(word);
 
   // ── Bintang kelap-kelip (starfield jauh, tiap bintang berkedip independen) ──
-  //    Selaras palet interior: mayoritas bone/cream, sebagian kecil kilau hijau/amber.
+  //    Selaras palet interior: mayoritas bone/cream, sebagian kecil kilau biru/cyan.
   const STAR_N = isMobile ? 110 : 210;
   const sPos = new Float32Array(STAR_N * 3), sSeed = new Float32Array(STAR_N), sTone = new Float32Array(STAR_N);
   for (let i = 0; i < STAR_N; i++) {
@@ -142,7 +142,7 @@ function init(renderer) {
     sPos[i * 3 + 2] = -7 - Math.random() * 16;         // jauh di belakang wordmark (z=0)
     sSeed[i] = Math.random();
     const r = Math.random();
-    sTone[i] = r > .94 ? 2 : (r > .86 ? 1 : 0);        // ~6% amber, ~8% hijau, sisanya bone
+    sTone[i] = r > .94 ? 2 : (r > .86 ? 1 : 0);        // ~6% cyan, ~8% biru, sisanya bone
   }
   const starGeo = new THREE.BufferGeometry();
   starGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3));
@@ -170,10 +170,10 @@ function init(renderer) {
       varying float vTw; varying float vTone;
       void main(){
         float d = length(gl_PointCoord - .5); if (d > .5) discard;
-        vec3 bone      = vec3(.914, .894, .839);
-        vec3 verdigris = vec3(.247, .642, .471);
-        vec3 amber     = vec3(.788, .541, .169);
-        vec3 col = vTone > 1.5 ? amber : (vTone > .5 ? verdigris : bone);
+        vec3 bone  = vec3(.914, .894, .839);
+        vec3 azure = vec3(.145, .388, .922);
+        vec3 cyan  = vec3(.133, .827, .933);
+        vec3 col = vTone > 1.5 ? cyan : (vTone > .5 ? azure : bone);
         float a = smoothstep(.5, .08, d) * (.18 + .55 * vTw);  // faint→terang, kedip lembut
         gl_FragColor = vec4(col, a);
       }`
@@ -181,7 +181,7 @@ function init(renderer) {
   const stars = new THREE.Points(starGeo, starMat); stars.renderOrder = -1; scene.add(stars);
 
   // ── Komet berinterval (seperti di luar angkasa) ──
-  //    Satu komet melintas tiap COMET_EVERY (± jitter). Ekor memudar bone→amber (ember hangat).
+  //    Satu komet melintas tiap COMET_EVERY (± jitter). Ekor memudar putih→cyan (dingin).
   const COMET_EVERY = 9.0;     // detik antar komet — diatur di sini
   const COMET_JITTER = 3.0;    // ± variasi acak
   const COMET_DUR = 1.7;       // durasi satu lintasan
@@ -216,9 +216,9 @@ function init(renderer) {
       varying float vT;
       void main(){
         float d = length(gl_PointCoord - .5); if (d > .5) discard;
-        vec3 headCol = vec3(.98, .96, .90);           // kepala putih hangat
-        vec3 amber   = vec3(.788, .541, .169);        // ekor amber
-        vec3 col = mix(headCol, amber, vT);
+        vec3 headCol = vec3(.86, .94, 1.0);           // kepala putih-biru dingin
+        vec3 cyan    = vec3(.133, .827, .933);        // ekor cyan
+        vec3 col = mix(headCol, cyan, vT);
         float a = uActive * pow(1. - vT, 1.6) * smoothstep(.5, .05, d);  // ekor memudar
         gl_FragColor = vec4(col, a);
       }`
