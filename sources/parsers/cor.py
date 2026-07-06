@@ -66,3 +66,54 @@ class CORPanelBankParser(BaseParser):
                                        [username, amt, occurred, pk_acct])
             out.append(row)
         return out
+
+
+class CORPanelQRISParser(BaseParser):
+    source_key = "panel"
+
+    def parse(self, path, flow=""):
+        _, rows = read_xlsx_rows(path, header_row=1)
+        is_wd = flow == "wd"
+        out = []
+        for r in rows:
+            username = str(r.get("Username", "") or "").strip()
+            txid = str(r.get("Transaction ID", "") or "").strip()
+            status = str(r.get("Status", "") or "").strip().lower()
+            if not txid or not username or status not in ("success", ""):
+                continue
+            amt = parse_decimal(r.get("Amount"))
+            raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
+            if is_wd:
+                jenis, credit_delta, money_delta = "wd", amt, -amt
+                pk_code, pk_acct, pk_name = parse_bank_triplet(r.get("Destination Bank"))
+                raw["Player Bank"] = f"{pk_code}|{pk_name}|{pk_acct}"
+                counterparty = pk_name
+            else:
+                jenis, credit_delta, money_delta = "depo", -amt, amt
+                counterparty = ""
+            occurred = parse_dt(r.get("Requested Date"))
+            posted = parse_dt(r.get("Approved Date"))
+            player_bank, bank_title = derive_bank_fields("panel", raw)
+            row = {
+                "source_type": "panel",
+                "occurred_at": occurred,
+                "posted_date": posted.date() if posted else None,
+                "jenis": jenis,
+                "amount": amt,
+                "credit_delta": credit_delta,
+                "money_delta": money_delta,
+                "fee": Decimal("0"),
+                "bonus": parse_decimal(r.get("Bonus")),
+                "balance_after": None,
+                "ticket_no": "",
+                "username": username,
+                "reference": txid,
+                "counterparty": counterparty,
+                "description": f"QRIS {txid}".strip(),
+                "player_bank": player_bank,
+                "bank_title": bank_title,
+                "raw": raw,
+            }
+            row["row_hash"] = row_hash("cor_panel_qris", [txid, username, amt])
+            out.append(row)
+        return out

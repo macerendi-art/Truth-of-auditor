@@ -3,6 +3,7 @@ from django.test import SimpleTestCase
 from openpyxl import Workbook
 from sources.parsers.base import parse_bank_triplet
 from sources.parsers.cor import CORPanelBankParser
+from sources.parsers.cor import CORPanelQRISParser
 
 class BankTripletTests(SimpleTestCase):
     def test_triplet_bank(self):
@@ -79,5 +80,36 @@ class CORPanelBankTests(SimpleTestCase):
              "BCA - 1 - A", "BCA - 2 - B", "1000", "pending", "op"]])
         try:
             self.assertEqual(CORPanelBankParser().parse(path, flow="dp"), [])
+        finally:
+            os.remove(path)
+
+
+class CORPanelQRISTests(SimpleTestCase):
+    HEADER = ["#", "Approved Date", "Requested Date", "Username",
+              "Transaction ID", "Amount", "Bonus", "Status"]
+
+    def test_dp_reference_uuid(self):
+        path = _xlsx([
+            self.HEADER,
+            ["1", "01 Jul 2026 23:59:56", "01 Jul 2026 23:59:19", "zidanhoki11",
+             "03f747e8-ac9c-48e0-a", "85000", "", "success"],
+        ])
+        try:
+            rows = CORPanelQRISParser().parse(path, flow="dp")
+        finally:
+            os.remove(path)
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["jenis"], "depo")
+        self.assertEqual(str(r["amount"]), "85000")
+        self.assertEqual(r["reference"], "03f747e8-ac9c-48e0-a")   # kunci exact
+        self.assertEqual(r["ticket_no"], "")
+        self.assertEqual(r["username"], "zidanhoki11")
+
+    def test_skip_tanpa_txid(self):
+        path = _xlsx([self.HEADER,
+            ["1", "x", "x", "user", "", "1000", "", "success"]])
+        try:
+            self.assertEqual(CORPanelQRISParser().parse(path, flow="dp"), [])
         finally:
             os.remove(path)
