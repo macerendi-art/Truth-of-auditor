@@ -1,6 +1,6 @@
 {% extends "web/base.html" %}
 {% load static %}
-{% block title %}Masuk · Truth of Auditor{% endblock %}
+{% block title %}Masuk · Truth Auditor{% endblock %}
 
 {% block head %}
 <link rel="stylesheet" href="{% static 'web/css/login.css' %}">
@@ -19,18 +19,22 @@
   .auth-card .btn.primary{width:100%;justify-content:center;padding:13px;font-size:15px;margin-top:6px}
   .err{background:rgba(208,106,92,.12);color:#E8A493;border:1px solid rgba(208,106,92,.35);
     padding:10px 13px;border-radius:var(--radius-sm);font-size:13px;margin-bottom:16px}
-  .foot{margin-top:20px;text-align:center;font-size:12.5px;color:var(--faint)}
+  .foot{margin-top:24px;padding-top:18px;border-top:1px solid var(--border);text-align:center;line-height:1.4}
+  .foot-kicker{display:block;font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.24em;color:var(--faint);margin-bottom:5px}
+  .foot-rnd{font-family:'Zodiak',Georgia,serif;font-size:15.5px;font-weight:700;letter-spacing:.01em;
+    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .foot-cprt{margin-top:11px;font-size:11px;color:var(--faint);letter-spacing:.03em}
 </style>
 {% endblock %}
 
 {% block chrome %}{% endblock %}
 {% block main %}
 <canvas id="gl"></canvas>
-<div id="wordmark-fallback" class="wm-fallback" aria-hidden="true">TRUTH OF AUDITOR</div>
+<div id="wordmark-fallback" class="wm-fallback" aria-hidden="true">TRUTH AUDITOR</div>
 <div class="auth">
   <div class="auth-card" id="card">
     <div class="brand"><span class="dot"></span> Truth<span class="grad-text">Auditor</span></div>
-    <h1><span class="kin">Kebenaran <span class="grad-text">koin</span> &amp; <span class="grad-text">uang</span>, dalam satu panel.</span></h1>
+    <h1><span class="kin">Kebenaran <span class="grad-text">uang</span> &amp; <span class="grad-text">koin</span> dalam 1 panel.</span></h1>
     <p class="sub">Masuk untuk merekonsiliasi Panel, Bracket, Bank &amp; Gateway.</p>
     {% if form.errors %}<div class="err">Username atau password salah. Coba lagi.</div>{% endif %}
     <form method="post">
@@ -40,7 +44,11 @@
       <button class="btn primary" type="submit">Masuk &rarr;</button>
       <input type="hidden" name="next" value="{{ next }}">
     </form>
-    <div class="foot">Truth of Auditor · rekonsiliasi keuangan</div>
+    <div class="foot">
+      <span class="foot-kicker">Dikembangkan oleh Divisi</span>
+      <div class="foot-rnd">Research &amp; Development</div>
+      <div class="foot-cprt">© 2026 Truth Auditor · Rekonsiliasi Keuangan</div>
+    </div>
   </div>
 </div>
 {% endblock %}

@@ -10,7 +10,7 @@
 <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 <style>
 :root{
-  --bg:#12100C; --bg2:#171410; --panel:rgba(233,228,214,.04); --panel2:rgba(233,228,214,.07);
+  --bg:#080a11; --bg2:#0f1320; --panel:rgba(233,228,214,.04); --panel2:rgba(233,228,214,.07);
   --border:rgba(233,228,214,.12); --border2:rgba(233,228,214,.2);
   --text:#E9E4D6; --muted:#A39D8C; --faint:#6E6A5D;
   --brand:#2563eb; --brand2:#22d3ee; --grad:linear-gradient(135deg,#2563eb,#22d3ee);
@@ -20,7 +20,12 @@
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{
-  font-family:'Supreme',system-ui,sans-serif; color:var(--text); background:var(--bg);
+  font-family:'Supreme',system-ui,sans-serif; color:var(--text);
+  background:
+    radial-gradient(1100px 640px at 74% 10%, rgba(37,99,235,.13), transparent 60%),
+    radial-gradient(880px 520px at 12% 88%, rgba(34,211,238,.07), transparent 58%),
+    var(--bg);
+  background-attachment:fixed;
   min-height:100vh; -webkit-font-smoothing:antialiased; letter-spacing:.1px;
 }
 body::after{content:"";position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.06;
