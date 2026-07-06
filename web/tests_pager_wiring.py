@@ -50,3 +50,8 @@ class PagerWiringTests(TestCase):
         # href halaman berikut wajib membawa bank=BCA (bukan hanya page=)
         self.assertContains(r, "bank=BCA")
         self.assertContains(r, "page=2")
+
+    def test_run_detail_pakai_wide_mode(self):
+        r = self.client.get(reverse("run_detail", args=[self.run.pk]))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'class="content wide"')

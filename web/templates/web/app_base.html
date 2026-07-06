@@ -79,6 +79,14 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .toko-pick select{border:none;background:none;font-family:inherit;font-weight:600;font-size:13.5px;color:var(--ink);cursor:pointer;padding:0 2px;max-width:110px}
 .toko-pick select:focus{outline:none}
 .content{padding:24px var(--pad) 70px;max-width:1280px;width:100%;margin:0 auto}
+/* Wide mode: halaman padat-data (rekonsiliasi) memakai ruang kosong kiri-kanan */
+.content.wide{max-width:min(1680px,100%)}
+/* Sel teks panjang: potong visual + tetap utuh via tooltip (title=) */
+td.cell-tr{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Tabel hasil rekonsiliasi: lebar kolom dipatuhi (fixed) → 13 kolom muat tanpa scroll samping */
+#hasil-table{table-layout:fixed}
+#hasil-table td,#hasil-table th{padding-left:9px;padding-right:9px;overflow:hidden;text-overflow:ellipsis}
+#hasil-table .badge{font-size:11px;padding:2px 8px;max-width:100%;overflow:hidden}
 .page-head{margin:0 0 20px;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .page-head h1{margin:0 0 4px;font-size:24px;font-weight:700}
 .page-head p{margin:0;color:var(--muted);font-size:14px}
@@ -168,9 +176,9 @@ input[type=checkbox],input[type=radio]{width:auto;accent-color:var(--brand)}
 .twrap .num,.table-wrap .num{text-align:right}
 .pager{display:flex;gap:10px;align-items:center;justify-content:center;margin-top:20px;color:var(--muted);font-size:13px}
 table{width:100%;border-collapse:collapse;font-size:13px}
-thead th{position:sticky;top:0;z-index:2;text-align:left;padding:10px 14px;background:var(--panel-2);color:var(--faint);font-weight:600;
+thead th{position:sticky;top:0;z-index:2;text-align:left;padding:9px 12px;background:var(--panel-2);color:var(--faint);font-weight:600;
   font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--line);white-space:nowrap}
-tbody td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+tbody td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
 tbody tr:last-child td{border-bottom:none}
 tbody tr:hover{background:var(--panel-2)}
 table.flush{border:none} table.flush thead th{background:none;position:static}
@@ -385,7 +393,7 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
       </select>
     </form>
   </div>
-  <div class="content">
+  <div class="content {% block content_class %}{% endblock %}">
     {% if messages %}{% for m in messages %}<div class="msg {{ m.tags }}">{{ m }}</div>{% endfor %}{% endif %}
     {% block content %}{% endblock %}
   </div>

@@ -67,11 +67,11 @@ class PanelFieldsRunDetailTests(TestCase):
         )
         resp = self.client.get(reverse("run_detail", args=[self.run.pk]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, '<th class="col-hide">Player Bank</th>')
+        self.assertContains(resp, ">Player Bank</th>")
         self.assertContains(resp, "DANA|fajar Pratama |083822153879")
-        self.assertContains(resp, '<th class="col-hide">Bank Title</th>')
+        self.assertContains(resp, ">Bank Title</th>")
         self.assertContains(resp, "BCA|HENDI|7126201591")
-        self.assertContains(resp, '<th class="col-hide">Handler</th>')
+        self.assertContains(resp, ">Handler</th>")
         self.assertContains(resp, "Mozart K25")
 
     def test_no_panel_fields_values_when_raw_empty(self):
