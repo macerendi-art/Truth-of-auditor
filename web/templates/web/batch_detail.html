@@ -40,7 +40,8 @@
       <tr><td>Panel (koin)</td><td>{{ dp.panel|default:0|floatformat:0|intcomma }}</td></tr>
       {# money_matched baru; batch lama pakai 'money'. Keduanya di-|default sendiri agar aman saat summary kosong. #}
       <tr><td>Uang real (matched)</td><td>{% if dp.money_matched != None %}{{ dp.money_matched|floatformat:0|intcomma }}{% else %}{{ dp.money|default:0|floatformat:0|intcomma }}{% endif %}</td></tr>
-      <tr><td class="faint">Uang real (gross)</td><td class="faint">{{ dp.money_gross|default:0|floatformat:0|intcomma }}</td></tr>
+      {# money_gross baru ada sejak era batch harian — batch lama: "—", bukan 0 palsu #}
+      <tr><td class="faint">Uang real (gross)</td><td class="faint">{% if dp.money_gross != None %}{{ dp.money_gross|floatformat:0|intcomma }}{% else %}—{% endif %}</td></tr>
       <tr><td><b>Selisih</b></td><td>{% if dp.selisih == 0 %}<span class="badge ok">Balanced</span>{% else %}<span class="badge warn">{{ dp.selisih|default:0|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
     </table>
   </div>
@@ -51,7 +52,7 @@
     <table class="kv">
       <tr><td>Panel (koin)</td><td>{{ wd.panel|default:0|floatformat:0|intcomma }}</td></tr>
       <tr><td>Uang real (matched)</td><td>{% if wd.money_matched != None %}{{ wd.money_matched|floatformat:0|intcomma }}{% else %}{{ wd.money|default:0|floatformat:0|intcomma }}{% endif %}</td></tr>
-      <tr><td class="faint">Uang real (gross)</td><td class="faint">{{ wd.money_gross|default:0|floatformat:0|intcomma }}</td></tr>
+      <tr><td class="faint">Uang real (gross)</td><td class="faint">{% if wd.money_gross != None %}{{ wd.money_gross|floatformat:0|intcomma }}{% else %}—{% endif %}</td></tr>
       <tr><td><b>Selisih</b></td><td>{% if wd.selisih == 0 %}<span class="badge ok">Balanced</span>{% else %}<span class="badge warn">{{ wd.selisih|default:0|floatformat:0|intcomma }}</span>{% endif %}</td></tr>
     </table>
   </div>
