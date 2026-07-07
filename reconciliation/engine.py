@@ -917,10 +917,12 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
     )
     relations, skipped = [], []
     # PANEL_BRACKET hanya jika bracket ADA, dicentang, DAN ada panel ber-ticket
-    # (panel tanpa ticket—mis. COR—tak bisa di-join baris demi baris ke bracket).
-    panel_has_ticket = _active(
-        _toko_filter(Transaction.objects.filter(
-            source_type__key="panel", is_duplicate=False), toko)
+    # DALAM SCOPE tanggal run (panel tanpa ticket—mis. COR—tak bisa di-join baris
+    # demi baris ke bracket; sisa baris ber-ticket lama di luar scope tak dihitung).
+    panel_has_ticket = _date_filter(
+        _active(_toko_filter(Transaction.objects.filter(
+            source_type__key="panel", is_duplicate=False), toko)),
+        date_from, date_to,
     ).exclude(ticket_no="").exists()
     if comp["bracket"] and _inc(include, "bracket") and panel_has_ticket:
         relations.append(MatchRun.Relation.PANEL_BRACKET)
