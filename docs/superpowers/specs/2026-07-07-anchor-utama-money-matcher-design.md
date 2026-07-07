@@ -43,3 +43,21 @@ Weak_name lahir dari audit 27–29 Juni (mismatch nama e-wallet nyata: agregator
 2. Band 60–84 → `name_partial`; assignment global anti-curi; detail no_money dua varian.
 3. Anchor nomor format riil BCA (`FTFVA/DANA`, `GO-PAY TOPUP`, counterparty kosong; normalisasi 0/62; digit terpotong).
 4. Suite penuh hijau; `validate_brands` COR/MUL/MXW — QRIS COR tetap ~96,8%, pasangan hilang hanya skor <60 dan settle di run berikutnya.
+
+## Hasil kalibrasi (data nyata 1–3 Juli 2026, DB scratch, sebelum→sesudah)
+
+Suite: **466 test hijau** (dari 455). Baseline "sebelum" = **engine prod berjalan** (`origin/main`
+d17f524, sudah termasuk fix review adversarial `0e70833`). `validate_brands` per hari (auto-batch, window 1):
+
+| Brand/hari | cocok prod | cocok baru | tinjau prod→baru | tidak prod→baru |
+|---|---|---|---|---|
+| MUL 07-01 | 8454 (97,4%) | **8472 (97,6%)** | 90 → **5** | 140 → 207 |
+| MUL 07-02 | 7426 (96,9%) | **7431 (97,0%)** | 58 → **5** | 176 → 224 |
+| MUL 07-03 | 7348 (97,0%) | 7348 (97,0%) | 15 → **3** | 209 → 221 |
+| COR 07-01 | 10386 (92,7%) | **10386 (92,7%)** | 189 → **9** | 624 → 804 |
+
+- **Cocok identik/NAIK** → anchor kuat (nomor/username/nama≥85) & kunci exact QRIS tak tersentuh
+  (COR persis sama); naik di MUL karena baris uang yang dulu dicuri pasangan buta kini bebas untuk match benar.
+- **Tinjau runtuh** → pasangan buta `weak_name` hilang; sisanya `name_partial` asli + `amount_mismatch`/`amount_fee`.
+- **Tidak naik** → baris tanpa anchor kini menunggu settlement (benar), bukan disanding paksa.
+- Kasus prod `W6170895` "Samsul maarif" 300rb: batch 07-01 tahan (uang belum keluar) → settle **cocok/late_settlement ke SAMSUL MAARIF** di batch 07-02, BUKAN ke ARI PRIHARTANTO.
