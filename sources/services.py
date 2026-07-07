@@ -3,7 +3,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from django.db import transaction as db_tx
+from django.db import IntegrityError, transaction as db_tx
 
 from transactions.models import Transaction
 
@@ -52,15 +52,25 @@ def _decrypt_to_temp(path, password):
     jelas (pesan ini tampil apa adanya di form upload)."""
     import msoffcrypto
 
+    import contextlib
+
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+
+    def _cleanup():
+        tmp.close()
+        with contextlib.suppress(OSError):  # gagal hapus jangan menutupi error asli
+            os.remove(tmp.name)
+
     try:
         with open(path, "rb") as f:
             off = msoffcrypto.OfficeFile(f)
             off.load_key(password=password)
             off.decrypt(tmp)
+    except OSError:
+        _cleanup()
+        raise  # file sumber hilang/tak terbaca — BUKAN soal password
     except Exception as e:
-        tmp.close()
-        os.remove(tmp.name)
+        _cleanup()
         raise ValueError(
             "Password salah atau file terenkripsi rusak — periksa kembali."
         ) from e
@@ -88,8 +98,21 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
     try:
         rows = parser.parse(parse_path, flow=flow)
         st = SourceType.objects.get(key=parser.source_key)
+        try:
+            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider)
+        except IntegrityError:
+            # Balapan ingest ganda (double-submit / dua worker): constraint DB
+            # menolak baris kembar. Ulang SEKALI — percobaan kedua membaca ulang
+            # row_hash yang baru saja di-commit proses lain → terhitung duplikat.
+            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
-        with db_tx.atomic():
+
+def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider):
+    """Simpan hasil parse sebagai Upload + Transaction (atomic, dedup row_hash)."""
+    with db_tx.atomic():
             up = Upload.objects.create(
                 source_type=st,
                 account=account,
@@ -141,8 +164,4 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
             up.rows_parsed = len(objs)
             up.rows_duplicate = dup
             up.save(update_fields=["rows_parsed", "rows_duplicate"])
-
-        return up, len(objs), dup
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    return up, len(objs), dup

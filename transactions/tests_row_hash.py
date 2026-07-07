@@ -30,6 +30,13 @@ class RowHashUniqueTests(TestCase):
         with self.assertRaises(IntegrityError), db_tx.atomic():
             self._tx(self.panel, self.lbs, "sama")
 
+    def test_duplikat_toko_null_juga_ditolak(self):
+        # NULL dianggap distinct oleh unique constraint biasa (Postgres/SQLite) —
+        # butuh constraint kondisional supaya ingest CLI tanpa toko tetap terjaga.
+        self._tx(self.panel, None, "null-sama")
+        with self.assertRaises(IntegrityError), db_tx.atomic():
+            self._tx(self.panel, None, "null-sama")
+
     def test_hash_sama_beda_toko_atau_sumber_boleh(self):
         self._tx(self.panel, self.lbs, "sama")
         self._tx(self.panel, self.k25, "sama")  # beda toko

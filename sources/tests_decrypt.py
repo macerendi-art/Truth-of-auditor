@@ -31,6 +31,19 @@ class DecryptTempCleanupTests(SimpleTestCase):
             leftovers = sorted(n for n in os.listdir(d) if n != "fake.xlsx")
             self.assertEqual(leftovers, [])
 
+    def test_file_hilang_bukan_error_password(self):
+        # File staged hilang/tak terbaca = OSError apa adanya — bukan pesan
+        # "password salah" yang menyesatkan; temp tetap dibersihkan.
+        with tempfile.TemporaryDirectory() as d:
+            old = tempfile.tempdir
+            tempfile.tempdir = d
+            try:
+                with self.assertRaises(OSError):
+                    _decrypt_to_temp(os.path.join(d, "tidak-ada.xlsx"), "pw")
+            finally:
+                tempfile.tempdir = old
+            self.assertEqual(os.listdir(d), [])
+
     def test_pesan_error_bahasa_indonesia(self):
         with tempfile.TemporaryDirectory() as d:
             src = self._make_fake(d)

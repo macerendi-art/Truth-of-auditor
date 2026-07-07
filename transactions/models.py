@@ -167,6 +167,13 @@ class Transaction(TimeStampedModel):
                 fields=["source_type", "toko", "row_hash"],
                 name="uniq_tx_source_toko_rowhash",
             ),
+            # NULL dianggap distinct oleh constraint di atas — jalur ingest tanpa
+            # toko (CLI debug) dijaga constraint kondisional terpisah.
+            models.UniqueConstraint(
+                fields=["source_type", "row_hash"],
+                condition=models.Q(toko__isnull=True),
+                name="uniq_tx_source_rowhash_toko_null",
+            ),
         ]
 
     def __str__(self):
