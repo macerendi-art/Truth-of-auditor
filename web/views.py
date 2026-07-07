@@ -21,6 +21,7 @@ from reconciliation.engine import (
     _panel_dates,
     check_completeness,
     pending_settlement_count,
+    refresh_batch_summary,
     run_batch,
     run_batches_auto,
     run_match,
@@ -1071,6 +1072,8 @@ def bulk_review(request, pk):
         catat(request.user, "review_massal", f"{len(rows)} hasil",
               toko=run.batch.toko if run.batch else None,
               run_pk=run.pk, n=len(rows), action=action)
+        if run.batch:  # kartu Cocok/Tinjau run & batch jangan basi terhadap chip live
+            refresh_batch_summary(run.batch)
     messages.success(request, f"{len(rows)} hasil diperbarui.")
     nxt = request.POST.get("next") or reverse("run_detail", args=[run.pk])
     if not url_has_allowed_host_and_scheme(
@@ -1103,6 +1106,8 @@ def review(request, pk):
     ReviewAction.objects.create(result=r, action=action, reason=reason, reviewer=request.user)
     catat(request.user, "review", f"Result #{r.pk}",
           toko=r.run.batch.toko if r.run.batch else None, result_pk=r.pk, action=action)
+    if r.run.batch:  # kartu Cocok/Tinjau run & batch jangan basi terhadap chip live
+        refresh_batch_summary(r.run.batch)
     show_run_col = request.POST.get("show_run_col") == "1"
     if show_run_col and r.run.batch:
         r.home_no = ReconBatch.objects.filter(
