@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The virtualenv is at `.venv`. Activate it first: `source .venv/bin/activate`.
 
 ```bash
-python manage.py test                         # run all tests (31 test modules)
+python manage.py test                         # run all tests (~495)
 python manage.py test web.tests_reconcile     # one module
 python manage.py test web.tests_reconcile.SomeTestCase.test_x   # one test
 python manage.py runserver                     # dev server (sqlite, DEBUG=True)
@@ -20,9 +20,15 @@ python manage.py migrate                        # apply migrations (includes see
 # CLI equivalents of the core pipeline (useful for debugging without the UI):
 python manage.py ingest <parser_key> <file_path> [--flow dp|wd] [--password ...]
 python manage.py match <panel_bracket|panel_bank|bracket_bank> [--from YYYY-MM-DD] [--to YYYY-MM-DD]
+
+# Fase-0 harness: ingest a folder of real exports + auto daily batches + match-rate report.
+# Use this to calibrate matcher changes against real data BEFORE shipping.
+python manage.py validate_brands --dir <folder> --toko <mul|g25|mxw|...> --flow-from-name
 ```
 
 Reference data (SourceTypes, the "Default" ToleranceProfile, seeded Tokos) is created by **data migrations**, not fixtures — a fresh `migrate` gives you a working DB. Tests rely on these seeds existing.
+
+To run anything against a throwaway DB (calibration, repros) without touching the dev DB, point `DATABASE_URL` at a scratch sqlite file: `DATABASE_URL=sqlite:////tmp/scratch.sqlite3 python manage.py migrate && ... validate_brands ...`.
 
 ## Architecture: the ingest → match pipeline
 
@@ -39,8 +45,9 @@ To add a new source format: write a parser subclass, register it in `PARSERS` (`
 
 ### 2. Match (`reconciliation/engine.py`) — the reconciliation logic
 
-- **Matchers are pluggable** via the `MATCHERS` dict keyed by `MatchRun.Relation`. `PanelBracketMatcher` joins on **Ticket Number** (strong key). `_MoneyMatcher` (→ `PanelBankMatcher`, `BracketBankMatcher`) blocks by rounded absolute amount, then filters by directed date window + username/fuzzy-name score (`rapidfuzz`, tolerant of bank-truncated names).
-- Each match produces a `MatchResult` in one of three buckets: `cocok` (matched), `tidak_cocok` (no match), `perlu_tinjau` (amount/name weak → needs human review).
+- **Matchers are pluggable** via the `MATCHERS` dict keyed by `MatchRun.Relation`. `PanelBracketMatcher` joins on **Ticket Number** (strong key). `_MoneyMatcher` (→ `PanelBankMatcher`, `BracketBankMatcher`) is multi-pass.
+- **The anchor rule (core domain decision, do not regress):** a pair may only form on a PRIMARY anchor — exact ticket (pass 0), exact gateway `reference` e.g. QRIS UUID (pass 0b), phone/VA/account-number match or exact username or fuzzy name ≥ `fuzzy_threshold` 85 (pass 1, global score-ordered assignment), near-miss on strong identity (pass 2: small fee diff / money H-1), or name in the review band `NAME_REVIEW_FLOOR`(60)–84 → `perlu_tinjau` `name_partial` (pass 3). **Amount+date are SUPPORTING anchors only** — required (they block candidates) but never sufficient; identity < 60 means NO pair (`no_money`) so the row can wait for next-day settlement. Amount blocking uses rounded absolute value; the date window is directed (money ≥ credit date).
+- Each match produces a `MatchResult` in one of three buckets: `cocok`, `tidak_cocok`, `perlu_tinjau` — plus pseudo-views in the UI: `no_panel` rows (money with no panel trace, `left=None`) are counted/displayed separately from `tidak_cocok` so `cocok+perlu_tinjau+tidak_cocok == panel row count` per run. Reason codes map to UI labels in `web/templatetags/web_extras.py` `REASON_LABELS` (keep old codes like `weak_name` there — historical rows still render).
 - **`run_batch(toko, ...)`** is the top-level orchestrator the UI calls: checks completeness, runs the applicable relations, aggregates DP/WD totals, and — **only on success, as the last step** — "consumes" the transactions by setting `consumed_by_batch`. Consumed rows are excluded from future completeness/matching (`_active()` filters `consumed_by_batch__isnull=True`); deleting a batch frees them again (`SET_NULL`). The whole run is wrapped in `transaction.atomic()`, so a failed run rolls back completely (no orphan batch, nothing consumed).
 - **Daily runs & late settlement:** the web always passes `recon_date` (one batch per `(toko, recon_date)`, guarded by view + unique constraint; redoing a date = delete the old batch first). On success, unmatched credit rows (`tidak_cocok`/`no_money`) still inside `date_window_days` are **not** consumed — they stay active "menunggu settlement". The next day's run matches them against newly-uploaded money rows; a hit **flips the original MatchResult in its home batch** (`reason_code="late_settlement"`, marked `resolved_by_batch`, home summary recomputed via `refresh_batch_summary`) and the credit row is consumed into its home batch. Carried rows never create new results in the resolving batch and are excluded from its gross totals (shown separately as "Settlement tertunda"). Unmatched carried rows past the window expire quietly into their home batch (recorded in `summary["late_settlement"]["expired"]`). Deleting a resolving batch calls `revert_late_settlements` first, restoring flips and reactivating carried/expired rows. **Retro write-back:** brand-new rows dated D < recon_date whose date already has a batch are written back to that batch (results into its runs, gross totals incremented via `_add_retro_gross`, consumed there); the current batch only notes them in `summary["retro"]`.
 - The `include` dict threads through every matcher/aggregator to let a run opt specific sources in/out (panel_dp, panel_wd, bracket, bank, gateway). `include=None` means "all", the legacy behavior.
@@ -50,7 +57,8 @@ To add a new source format: write a parser subclass, register it in `PARSERS` (`
 All money is normalized to **rupiah** on the canonical `Transaction`. Sign and scale conventions:
 
 - **`credit_delta`** = effect on the operator's credit ledger; **`money_delta`** = effect on real cash. A deposit is `money_delta > 0` / `credit_delta < 0`; a withdrawal is the reverse. Matching requires the two sides to share the same money direction.
-- **Panel amounts are in thousands** — the panel parser multiplies by `SCALE = 1000` to reach rupiah. Don't double-apply.
+- **Panel amounts are in thousands** — the panel parser multiplies by `SCALE = 1000` to reach rupiah. Don't double-apply. **Exception: COR (Gacor25) exports are already in full rupiah** — the `cor_*` parsers must NOT ×1000.
+- **Per-brand exact keys on the money side** (prefer these over fuzzy): COR QRIS `Transaction ID` (UUID) == gateway `OrderId` → `reference`; MUL QRIS-HOKI `Whitelabel Transaction ID` == panel ticket; MXW QRFlyer `TXN ID` / NXPay `Ticket Number` == panel ticket. Some COR exports lack the xlsx `<dimension>` tag and have broken stylesheets — read them with the styles-tolerant raw reader in `sources/parsers/base.py`, not plain openpyxl.
 - **BCA fee rows** are tagged `jenis="admin"` and deliberately excluded from WD money totals (they aren't real withdrawals).
 - Match keys on `Transaction`: `ticket_no` (panel `D…`/`W…`), `reference` (gateway), `username`, `counterparty` (bank sender/receiver name). Names are isolated per-source in the parser; the engine only normalizes + fuzzy-matches.
 - `USE_TZ = False` — bank/panel timestamps are naive local (WIB, `Asia/Jakarta`). Don't introduce tz-aware datetimes.
@@ -66,5 +74,7 @@ Railway (Nixpacks), config in `railway.json` / `Procfile`. Production is trigger
 ## Working notes
 
 - Design specs and implementation plans for completed features live in `docs/superpowers/{specs,plans}/` — check there for intent behind non-obvious decisions.
-- `db.sqlite3` is committed and large (contains real working data); it is the local dev DB.
-- After each work chunk, commit locally. **Do not push to origin main** — pushes are coordinated manually with the team.
+- `db.sqlite3` is the local dev DB and is **gitignored** (contains real working data — never commit it). Git worktrees don't have it; copy it from the main checkout + `migrate` if a preview needs real data.
+- **Git flow:** commit per work chunk AND push to `origin/main` (fast-forward only, never force). A teammate (`sabian`) also lands on main — always `git fetch` + rebase before pushing.
+- **Pushing does NOT deploy.** Deploys are manual: `railway up --ci` run from the main checkout `/Users/macads/Truth-of-auditor` after fast-forwarding it to `origin/main` (running it from a worktree ships a stale tree). Never deploy without explicit confirmation — this is a live financial app.
+- Django 5.2 keeps the cached template loader on even in DEBUG — restart the dev server after editing templates before concluding an edit "didn't work".
