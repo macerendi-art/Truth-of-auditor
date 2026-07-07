@@ -143,13 +143,48 @@ class LateSettlementTests(_Base):
         self.assertEqual(b28.summary["late_settlement"]["dp"],
                          {"count": 1, "amount": 50000.0})
 
-    def test_weak_name_late_jadi_perlu_tinjau(self):
+    def test_nama_lemah_late_tidak_flip_lalu_kadaluarsa(self):
+        # Aturan anchor: identitas lemah (username 'bodi'≠'budi', skor 40 < floor)
+        # TIDAK boleh mencaplok uang di H+1 hanya karena nominal+tanggal cocok.
+        # Baris tetap no_money, lewat window → kadaluarsa diam-diam ke batch asal.
         p, b27 = self._carry_day27()
         self._tx(self.bank, "depo", "50000", "50000", "", "k2",
                  username="bodi", dt=datetime(2026, 6, 28, 1, 0))  # nama lemah
         b28 = run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 28))
         r = MatchResult.objects.get(run__batch=b27, left=p)
+        self.assertEqual(r.bucket, MatchResult.Bucket.TIDAK)
+        self.assertEqual(r.reason_code, "no_money")
+        self.assertIsNone(r.right)
+        p.refresh_from_db()
+        self.assertEqual(p.consumed_by_batch, b27)  # kadaluarsa ke asalnya
+        self.assertEqual(b28.summary["late_settlement"]["expired"],
+                         [{"tx": p.id, "home": b27.id}])
+
+    def test_nama_band_late_jadi_perlu_tinjau(self):
+        # Nama mirip pita 60–84 (kepotong bank) DI H+1 → flip perlu_tinjau.
+        p = self._tx(self.panel, "depo", "50000", "50000", "D1", "p1",
+                     username="budi", counterparty="Muhammad Aditya Firmansyah",
+                     dt=datetime(2026, 6, 27, 21, 0))
+        self._tx(self.bank, "depo", "70000", "70000", "", "k1", username="siti")
+        b27 = run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 27))
+        # H+1: mutasi dengan nama kepotong (skor ~82), username bank kosong.
+        self._tx(self.bank, "depo", "50000", "50000", "", "k2",
+                 counterparty="M ADITYA FIRMANSYA", dt=datetime(2026, 6, 28, 1, 0))
+        b28 = run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 28))
+        r = MatchResult.objects.get(run__batch=b27, left=p)
         self.assertEqual(r.bucket, MatchResult.Bucket.TINJAU)
+        self.assertEqual(r.reason_code, "late_settlement")
+        self.assertEqual(r.resolved_by_batch, b28)
+
+    def test_nama_persis_late_jadi_cocok(self):
+        # Nama/username persis DI H+1 → flip cocok (anchor utama sama).
+        p, b27 = self._carry_day27()  # username budi
+        uang = self._tx(self.bank, "depo", "50000", "50000", "", "k2",
+                        username="budi", dt=datetime(2026, 6, 28, 1, 0))
+        b28 = run_batch(self.lbs, self.tol, recon_date=date(2026, 6, 28))
+        r = MatchResult.objects.get(run__batch=b27, left=p)
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.right, uang)
         self.assertEqual(r.reason_code, "late_settlement")
         self.assertEqual(r.resolved_by_batch, b28)
 

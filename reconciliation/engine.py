@@ -98,6 +98,15 @@ def _route_ok(expected, owner, source_key):
 # Detail baku hasil no_money — juga dipakai untuk MENGEMBALIKAN hasil yang
 # di-flip late settlement, jadi string ini harus tetap satu sumber kebenaran.
 NO_MONEY_DETAIL = "Tak ada padanan nominal+tanggal di Mutasi Bank"
+# Detail no_money ketika ADA kandidat nominal+tanggal tapi identitasnya beda
+# (skor < NAME_REVIEW_FLOOR) → biarkan menunggu settlement tanggal berikutnya.
+NO_MONEY_WAIT_DETAIL = "Ada kandidat nominal+tanggal tapi identitas beda — menunggu settlement"
+
+# Anchor UTAMA (identitas unik) yang menentukan pasangan; nominal+tanggal hanya
+# PENDUKUNG. Nama mirip pada pita ini → perlu_tinjau ('nama mirip'); di bawahnya
+# TIDAK dipasangkan (menunggu settlement). Kalibrasi via `validate_brands`;
+# dinaikkan ke ToleranceProfile bila per-toko perlu beda (YAGNI sekarang).
+NAME_REVIEW_FLOOR = 60
 
 
 def _included_money_sources(include):
@@ -419,26 +428,38 @@ class _MoneyMatcher:
                          "uang tiba sehari SEBELUM tanggal panel")
                     break
 
-        # --- pass 3: sisa berbasis nominal — prioritas rekening yang benar ---
+        # --- pass 3: sisa berbasis IDENTITAS — nominal+tanggal cuma pendukung ---
+        # Nama mirip pada pita [NAME_REVIEW_FLOOR..threshold) → perlu_tinjau,
+        # di-assign GLOBAL urut skor (anti-curi, seperti pass 1). Di bawah floor
+        # TIDAK dipasangkan: biarkan menunggu settlement tanggal berikutnya —
+        # ini yang mencegah WD "Samsul" nyasar ke mutasi "ARI" (skor 36).
+        band_pairs = []
+        has_candidate = {}
         for p in left:
             if p.id in matched:
                 continue
             expected = _expected_owner(p)
-            best = None
+            any_cand = False
             for b, delta in kandidat(p):
+                any_cand = True
                 s = self._identity(p, b)
-                route = _route_ok(expected, owners.get(b.upload_id), b.source_type.key)
-                rank = (route is True, s, -delta)
-                if best is None or rank > best[0]:
-                    best = (rank, s, b)
-            if best is not None:
-                _, s, b = best
-                wallet = _wallet_label(b.counterparty)
-                extra = f" — kanal {wallet}" if wallet else ""
-                emit(p, b, MatchResult.Bucket.TINJAU, s, "weak_name",
-                     f"nominal+tanggal cocok, nama lemah (score {s:.0f}){extra}")
-            else:
-                emit(p, None, MatchResult.Bucket.TIDAK, 0, "no_money", NO_MONEY_DETAIL)
+                if s >= NAME_REVIEW_FLOOR:
+                    route = _route_ok(expected, owners.get(b.upload_id), b.source_type.key)
+                    band_pairs.append((s, route is True, -delta, p, b))
+            has_candidate[p.id] = any_cand
+        band_pairs.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+        for s, _, _, p, b in band_pairs:
+            if p.id in matched or b.id in used:
+                continue
+            wallet = _wallet_label(b.counterparty)
+            extra = f" — kanal {wallet}" if wallet else ""
+            emit(p, b, MatchResult.Bucket.TINJAU, s, "name_partial",
+                 f"nama mirip (score {s:.0f}){extra}")
+        for p in left:
+            if p.id in matched:
+                continue
+            detail = NO_MONEY_WAIT_DETAIL if has_candidate.get(p.id) else NO_MONEY_DETAIL
+            emit(p, None, MatchResult.Bucket.TIDAK, 0, "no_money", detail)
         return out
 
 
@@ -654,7 +675,7 @@ def _writeback_retro(batch, retro, retro_results, tolerance, user):
 
 def _apply_late_settlements(batch, late_pairs):
     """Flip hasil no_money LAMA di batch asalnya: bucket ikut aturan skor normal
-    (cocok / perlu_tinjau weak_name), right diisi baris uang, reason asal disimpan
+    (cocok / perlu_tinjau name_partial), right diisi baris uang, reason asal disimpan
     di reason_detail, ditandai resolved_by_batch=batch (untuk revert saat hapus)."""
     resolved = []
     for prior, new in late_pairs:

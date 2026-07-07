@@ -112,18 +112,20 @@ class Pass1GlobalAssignTests(_Base):
         self.assertIsNone(MatchResult.objects.get(left=p_weak).right_id)
 
     def test_route_prioritas_rekening_benar(self):
-        # Dua kandidat nominal sama; panel menunjuk rekening HENDI via Bank Title.
+        # Dua kandidat nominal sama, nama SAMA-SAMA di pita mirip (skor identik);
+        # panel menunjuk rekening HENDI via Bank Title → rute yang benar menang.
         p = self.tx(self.panel, self.up_panel, "wd", "75000", "-75000",
-                    datetime(2026, 6, 27, 9), ticket="W3", cp="JOKO S",
+                    datetime(2026, 6, 27, 9), ticket="W3", cp="JOKO SUSANTO",
                     raw={"Bank Title": "BCA|HENDI|712620"})
         m_wrong = self.tx(self.bank, self.up_nijun, "wd", "75000", "-75000",
-                          datetime(2026, 6, 27, 10), cp="SESEORANG")
+                          datetime(2026, 6, 27, 10), cp="JOKO SUSILO")
         m_right = self.tx(self.bank, self.up_hendi, "wd", "75000", "-75000",
-                          datetime(2026, 6, 27, 11), cp="ORANG BEDA")
+                          datetime(2026, 6, 27, 11), cp="JOKO SUSILO")
         self.match()
         r = MatchResult.objects.get(left=p)
         self.assertEqual(r.right_id, m_right.id)
         self.assertEqual(r.bucket, MatchResult.Bucket.TINJAU)
+        self.assertEqual(r.reason_code, "name_partial")
 
 
 class PhoneIdentityTests(_Base):
