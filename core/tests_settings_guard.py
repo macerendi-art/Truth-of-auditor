@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 def _import_settings(extra_env):
     """Import truth_auditor.settings di subprocess bersih; return CompletedProcess."""
     env = {k: v for k, v in os.environ.items()
-           if k not in ("SECRET_KEY", "DEBUG", "DATABASE_URL")}
+           if k not in ("SECRET_KEY", "DEBUG", "DATABASE_URL", "RAILWAY_ENVIRONMENT")}
     env.update(extra_env)
     return subprocess.run(
         [sys.executable, "-c", "import truth_auditor.settings"],
@@ -33,4 +33,15 @@ class SecretKeyGuardTests(SimpleTestCase):
 
     def test_dev_tanpa_secret_key_tetap_jalan(self):
         p = _import_settings({})  # DEBUG default True — fallback dev diperbolehkan
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+    def test_railway_tanpa_debug_dianggap_produksi(self):
+        # Lingkungan Railway (RAILWAY_ENVIRONMENT ada) tanpa env DEBUG: default
+        # harus PRODUKSI (DEBUG=False) → guard SECRET_KEY tetap menyala.
+        p = _import_settings({"RAILWAY_ENVIRONMENT": "production"})
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("SECRET_KEY", p.stderr)
+
+    def test_railway_dengan_secret_key_jalan(self):
+        p = _import_settings({"RAILWAY_ENVIRONMENT": "production", "SECRET_KEY": "x" * 60})
         self.assertEqual(p.returncode, 0, p.stderr)

@@ -27,7 +27,10 @@ SECRET_KEY = os.environ.get(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
+# Di Railway (RAILWAY_ENVIRONMENT selalu di-inject) default-nya PRODUKSI:
+# service tanpa env DEBUG tak boleh diam-diam boot dengan DEBUG=True.
+_default_debug = 'False' if os.environ.get('RAILWAY_ENVIRONMENT') else 'True'
+DEBUG = os.environ.get('DEBUG', _default_debug).lower() == 'true'
 
 # Produksi wajib SECRET_KEY dari env — kunci default di atas ter-commit di repo
 # (publik). Gagal cepat saat boot jauh lebih aman daripada diam-diam insecure.
