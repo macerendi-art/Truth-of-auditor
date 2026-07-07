@@ -529,14 +529,16 @@ def _matched_money(runs):
     """Uang REAL yang benar-benar berpasangan ke baris Panel (bucket cocok + perlu_tinjau).
 
     Dijumlah dari sisi UANG (right) pada MatchResult PANEL_BANK yang punya left&right.
-    DP = money_delta>0, WD = abs(money_delta<0). Tidak menjalankan ulang matching.
+    Bucket TIDAK dikecualikan: pasangan yang DITOLAK auditor (mark_unmatched)
+    bukan uang matched — tanpa ini kartu batch tetap "balanced" padahal
+    reviewer menolak pasangannya. DP = money_delta>0, WD = abs(money_delta<0).
     """
     panel_bank = [r.id for r in runs if r.relation == MatchRun.Relation.PANEL_BANK]
     dp = wd = 0.0
     if panel_bank:
         results = MatchResult.objects.filter(
             run_id__in=panel_bank, left__isnull=False, right__isnull=False
-        ).select_related("right")
+        ).exclude(bucket=MatchResult.Bucket.TIDAK).select_related("right")
         for res in results:
             md = float(res.right.money_delta)
             if md > 0:
@@ -915,15 +917,18 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
         toko=toko, tolerance=tolerance, date_from=date_from, date_to=date_to,
         created_by=user, completeness=comp, recon_date=recon_date,
     )
+    carried = _carried_results(toko) if recon_date else {}
     relations, skipped = [], []
     # PANEL_BRACKET hanya jika bracket ADA, dicentang, DAN ada panel ber-ticket
     # DALAM SCOPE tanggal run (panel tanpa ticket—mis. COR—tak bisa di-join baris
-    # demi baris ke bracket; sisa baris ber-ticket lama di luar scope tak dihitung).
+    # demi baris ke bracket). Baris CARRIED dikecualikan: run_batches_auto
+    # melebarkan date_from ke baris carried, dan PANEL_BRACKET toh mengecualikan
+    # carried dari pencocokan — ticket lama itu cuma akan menghasilkan noise no_panel.
     panel_has_ticket = _date_filter(
         _active(_toko_filter(Transaction.objects.filter(
             source_type__key="panel", is_duplicate=False), toko)),
         date_from, date_to,
-    ).exclude(ticket_no="").exists()
+    ).exclude(ticket_no="").exclude(id__in=set(carried)).exists()
     if comp["bracket"] and _inc(include, "bracket") and panel_has_ticket:
         relations.append(MatchRun.Relation.PANEL_BRACKET)
     else:
@@ -940,7 +945,6 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
     else:
         skipped.append(MatchRun.Relation.PANEL_BANK.value)
 
-    carried = _carried_results(toko) if recon_date else {}
     retro = (
         _retro_homes(toko, recon_date, date_from, date_to, include, exclude_ids=set(carried))
         if recon_date else {}
