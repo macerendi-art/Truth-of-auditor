@@ -159,6 +159,15 @@ class Transaction(TimeStampedModel):
             models.Index(fields=["source_type", "occurred_at"]),
             models.Index(fields=["jenis", "amount"]),
         ]
+        constraints = [
+            # Idempotensi di DB (guard aplikasi di ingest tetap ada): dua proses
+            # ingest bersamaan tak boleh menghasilkan baris kembar. Diverifikasi
+            # 2026-07-07: lokal & prod 0 duplikat sebelum constraint ini masuk.
+            models.UniqueConstraint(
+                fields=["source_type", "toko", "row_hash"],
+                name="uniq_tx_source_toko_rowhash",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.get_jenis_display()} {self.amount}"
