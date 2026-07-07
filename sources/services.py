@@ -46,14 +46,24 @@ def is_encrypted_xlsx(path):
 
 
 def _decrypt_to_temp(path, password):
-    """Dekripsi xlsx terenkripsi ke file .xlsx sementara; kembalikan path-nya."""
+    """Dekripsi xlsx terenkripsi ke file .xlsx sementara; kembalikan path-nya.
+
+    Gagal (password salah / file rusak) → temp dibersihkan + ValueError berpesan
+    jelas (pesan ini tampil apa adanya di form upload)."""
     import msoffcrypto
 
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
-    with open(path, "rb") as f:
-        off = msoffcrypto.OfficeFile(f)
-        off.load_key(password=password)
-        off.decrypt(tmp)
+    try:
+        with open(path, "rb") as f:
+            off = msoffcrypto.OfficeFile(f)
+            off.load_key(password=password)
+            off.decrypt(tmp)
+    except Exception as e:
+        tmp.close()
+        os.remove(tmp.name)
+        raise ValueError(
+            "Password salah atau file terenkripsi rusak — periksa kembali."
+        ) from e
     tmp.close()
     return tmp.name
 
