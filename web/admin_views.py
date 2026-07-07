@@ -1,6 +1,8 @@
 """Panel admin: kelola pengguna & toko, hapus data. Semua view digate admin_required."""
 from django.contrib import messages
 from django.contrib.auth import get_user_model, update_session_auth_hash
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
@@ -43,6 +45,16 @@ def _locking_batches(upload):
 VALID_ROLES = ("admin", "supervisor", "auditor")
 
 
+def _password_error(password, user=None):
+    """Pesan gabungan validator password Django (terlokalisasi id) — None bila lolos.
+    Mencakup panjang minimum, password umum, semua-angka, mirip atribut user."""
+    try:
+        validate_password(password, user=user)
+    except ValidationError as e:
+        return " ".join(e.messages)
+    return None
+
+
 @admin_required
 def kelola_toko(request):
     if request.method == "POST" and request.POST.get("action") == "create":
@@ -81,13 +93,15 @@ def kelola_user(request):
         nama = request.POST.get("nama", "").strip()
         role = request.POST.get("role", "auditor")
         toko_ids = request.POST.getlist("tokos")
+        # user=... hanya untuk cek kemiripan atribut (username/nama) — tidak disimpan.
+        pw_err = _password_error(password, user=User(username=username, first_name=nama))
         err = None
         if not username:
             err = "Username wajib diisi."
         elif User.objects.filter(username=username).exists():
             err = f"Username {username} sudah dipakai."
-        elif len(password) < 8:
-            err = "Password minimal 8 karakter."
+        elif pw_err:
+            err = pw_err
         elif role not in VALID_ROLES:
             err = "Role tidak dikenal."
         elif role == "auditor" and not toko_ids:
@@ -135,8 +149,9 @@ def kelola_user_edit(request, pk):
             return redirect("kelola_user")
     elif action == "reset_password":
         pw = request.POST.get("password", "")
-        if len(pw) < 8:
-            messages.error(request, "Password minimal 8 karakter.")
+        pw_err = _password_error(pw, user=target)
+        if pw_err:
+            messages.error(request, pw_err)
         else:
             target.set_password(pw)
             target.save()
