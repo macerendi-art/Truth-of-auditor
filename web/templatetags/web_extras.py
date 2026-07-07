@@ -21,7 +21,8 @@ REASON_LABELS = {
     "amount_mismatch":  ("Selisih nominal",          "warn"),
     "ticket_amount":    ("Ticket sama · selisih nominal", "warn"),
     "date_before":      ("Uang tiba H-1",            "warn"),
-    "weak_name":        ("Nama belum yakin",         "warn"),
+    "name_partial":     ("Nama mirip",               "warn"),
+    "weak_name":        ("Nama belum yakin",         "warn"),  # data lama (pra-anchor)
     # tertunda / info / keputusan manusia
     "late_settlement":  ("Settle terlambat",         "src"),
     "manual_override":  ("Ditandai manual",          "src"),

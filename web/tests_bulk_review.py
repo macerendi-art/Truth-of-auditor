@@ -33,18 +33,20 @@ class BulkReviewTests(TestCase):
                                    original_name="P.xlsx")
         upb = Upload.objects.create(source_type=bank, toko=self.toko,
                                     original_name="B.csv")
+        # Nama sengaja "mirip tapi kepotong bank" (skor ~82, pita 60–84) supaya
+        # jatuh ke perlu_tinjau 'name_partial' — bahan uji setujui massal.
         for i in range(3):
             Transaction.objects.create(
                 upload=up, source_type=panel, toko=self.toko, jenis="wd",
                 amount=Decimal("50000"), money_delta=Decimal("-50000"),
                 occurred_at=datetime(2026, 6, 27, 9 + i), ticket_no=f"W{i}",
-                counterparty=f"ORANG {i}", row_hash=f"p{i}",
+                counterparty="Muhammad Aditya Firmansyah", row_hash=f"p{i}",
             )
             Transaction.objects.create(
                 upload=upb, source_type=bank, toko=self.toko, jenis="wd",
                 amount=Decimal("50000"), money_delta=Decimal("-50000"),
                 occurred_at=datetime(2026, 6, 27, 10 + i),
-                counterparty=f"BEDA {i}", row_hash=f"b{i}",
+                counterparty="M ADITYA FIRMANSYA", row_hash=f"b{i}",
             )
         batch = ReconBatch.objects.create(toko=self.toko, tolerance=self.tol)
         self.run = run_match(MatchRun.Relation.PANEL_BANK, self.tol, toko=self.toko,
