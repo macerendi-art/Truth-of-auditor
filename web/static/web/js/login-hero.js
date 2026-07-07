@@ -49,29 +49,40 @@ function sampleText(text) {
   x.fillText(text, W / 2, H / 2);
   const img = x.getImageData(0, 0, W, H).data, pts = [];
   const step = isMobile ? 5 : 3;                       // kepadatan sampling (canvas lebih besar → step longgar)
-  let halfW = 1;                                        // extent teks (px) untuk fit ke viewport di init()
+  let halfW = 1, halfH = 1;                             // extent teks (px) → fit lebar & tinggi di layout()
   for (let y = 0; y < H; y += step) for (let px = 0; px < W; px += step)
     if (img[(y * W + px) * 4 + 3] > 128) {
       const wx = px - W / 2, wy = -(y - H / 2);
       pts.push([wx, wy]);
       if (Math.abs(wx) > halfW) halfW = Math.abs(wx);
+      if (Math.abs(wy) > halfH) halfH = Math.abs(wy);
     }
-  return { pts, halfW };
+  return { pts, halfW, halfH };
 }
 
 function init(renderer) {
   const CAP = isMobile ? 7000 : 20000;
   const sampled = sampleText('TRUTH OF AUDITOR');
-  const halfW = sampled.halfW;
+  const halfW = sampled.halfW, halfH = sampled.halfH;
   let pts = sampled.pts;
   if (pts.length > CAP) pts = pts.filter((_, i) => i % Math.ceil(pts.length / CAP) === 0);
   const N = pts.length;
-  // Fit wordmark ke viewport (~88% lebar) + naikkan dari tengah; responsif terhadap aspect.
+  // Muat wordmark ke ruang DI ATAS kartu login (diukur langsung dari kartu) → tak pernah
+  // tertutup di viewport manapun (desktop & mobile). Batasi oleh lebar ATAU tinggi celah.
   const CAM_Z = 9, VFOV = 45 * Math.PI / 180;
   function layout() {
     const visH = 2 * CAM_Z * Math.tan(VFOV / 2);
     const visW = visH * (innerWidth / innerHeight);
-    return { visW, visH, scale: (visW * 0.44) / halfW, yOff: visH * 0.30 };
+    const cardEl = document.getElementById('card');
+    // offsetTop = posisi layout kartu di viewport (.auth mengisi layar), kebal transform GSAP entrance.
+    const cardTopPx = cardEl ? cardEl.offsetTop : innerHeight * 0.6;
+    const marginPx = Math.max(innerHeight * 0.05, 22);                // napas antara wordmark & kartu
+    const gapPx = Math.max(cardTopPx - marginPx, 40);                 // tinggi celah di atas kartu (px)
+    const gapH = (gapPx / innerHeight) * visH;                        // celah dalam satuan world
+    const scale = Math.min((visW * 0.44) / halfW,                     // ≤ 88% lebar viewport
+                           (gapH * 0.44) / halfH);                    // ≤ 88% tinggi celah
+    const yOff = visH * (0.5 - (gapPx * 0.5) / innerHeight);          // pusatkan wordmark di celah
+    return { visW, visH, scale, yOff };
   }
   let lay = layout();
 
@@ -255,13 +266,18 @@ function init(renderer) {
     // proyeksikan ke plane z=0 kamera sederhana:
     uni.uPointer.value.set(ndc.x * lay.visW / 2, ndc.y * lay.visH / 2);
   });
+  function refit() {                                   // hitung ulang skala+posisi wordmark dari kartu
+    lay = layout();
+    for (let i = 0; i < N; i++) { tgt[i * 3] = pts[i][0] * lay.scale; tgt[i * 3 + 1] = pts[i][1] * lay.scale + lay.yOff; }
+    geo.attributes.aTarget.needsUpdate = true;
+  }
   addEventListener('resize', () => {
     cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
-    lay = layout();                                    // refit wordmark ke ukuran/aspect baru
-    for (let i = 0; i < N; i++) { tgt[i * 3] = pts[i][0] * lay.scale; tgt[i * 3 + 1] = pts[i][1] * lay.scale + lay.yOff; }
-    geo.attributes.aTarget.needsUpdate = true;
+    refit();                                           // refit wordmark ke ukuran/aspect + tinggi kartu baru
   });
+  // Zodiak bisa selesai load SETELAH init → tinggi kartu berubah → ukur & fit ulang biar tetap bebas.
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(refit);
 
   // assemble saat load (GSAP UMD sudah ada di halaman)
   let assembled = false;
