@@ -10,6 +10,20 @@
   </div>
 </div>
 
+<div class="card reveal" style="margin-bottom:14px">
+  <form method="get" class="row" style="align-items:flex-end">
+    <div class="field"><label>Dari tanggal</label><input type="date" name="from" value="{{ date_from }}"></div>
+    <div class="field"><label>Sampai tanggal</label><input type="date" name="to" value="{{ date_to }}"></div>
+    <button class="btn primary" type="submit">Filter</button>
+    {% if date_from or date_to %}<a class="btn" href="{% url 'toko_overview' %}">Reset</a>{% endif %}
+  </form>
+  {% if date_from or date_to %}
+  <p class="faint" style="margin:8px 0 0;font-size:12.5px">Menampilkan agregat batch
+    {% if date_from %}dari <b>{{ date_from }}</b>{% endif %}{% if date_to %} sampai <b>{{ date_to }}</b>{% endif %} —
+    selisih, antrean tinjau, dan uang periksa dijumlah atas seluruh batch dalam rentang.</p>
+  {% endif %}
+</div>
+
 <div class="card pad0 reveal">
   <div class="card-head"><h3>Toko <span class="faint" style="font-weight:500">({{ rows|length }})</span></h3></div>
   <div class="twrap" style="border:none">

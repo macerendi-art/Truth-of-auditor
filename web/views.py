@@ -989,9 +989,19 @@ def run_detail(request, pk):
     return render(request, "web/run_detail.html", ctx)
 
 
+def _parse_date(s):
+    """'YYYY-MM-DD' → date; string kosong/invalid → None (filter diabaikan)."""
+    try:
+        return date_cls.fromisoformat(s) if s else None
+    except ValueError:
+        return None
+
+
 @login_required
 def review_queue(request):
-    """Antrean semua hasil perlu-tinjau toko aktif, lintas batch/run."""
+    """Antrean semua hasil perlu-tinjau toko aktif, lintas batch/run.
+    Filter (pola sama dgn run_detail): DP/WD, rentang tanggal transaksi,
+    bank pemain, bank title — chip dihitung DALAM filter terpilih."""
     active = _active_toko(request)
     if active is None:
         return render(request, "web/no_toko.html")
@@ -1002,6 +1012,37 @@ def review_queue(request):
         .select_related("left", "right", "run", "run__batch")
         .order_by("-run__batch__recon_date", "-score", "id")
     )
+    flow = request.GET.get("flow", "")
+    if flow not in ("depo", "wd"):
+        flow = ""
+    if flow:
+        qs = qs.filter(Q(left__jenis=flow) | Q(left__isnull=True, right__jenis=flow))
+
+    date_from = _parse_date(request.GET.get("from", ""))
+    date_to = _parse_date(request.GET.get("to", ""))
+    if date_from:
+        qs = qs.filter(left__occurred_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(left__occurred_at__date__lte=date_to)
+
+    banks = [
+        {"code": r["left__player_bank"], "n": r["n"]}
+        for r in qs.filter(left__player_bank__gt="")
+        .values("left__player_bank").annotate(n=Count("id")).order_by("-n")
+    ]
+    bank = request.GET.get("bank", "")
+    if bank:
+        qs = qs.filter(left__player_bank=bank)
+
+    btitles = [
+        {"code": r["left__bank_title"], "n": r["n"]}
+        for r in qs.filter(left__bank_title__gt="")
+        .values("left__bank_title").annotate(n=Count("id")).order_by("-n")
+    ]
+    btitle = request.GET.get("btitle", "")
+    if btitle:
+        qs = qs.filter(left__bank_title=btitle)
+
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
     # nomor batch per-toko untuk tiap hasil di halaman ini
     for r in page.object_list:
@@ -1011,41 +1052,64 @@ def review_queue(request):
         )
     return render(request, "web/review_queue.html", {
         "page": page, "active_toko": active,
+        "flow": flow, "bank": bank, "btitle": btitle,
+        "banks": banks, "btitles": btitles,
+        "date_from": request.GET.get("from", "") if date_from else "",
+        "date_to": request.GET.get("to", "") if date_to else "",
     })
 
 
 @login_required
 def toko_overview(request):
     """Ringkasan lintas toko (scoped RBAC): status rekon terakhir, selisih,
-    antrean tinjau, menunggu settlement, uang periksa D."""
+    antrean tinjau, menunggu settlement, uang periksa D.
+    Filter tanggal (?from&to): selisih/tinjau/uang-D diagregasi atas batch
+    DALAM rentang; 'rekon terakhir' = batch terakhir dalam rentang."""
     from reconciliation.engine import pending_settlement_count
 
+    date_from = _parse_date(request.GET.get("from", ""))
+    date_to = _parse_date(request.GET.get("to", ""))
+    filtered = bool(date_from or date_to)
     tokos = tokos_for(request.user)
     rows = []
     for t in tokos:
-        last = (
-            ReconBatch.objects.filter(toko=t, recon_date__isnull=False)
-            .order_by("recon_date")
-            .last()
-        )
-        s = (last.summary or {}) if last else {}
-        dp = abs((s.get("dp") or {}).get("selisih") or 0)
-        wd = abs((s.get("wd") or {}).get("selisih") or 0)
-        total = dp + wd
+        batches = ReconBatch.objects.filter(toko=t, recon_date__isnull=False)
+        if date_from:
+            batches = batches.filter(recon_date__gte=date_from)
+        if date_to:
+            batches = batches.filter(recon_date__lte=date_to)
+        batches = list(batches.order_by("recon_date"))
+        last = batches[-1] if batches else None
+        # tanpa filter: perilaku lama (angka batch TERAKHIR saja);
+        # dengan filter: agregat seluruh batch dalam rentang.
+        scope = batches if filtered else batches[-1:]
+        total = uang_d = 0
+        for b in scope:
+            s = b.summary or {}
+            total += abs((s.get("dp") or {}).get("selisih") or 0)
+            total += abs((s.get("wd") or {}).get("selisih") or 0)
+            uang_d += ((s.get("unmatched_money") or {}).get("d") or {}).get("n") or 0
         st = "" if last is None else ("ok" if total == 0 else ("warn" if total < 10_000_000 else "bad"))
-        tinjau = MatchResult.objects.filter(
+        tinjau_qs = MatchResult.objects.filter(
             run__batch__toko=t, bucket=MatchResult.Bucket.TINJAU
-        ).count()
-        um = (s.get("unmatched_money") or {}).get("d") or {}
+        )
+        if date_from:
+            tinjau_qs = tinjau_qs.filter(run__batch__recon_date__gte=date_from)
+        if date_to:
+            tinjau_qs = tinjau_qs.filter(run__batch__recon_date__lte=date_to)
         rows.append({
             "toko": t, "last": last, "selisih": total, "status": st,
-            "tinjau": tinjau, "pending": pending_settlement_count(t),
-            "uang_d": um.get("n") or 0,
+            "tinjau": tinjau_qs.count(), "pending": pending_settlement_count(t),
+            "uang_d": uang_d,
             "has_batch": last is not None,
         })
     # selisih terbesar dulu; toko tanpa batch di bawah
     rows.sort(key=lambda r: (r["has_batch"], r["selisih"]), reverse=True)
-    return render(request, "web/toko_overview.html", {"rows": rows})
+    return render(request, "web/toko_overview.html", {
+        "rows": rows,
+        "date_from": request.GET.get("from", "") if date_from else "",
+        "date_to": request.GET.get("to", "") if date_to else "",
+    })
 
 
 @login_required

@@ -72,3 +72,64 @@ class ReviewQueueTests(TestCase):
         self.assertEqual(r.status_code, 200)
         res.refresh_from_db()
         self.assertEqual(res.bucket, MatchResult.Bucket.COCOK)
+
+
+class ReviewQueueFilterTests(ReviewQueueTests):
+    """Filter antrean tinjau: DP/WD, rentang tanggal transaksi, bank pemain,
+    bank title — pola sama seperti run_detail."""
+
+    def _tinjau2(self, *, ticket, jenis="depo", dt=datetime(2026, 6, 27, 10, 0),
+                 player_bank="", bank_title=""):
+        up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+        batch = ReconBatch.objects.create(toko=self.lbs, tolerance=self.tol)
+        run = MatchRun.objects.create(
+            relation=MatchRun.Relation.PANEL_BANK, tolerance=self.tol, batch=batch
+        )
+        left = Transaction.objects.create(
+            upload=up, source_type=self.panel, toko=self.lbs, jenis=jenis,
+            amount=Decimal("50000"), occurred_at=dt, ticket_no=ticket,
+            player_bank=player_bank, bank_title=bank_title,
+            row_hash=f"q-{next(_seq)}", raw={},
+        )
+        return MatchResult.objects.create(
+            run=run, bucket=MatchResult.Bucket.TINJAU,
+            reason_code="amount_mismatch", left=left,
+        )
+
+    def test_filter_flow_dp_wd(self):
+        self._tinjau2(ticket="D-DEPO", jenis="depo")
+        self._tinjau2(ticket="W-WD", jenis="wd")
+        r = self.client.get(reverse("review_queue"), {"flow": "wd"})
+        self.assertContains(r, "W-WD")
+        self.assertNotContains(r, "D-DEPO")
+
+    def test_filter_rentang_tanggal(self):
+        self._tinjau2(ticket="D-27", dt=datetime(2026, 6, 27, 10, 0))
+        self._tinjau2(ticket="D-28", dt=datetime(2026, 6, 28, 10, 0))
+        r = self.client.get(reverse("review_queue"),
+                            {"from": "2026-06-28", "to": "2026-06-28"})
+        self.assertContains(r, "D-28")
+        self.assertNotContains(r, "D-27")
+
+    def test_filter_bank_pemain(self):
+        self._tinjau2(ticket="D-BCA", player_bank="BCA")
+        self._tinjau2(ticket="D-DANA", player_bank="DANA")
+        r = self.client.get(reverse("review_queue"), {"bank": "DANA"})
+        self.assertContains(r, "D-DANA")
+        self.assertNotContains(r, "D-BCA")
+
+    def test_filter_bank_title(self):
+        self._tinjau2(ticket="D-T1", bank_title="BCA")
+        self._tinjau2(ticket="D-T2", bank_title="BRI")
+        r = self.client.get(reverse("review_queue"), {"btitle": "BRI"})
+        self.assertContains(r, "D-T2")
+        self.assertNotContains(r, "D-T1")
+
+    def test_filter_kombinasi_dan_chip_terhitung(self):
+        self._tinjau2(ticket="D-X", jenis="wd", player_bank="BCA", bank_title="BCA")
+        self._tinjau2(ticket="D-Y", jenis="wd", player_bank="DANA", bank_title="BCA")
+        r = self.client.get(reverse("review_queue"), {"flow": "wd", "bank": "BCA"})
+        self.assertContains(r, "D-X")
+        self.assertNotContains(r, "D-Y")
+        # chip bank pemain tetap menawarkan DANA (dihitung dalam flow terpilih)
+        self.assertContains(r, "DANA")
