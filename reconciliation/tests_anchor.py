@@ -117,3 +117,71 @@ class AnchorUtamaMoneyMatcherTests(TestCase):
         self.assertFalse(
             MatchResult.objects.filter(run=run, reason_code="weak_name").exists()
         )
+
+
+class AnchorNomorHPTests(TestCase):
+    """Anchor nomor HP/VA — mutasi e-wallet (FTFVA/DANA, GO-PAY TOPUP) tak membawa
+    nama pengirim tapi membawa nomor tujuan; format persis dari mutasi BCA riil."""
+
+    def setUp(self):
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bank = SourceType.objects.get_or_create(
+            key="bank", defaults={"name": "Bank", "is_money_source": True}
+        )[0]
+        self.tol = ToleranceProfile.objects.get_or_create(
+            name="Default", defaults={"date_window_days": 1, "fuzzy_threshold": 85}
+        )[0]
+        self.up = Upload.objects.create(source_type=self.panel)
+        self.upb = Upload.objects.create(source_type=self.bank)
+
+    def _panel(self, money, name, pbank, rh, dt):
+        return Transaction.objects.create(
+            upload=self.up, source_type=self.panel, jenis="wd",
+            amount=Decimal(abs(money)), money_delta=Decimal(money),
+            counterparty=name, occurred_at=dt, row_hash=rh,
+            raw={"Player Bank": pbank},
+        )
+
+    def _bank(self, money, ket, rh, dt):
+        return Transaction.objects.create(
+            upload=self.upb, source_type=self.bank, jenis="wd",
+            amount=Decimal(abs(money)), money_delta=Decimal(money),
+            counterparty="", occurred_at=dt, row_hash=rh, raw={"Keterangan": ket},
+        )
+
+    def test_dana_va_nomor_cocok(self):
+        # Mutasi DANA tanpa nama pengirim, nomor VA di keterangan = HP panel → cocok.
+        p = self._panel(-126000, "Angger Praja", "DANA|Angger Praja|082264436674",
+                        "p1", datetime(2026, 7, 1, 10, 0))
+        b = self._bank(-126000,
+                       "TRSF E-BANKING DB 0107/FTFVA/WS9501139010/DANA - - 82264436674",
+                       "b1", datetime(2026, 7, 1, 11, 0))
+        run = run_match("panel_bank", self.tol)
+        r = MatchResult.objects.get(run=run, left=p)
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.right, b)
+        self.assertEqual(r.score, 100)
+
+    def test_gopay_topup_nomor_cocok(self):
+        p = self._panel(-51000, "Bayu Hartono", "GOPAY|Bayu Hartono|0895389905759",
+                        "p1", datetime(2026, 7, 1, 10, 0))
+        b = self._bank(-51000,
+                       "TRSF E-BANKING DB 0107/FTFVA/WS9501170001/GO-PAY TOPUP- - 0895389905759",
+                       "b1", datetime(2026, 7, 1, 11, 0))
+        run = run_match("panel_bank", self.tol)
+        r = MatchResult.objects.get(run=run, left=p)
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.right, b)
+
+    def test_nomor_beda_tidak_dipasangkan(self):
+        # Nomor HP beda + tak ada nama di mutasi → tidak boleh dipasangkan blind.
+        p = self._panel(-70000, "Hermanto", "DANA|Hermanto|087886695145",
+                        "p1", datetime(2026, 7, 1, 22, 50))
+        self._bank(-70000,
+                   "TRSF E-BANKING DB 0107/FTFVA/WS9501139010/DANA - - 81328680665",
+                   "b1", datetime(2026, 7, 1, 0, 0))
+        run = run_match("panel_bank", self.tol)
+        r = MatchResult.objects.get(run=run, left=p)
+        self.assertEqual(r.bucket, MatchResult.Bucket.TIDAK)
+        self.assertEqual(r.reason_code, "no_money")
+        self.assertIsNone(r.right)
