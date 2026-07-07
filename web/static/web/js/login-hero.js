@@ -71,7 +71,7 @@ function init(renderer) {
   function layout() {
     const visH = 2 * CAM_Z * Math.tan(VFOV / 2);
     const visW = visH * (innerWidth / innerHeight);
-    return { visW, visH, scale: (visW * 0.44) / halfW, yOff: visH * 0.18 };
+    return { visW, visH, scale: (visW * 0.44) / halfW, yOff: visH * 0.30 };
   }
   let lay = layout();
 
@@ -134,7 +134,7 @@ function init(renderer) {
 
   // ── Bintang kelap-kelip (starfield jauh, tiap bintang berkedip independen) ──
   //    Selaras palet interior: mayoritas bone/cream, sebagian kecil kilau biru/cyan.
-  const STAR_N = isMobile ? 110 : 210;
+  const STAR_N = isMobile ? 300 : 620;
   const sPos = new Float32Array(STAR_N * 3), sSeed = new Float32Array(STAR_N), sTone = new Float32Array(STAR_N);
   for (let i = 0; i < STAR_N; i++) {
     sPos[i * 3]     = (Math.random() - .5) * 52;      // sebar jauh melebihi viewport → kepadatan rendah
