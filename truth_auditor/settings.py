@@ -29,6 +29,16 @@ SECRET_KEY = os.environ.get(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 
+# Produksi wajib SECRET_KEY dari env — kunci default di atas ter-commit di repo
+# (publik). Gagal cepat saat boot jauh lebih aman daripada diam-diam insecure.
+if not DEBUG and 'SECRET_KEY' not in os.environ:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        'DEBUG=False tanpa env SECRET_KEY — set SECRET_KEY di environment produksi '
+        '(jangan memakai kunci default repo).'
+    )
+
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', 'testserver']
 _railway_host = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
 if _railway_host:
