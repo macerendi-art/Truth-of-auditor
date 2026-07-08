@@ -388,6 +388,8 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
     Mutasi Bank</a>
   <a class="link {% if '/tinjau' in p %}active{% endif %}" href="{% url 'review_queue' %}" style="padding-left:38px;font-size:12.5px">
     Area Pengecekan{% if pending_review_count %} <span class="cnt {% if pending_review_count > 200 %}hot{% endif %}">{{ pending_review_count }}</span>{% endif %}</a>
+  <a class="link {% if p == '/export/' %}active{% endif %}" href="{% url 'export_center' %}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export</a>
   {% if is_admin_user %}
   <div class="sec">Admin</div>
   <a class="link {% if '/kelola/user' in p %}active{% endif %}" href="{% url 'kelola_user' %}">

@@ -1,0 +1,36 @@
+{% extends "web/app_base.html" %}
+{% block title %}Export · Truth of Auditor{% endblock %}
+{% block crumb %}Export{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Export</h1>
+    <p>Unduh hasil rekonsiliasi per tanggal &amp; toko — banyak file otomatis jadi satu ZIP.</p>
+  </div>
+</div>
+
+<div class="card reveal" style="max-width:640px">
+  <form method="get" class="row" style="flex-direction:column;align-items:stretch;gap:14px">
+    <div class="field"><label>Toko</label>
+      <select name="toko" required>
+        <option value="">— pilih toko —</option>
+        {% if is_admin_user %}<option value="all">Semua toko (admin)</option>{% endif %}
+        {% for t in tokos %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>Satu tanggal (kosongkan untuk rentang)</label>
+      <input type="date" name="date"></div>
+    <div style="display:flex;gap:12px">
+      <div class="field" style="flex:1"><label>Dari tanggal</label><input type="date" name="from"></div>
+      <div class="field" style="flex:1"><label>Sampai tanggal</label><input type="date" name="to"></div>
+    </div>
+    <p class="faint" style="font-size:12.5px;margin:0">
+      Kosongkan semua tanggal = seluruh tanggal untuk toko terpilih. Nama file selalu
+      <span class="mono">rekonsiliasi_&lt;toko&gt;_&lt;tanggal&gt;.xlsx</span> — bulk tetap terpisah per tanggal di dalam ZIP.
+    </p>
+    <div><button class="btn primary" type="submit">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Unduh Export</button></div>
+  </form>
+</div>
+{% endblock %}

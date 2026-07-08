@@ -35,7 +35,7 @@ from sources.management.commands.ingest import detect_flow
 from sources.models import SourceType, Upload
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
-from web.access import tokos_for
+from web.access import is_admin, tokos_for
 from web.templatetags.web_extras import reason_label
 
 BUCKET_META = {
@@ -1332,35 +1332,9 @@ def export_run(request, pk):
     for row in ws["A"]:
         row.font = Font(bold=True)
 
-    d = wb.create_sheet("Hasil")
-    L, R = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
-    headers = ["Status", f"{L} Ticket", f"{L} Nominal", f"{L} Username", f"{L} Nama Lengkap",
-               f"{L} Player Bank", f"{L} Bank Title", f"{L} Handler", f"{L} Waktu",
-               R, f"{R} Sumber", f"{R} Nominal", f"{R} Waktu", "Skor", "Alasan", "Detail"]
-    d.append(headers)
-    for c in d[1]:
-        c.font = Font(bold=True)
-    qs = run.results.select_related("left", "right", "left__source_type", "right__source_type")
-    for r in qs.iterator():
-        left, right = r.left, r.right
-        d.append([
-            r.get_bucket_display(),
-            left.ticket_no if left else "",
-            float(left.amount) if left else "",
-            left.username if left else "",
-            left.counterparty if left else "",
-            (left.raw or {}).get("Player Bank", "") if left else "",
-            (left.raw or {}).get("Bank Title", "") if left else "",
-            (left.raw or {}).get("Handler", "") if left else "",
-            left.occurred_at.strftime("%d/%m %H:%M") if left and left.occurred_at else "",
-            (right.ticket_no or right.counterparty) if right else "",
-            right.source_type.key if right else "",
-            float(right.amount) if right else "",
-            right.occurred_at.strftime("%d/%m %H:%M") if right and right.occurred_at else "",
-            round(r.score or 0),
-            reason_label(r.reason_code),
-            r.reason_detail,
-        ])
+    from web.exports import results_sheet
+
+    results_sheet(wb, run, "Hasil", REL_LABELS)
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -1370,4 +1344,100 @@ def export_run(request, pk):
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     resp["Content-Disposition"] = f'attachment; filename="rekonsiliasi_run{run.pk}.xlsx"'
+    return resp
+
+
+# Batas jumlah batch satu kali export bulk — jaga memori & waktu respons.
+EXPORT_BATCH_CAP = 200
+
+
+@login_required
+def export_center(request):
+    """Menu Export: per-tanggal / per-toko / semua toko (admin) / kombinasi.
+
+    1 batch -> xlsx langsung; >1 -> ZIP berisi xlsx per-(toko,tanggal) —
+    output tetap per-tanggal walaupun export dilakukan sekaligus (bulk).
+    """
+    import io
+
+    from web.exports import XLSX_CT, batch_filename, build_batch_workbook, safe_name
+
+    allowed = tokos_for(request.user)
+    toko_param = request.GET.get("toko", "")
+    date_one = _parse_date(request.GET.get("date", ""))
+    date_from = _parse_date(request.GET.get("from", ""))
+    date_to = _parse_date(request.GET.get("to", ""))
+
+    if not toko_param:  # form
+        return render(request, "web/export_center.html", {"tokos": allowed})
+
+    # --- resolusi scope toko (RBAC: tokos_for = satu-satunya sumber kebenaran) ---
+    if toko_param == "all":
+        if not is_admin(request.user):
+            messages.error(request, "Export semua toko khusus admin.")
+            return redirect("export_center")
+        scope = allowed
+        scope_label = "semua-toko"
+    else:
+        toko = allowed.filter(id=toko_param).first() if toko_param.isdigit() else None
+        if toko is None:
+            messages.error(request, "Toko tidak dikenal atau bukan wewenangmu.")
+            return redirect("export_center")
+        scope = [toko]
+        scope_label = safe_name(toko.name)
+
+    batches = (
+        ReconBatch.objects.filter(toko__in=scope, recon_date__isnull=False)
+        .select_related("toko", "tolerance")
+        .order_by("toko__name", "recon_date")
+    )
+    if date_one:
+        batches = batches.filter(recon_date=date_one)
+    else:
+        if date_from:
+            batches = batches.filter(recon_date__gte=date_from)
+        if date_to:
+            batches = batches.filter(recon_date__lte=date_to)
+
+    n = batches.count()
+    if n == 0:
+        messages.error(request, "Tidak ada batch pada pilihan itu — cek toko/tanggalnya.")
+        return redirect("export_center")
+    if n > EXPORT_BATCH_CAP:
+        messages.error(
+            request, f"{n} batch terlalu banyak untuk satu export — persempit rentang tanggal (maks {EXPORT_BATCH_CAP})."
+        )
+        return redirect("export_center")
+
+    # nomor batch per-toko (konsisten dgn batch_detail) tanpa N query per batch
+    def batch_no(b):
+        return ReconBatch.objects.filter(toko=b.toko, id__lte=b.id).count()
+
+    catat(request.user, "export_batch", f"{n} batch ({scope_label})")
+
+    if n == 1:
+        b = batches[0]
+        wb = build_batch_workbook(b, batch_no(b), REL_LABELS)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        resp = HttpResponse(buf.read(), content_type=XLSX_CT)
+        resp["Content-Disposition"] = f'attachment; filename="{batch_filename(b)}"'
+        return resp
+
+    # Bulk: ZIP — satu xlsx per (toko, tanggal); workbook dibangun berurutan (hemat memori).
+    zbuf = io.BytesIO()
+    with zipfile.ZipFile(zbuf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for b in batches.iterator():
+            wb = build_batch_workbook(b, batch_no(b), REL_LABELS)
+            inner = io.BytesIO()
+            wb.save(inner)
+            zf.writestr(batch_filename(b), inner.getvalue())
+    zbuf.seek(0)
+    tag_from = (date_one or date_from).isoformat() if (date_one or date_from) else "awal"
+    tag_to = (date_one or date_to).isoformat() if (date_one or date_to) else "akhir"
+    resp = HttpResponse(zbuf.read(), content_type="application/zip")
+    resp["Content-Disposition"] = (
+        f'attachment; filename="rekonsiliasi_{scope_label}_{tag_from}_{tag_to}.zip"'
+    )
     return resp
