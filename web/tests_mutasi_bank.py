@@ -107,6 +107,22 @@ class MutasiBankFilterTests(MutasiBankBase):
         self.assertContains(r, "GW-ROW")
         self.assertNotContains(r, "DP-BANK")
 
+    def test_dropdown_file_ikut_tombol_sumber(self):
+        # tombol Bank -> dropdown cuma file bank; Gateway -> cuma file gateway
+        r = self.client.get(reverse("bank_mutations"), {"source": "bank"})
+        self.assertContains(r, "bca.csv")
+        self.assertNotContains(r, "QR FLYER")
+        r = self.client.get(reverse("bank_mutations"), {"source": "gateway"})
+        self.assertContains(r, "QR FLYER")
+        self.assertNotContains(r, "bca.csv")
+
+    def test_ganti_sumber_reset_pilihan_file(self):
+        # file gateway dipilih tapi sumber=bank -> pilihan diabaikan (tampil semua bank)
+        r = self.client.get(reverse("bank_mutations"), {"source": "bank", "upload": self.upg.id})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "DP-BANK")
+        self.assertNotContains(r, "GW-ROW")
+
     def test_filter_upload_toko_lain_diabaikan(self):
         upo = self._up(self.bank, "x.csv", toko=self.slo)
         self._tx(upo, self.bank, toko=self.slo, counterparty="LAIN")

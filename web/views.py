@@ -981,6 +981,9 @@ def run_detail(request, pk):
         "left_amt_label": left_amt_label, "right_amt_label": right_amt_label,
         "orphan_label": orphan_label,
         "n_tidak_cocok": n_tidak_cocok, "n_tidak_ada_panel": n_tidak_ada_panel,
+        # Tab "Tidak Ada di Panel": sisi kiri (panel) kosong semua → sembunyikan
+        # kolomnya agar kolom Mutasi Bank lega & nama rekening terbaca.
+        "hide_left": bucket == "tidak_ada_panel",
         "batch": batch, "batch_no": batch_no,
         "reasons": reasons, "reason": reason, "flow": flow,
         "banks": banks, "bank": bank, "btitles": btitles, "btitle": btitle,
@@ -1158,16 +1161,18 @@ def bank_mutations(request):
     if date_to:
         qs = qs.filter(occurred_at__date__lte=date_to)
 
-    # Dropdown per-file: hanya upload sumber uang milik toko aktif.
-    uploads = list(
-        Upload.objects.filter(toko=active, source_type__key__in=money_keys)
-        .order_by("-id")
-    )
+    # Dropdown per-file: upload sumber uang toko aktif, IKUT tombol sumber
+    # (Bank → hanya file bank; Gateway QRIS → hanya file gateway).
+    upload_qs = Upload.objects.filter(toko=active, source_type__key__in=money_keys)
+    if src:
+        upload_qs = upload_qs.filter(source_type__key=src)
+    uploads = list(upload_qs.order_by("-id"))
     upload_id = request.GET.get("upload", "")
     sel_upload = None
     if upload_id.isdigit():
+        # cari di daftar ter-scope src → ganti sumber otomatis mereset pilihan file
         sel_upload = next((u for u in uploads if u.id == int(upload_id)), None)
-        if sel_upload:  # id upload toko lain diabaikan (RBAC)
+        if sel_upload:  # id upload toko lain / sumber lain diabaikan (RBAC + konsistensi)
             qs = qs.filter(upload=sel_upload)
 
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
@@ -1364,9 +1369,14 @@ def export_center(request):
 
     allowed = tokos_for(request.user)
     toko_param = request.GET.get("toko", "")
-    date_one = _parse_date(request.GET.get("date", ""))
     date_from = _parse_date(request.GET.get("from", ""))
     date_to = _parse_date(request.GET.get("to", ""))
+    # UX rentang: isi "Dari" saja = tarik satu tanggal (Sampai ikut); isi "Sampai"
+    # saja = anggap tanggal itu juga. Isi keduanya = rentang.
+    if date_from and not date_to:
+        date_to = date_from
+    elif date_to and not date_from:
+        date_from = date_to
 
     if not toko_param:  # form
         return render(request, "web/export_center.html", {"tokos": allowed})
@@ -1391,13 +1401,10 @@ def export_center(request):
         .select_related("toko", "tolerance")
         .order_by("toko__name", "recon_date")
     )
-    if date_one:
-        batches = batches.filter(recon_date=date_one)
-    else:
-        if date_from:
-            batches = batches.filter(recon_date__gte=date_from)
-        if date_to:
-            batches = batches.filter(recon_date__lte=date_to)
+    if date_from:
+        batches = batches.filter(recon_date__gte=date_from)
+    if date_to:
+        batches = batches.filter(recon_date__lte=date_to)
 
     n = batches.count()
     if n == 0:
@@ -1434,8 +1441,8 @@ def export_center(request):
             wb.save(inner)
             zf.writestr(batch_filename(b), inner.getvalue())
     zbuf.seek(0)
-    tag_from = (date_one or date_from).isoformat() if (date_one or date_from) else "awal"
-    tag_to = (date_one or date_to).isoformat() if (date_one or date_to) else "akhir"
+    tag_from = date_from.isoformat() if date_from else "awal"
+    tag_to = date_to.isoformat() if date_to else "akhir"
     resp = HttpResponse(zbuf.read(), content_type="application/zip")
     resp["Content-Disposition"] = (
         f'attachment; filename="rekonsiliasi_{scope_label}_{tag_from}_{tag_to}.zip"'

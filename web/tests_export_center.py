@@ -61,7 +61,7 @@ class ExportSingleTests(ExportCenterBase):
     def test_satu_batch_langsung_xlsx(self):
         self._batch(self.lbs, date(2026, 6, 27))
         r = self.client.get(reverse("export_center"),
-                            {"toko": self.lbs.id, "date": "2026-06-27"})
+                            {"toko": self.lbs.id, "from": "2026-06-27"})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r["Content-Type"], XLSX_CT)
         cd = r["Content-Disposition"]
@@ -76,9 +76,18 @@ class ExportSingleTests(ExportCenterBase):
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, "Export")
 
+    def test_sampai_saja_dianggap_satu_tanggal(self):
+        # isi "Sampai" saja -> diperlakukan tanggal itu juga -> 1 batch xlsx
+        self._batch(self.lbs, date(2026, 6, 27))
+        self._batch(self.lbs, date(2026, 6, 28))
+        r = self.client.get(reverse("export_center"),
+                            {"toko": self.lbs.id, "to": "2026-06-27"})
+        self.assertEqual(r["Content-Type"], XLSX_CT)
+        self.assertIn("2026-06-27", r["Content-Disposition"])
+
     def test_kosong_redirect_message(self):
         r = self.client.get(reverse("export_center"),
-                            {"toko": self.lbs.id, "date": "2026-01-01"}, follow=True)
+                            {"toko": self.lbs.id, "from": "2026-01-01"}, follow=True)
         self.assertContains(r, "Tidak ada batch")
 
 
@@ -104,7 +113,7 @@ class ExportBulkTests(ExportCenterBase):
     def test_semua_toko_admin(self):
         self._batch(self.lbs, date(2026, 6, 27))
         self._batch(self.slo, date(2026, 6, 27))
-        r = self.client.get(reverse("export_center"), {"toko": "all", "date": "2026-06-27"})
+        r = self.client.get(reverse("export_center"), {"toko": "all", "from": "2026-06-27"})
         self.assertEqual(r["Content-Type"], "application/zip")
         zf = zipfile.ZipFile(io.BytesIO(r.content))
         self.assertEqual(len(zf.namelist()), 2)
@@ -129,7 +138,7 @@ class ExportRBACTests(ExportCenterBase):
         self._batch(self.lbs, date(2026, 6, 27))
         self._login_auditor(self.lbs)
         r = self.client.get(reverse("export_center"),
-                            {"toko": "all", "date": "2026-06-27"}, follow=True)
+                            {"toko": "all", "from": "2026-06-27"}, follow=True)
         self.assertNotEqual(r.get("Content-Type"), "application/zip")
         self.assertContains(r, "admin")
 
@@ -137,14 +146,14 @@ class ExportRBACTests(ExportCenterBase):
         self._batch(self.slo, date(2026, 6, 27))
         self._login_auditor(self.lbs)
         r = self.client.get(reverse("export_center"),
-                            {"toko": self.slo.id, "date": "2026-06-27"}, follow=True)
+                            {"toko": self.slo.id, "from": "2026-06-27"}, follow=True)
         self.assertNotEqual(r.get("Content-Type"), XLSX_CT)
 
     def test_auditor_toko_sendiri_boleh(self):
         self._batch(self.lbs, date(2026, 6, 27))
         self._login_auditor(self.lbs)
         r = self.client.get(reverse("export_center"),
-                            {"toko": self.lbs.id, "date": "2026-06-27"})
+                            {"toko": self.lbs.id, "from": "2026-06-27"})
         self.assertEqual(r["Content-Type"], XLSX_CT)
 
     def test_opsi_semua_toko_hanya_admin_di_form(self):

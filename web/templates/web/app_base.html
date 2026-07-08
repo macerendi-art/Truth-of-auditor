@@ -180,7 +180,7 @@ input[type=checkbox],input[type=radio]{width:auto;accent-color:var(--brand)}
 /* Tabel hasil run & antrean tinjau: banyak kolom — beri lantai lebar supaya
    overflow-x:auto bekerja (tanpa ini browser menggencet kolom fleksibel jadi
    ~21px di laptop 1280px). ≤760px tidak perlu: .col-hide sudah disembunyikan. */
-@media(min-width:761px){#hasil-table{min-width:1340px}#tinjau-table{min-width:1340px}#tinjau-table.lean{min-width:820px}}
+@media(min-width:761px){#hasil-table{min-width:1340px}#hasil-table.lean{min-width:760px}#tinjau-table{min-width:1340px}#tinjau-table.lean{min-width:820px}}
 .pager{display:flex;gap:6px;align-items:center;justify-content:center;margin-top:22px;flex-wrap:wrap;color:var(--muted);font-size:13px}
 .pg{display:inline-grid;place-items:center;min-width:36px;height:36px;padding:0 10px;border-radius:10px;
   border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:13px;font-weight:600;
