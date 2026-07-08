@@ -15,7 +15,8 @@
   {% endwith %}
   <td class="num mono">{% if r.left %}{{ r.left.amount|floatformat:0|intcomma }}{% endif %}</td>
   <td>{% if r.right %}<div class="mono">{{ r.right.counterparty|default:r.right.ticket_no|default:"—" }}</div>
-    <div class="faint" style="font-size:12px"><b style="color:var(--ink)">{{ r.right.source_label }}</b>{% with norek=r.right.raw|raw_get:"NOREK" %}{% if norek %} · <span title="No. rekening">{{ norek }}</span>{% endif %}{% endwith %}{% if r.right.occurred_at %} · {{ r.right.occurred_at|date:"d/m H:i" }}{% endif %}</div>{% else %}<span class="faint">—</span>{% endif %}</td>
+    <div class="faint" style="font-size:12px"><b style="color:var(--ink)">{{ r.right.source_label_full }}</b>{% with norek=r.right.raw|raw_get:"NOREK" %}{% if norek %} · <span title="No. rekening">{{ norek }}</span>{% endif %}{% endwith %}{% if r.right.occurred_at %} · {{ r.right.occurred_at|date:"d/m H:i" }}{% endif %}</div>
+    {% if r.right.description %}<div class="faint cell-tr" style="font-size:11.5px" title="{{ r.right.description }}">{{ r.right.description|truncatechars:110 }}</div>{% endif %}{% else %}<span class="faint">—</span>{% endif %}</td>
   <td class="num mono">{% if r.right %}{{ r.right.amount|floatformat:0|intcomma }}{% endif %}</td>
   <td>
     <span style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">

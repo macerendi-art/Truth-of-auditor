@@ -55,6 +55,41 @@ def provider_from_filename(name):
     return ""
 
 
+# Token nama file yang BUKAN nama pemilik rekening (label alur/dokumen + ekstensi).
+# Nama bulan ikut dibuang (nama file sering memuat tanggal: '27_JUNI_2026_...').
+_OWNER_STOPWORDS = frozenset({
+    "DP", "WD", "MUTASI", "REKENING", "REK", "TRANSAKSI", "HISTORI", "PANEL",
+    "TGL", "QR", "FLYER", "CSV", "PDF", "XLSX", "XLS",
+    "JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS",
+    "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER",
+    "JAN", "FEB", "MAR", "APR", "JUN", "JUL", "AGU", "AGT", "SEP", "OKT", "NOV", "DES",
+})
+
+
+def owner_from_filename(name):
+    """Nama pemilik rekening dari nama file upload — fallback bila header file
+    tidak memuatnya (BRI). Token SETELAH token brand, buang token berdigit
+    (tanggal/kode toko) + stopword. '27_JUNI_2026_WD_BRI_PANCA_SENTANA.csv'
+    -> 'PANCA SENTANA'. Tak ada brand / tak tersisa token -> ''.
+    """
+    tokens = [t for t in re.split(r"[^A-Z0-9]+", (name or "").upper()) if t]
+    brand_end = None  # indeks token pertama SETELAH token brand
+    for i, tok in enumerate(tokens):
+        if i + 1 < len(tokens) and tok + tokens[i + 1] in SPECIFIC_SOURCE_LABELS:
+            brand_end = i + 2
+            break
+        if tok in SPECIFIC_SOURCE_LABELS:
+            brand_end = i + 1
+            break
+    if brand_end is None:
+        return ""
+    keep = [
+        t for t in tokens[brand_end:]
+        if t not in _OWNER_STOPWORDS and not re.search(r"\d", t)
+    ]
+    return " ".join(keep)
+
+
 def specific_source_label(source_key, account=None, upload=None):
     """Label sumber spesifik untuk badge Transaksi.
 
@@ -187,3 +222,17 @@ class Transaction(TimeStampedModel):
             account=self.account if self.account_id else None,
             upload=self.upload if self.upload_id else None,
         )
+
+    @property
+    def source_label_full(self):
+        """Label sumber + pemilik rekening end user: 'BCA a/n HENDI'.
+
+        Hanya sisi uang (bank/gateway) yang punya owner; tanpa owner ->
+        sama dengan `source_label` (jangan mengarang).
+        """
+        label = self.source_label
+        if self.source_type.key in _MONEY_KEYS and self.upload_id:
+            owner = self.upload.owner_name
+            if owner:
+                return f"{label} a/n {owner}"
+        return label

@@ -174,6 +174,11 @@ class BCACSVParser(BaseParser):
         hidx = None
         for i, r in enumerate(rows):
             cells = [str(c).strip() for c in r]
+            # Preamble BCA: baris 'Nama,=,NIJUN' sebelum header -> pemilik rekening.
+            if not self.meta.get("owner_name") and cells and cells[0] == "Nama":
+                owner = next((c.lstrip("'").strip() for c in cells[1:] if c and c != "="), "")
+                if owner:
+                    self.meta["owner_name"] = owner
             if "Tanggal" in cells and "Saldo" in cells:
                 hidx = i
                 break
@@ -229,6 +234,12 @@ class MandiriParser(BaseParser):
         hidx = None
         for i, r in enumerate(allrows):
             cells = [str(c).strip() if c is not None else "" for c in r]
+            # Header e-Statement: 'Nama/Name | : | SITI NURUL WIRDAH | ...'
+            if not self.meta.get("owner_name") and any(c.startswith("Nama/Name") for c in cells):
+                j = next(k for k, c in enumerate(cells) if c.startswith("Nama/Name"))
+                owner = next((c for c in cells[j + 1:] if c and c != ":"), "")
+                if owner:
+                    self.meta["owner_name"] = owner
             if "Tanggal" in cells and "Keterangan" in cells:
                 hidx = i
                 break

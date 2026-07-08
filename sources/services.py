@@ -5,7 +5,7 @@ from pathlib import Path
 
 from django.db import IntegrityError, transaction as db_tx
 
-from transactions.models import Transaction
+from transactions.models import Transaction, owner_from_filename
 
 from .models import SourceType, Upload
 from .parsers.banks import BCACSVParser, BRIParser, MandiriParser
@@ -98,19 +98,23 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
     try:
         rows = parser.parse(parse_path, flow=flow)
         st = SourceType.objects.get(key=parser.source_key)
+        # Pemilik rekening: header file (BCA/Mandiri) dulu, fallback nama file (BRI).
+        # getattr: parser double di test boleh tanpa .meta.
+        meta = getattr(parser, "meta", {}) or {}
+        owner = meta.get("owner_name", "") or owner_from_filename(Path(file_path).name)
         try:
-            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider)
+            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner)
         except IntegrityError:
             # Balapan ingest ganda (double-submit / dua worker): constraint DB
             # menolak baris kembar. Ulang SEKALI — percobaan kedua membaca ulang
             # row_hash yang baru saja di-commit proses lain → terhitung duplikat.
-            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider)
+            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner)
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
 
 
-def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider):
+def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner=""):
     """Simpan hasil parse sebagai Upload + Transaction (atomic, dedup row_hash)."""
     with db_tx.atomic():
             up = Upload.objects.create(
@@ -121,6 +125,7 @@ def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, pr
                 flow=flow or "",
                 recon_date=recon_date,
                 original_name=Path(file_path).name,
+                owner_name=(owner or "")[:100],
                 status=Upload.PARSED,
                 uploaded_by=user,
             )

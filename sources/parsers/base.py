@@ -259,9 +259,18 @@ def parse_bank_triplet(value):
 
 
 class BaseParser:
-    """Interface parser. Subclass set `source_key` & implement `parse`."""
+    """Interface parser. Subclass set `source_key` & implement `parse`.
+
+    `meta` = metadata level-file yang diisi `parse()` (mis. `owner_name`
+    pemilik rekening dari header statement). Terpisah dari baris keluaran
+    agar row_hash TIDAK berubah. Parser di-instantiate fresh per ingest,
+    jadi tidak ada state basi antar file.
+    """
 
     source_key: str | None = None
+
+    def __init__(self):
+        self.meta = {}
 
     def parse(self, path, flow="") -> list[dict]:
         raise NotImplementedError

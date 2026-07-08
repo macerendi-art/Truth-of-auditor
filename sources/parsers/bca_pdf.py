@@ -25,6 +25,19 @@ def _is_skip(s):
     return any(k in s for k in SKIP)
 
 
+OWNER_RE = re.compile(r"^NAMA\s*:\s*(.+?)\s*$")
+
+
+def extract_pdf_owner(lines):
+    """Pemilik rekening dari header statement ('NAMA : HENDI'). '' bila absen.
+    Baris ini tetap di-SKIP dari transaksi — hanya dibaca sebagai metadata."""
+    for ln in lines:
+        m = OWNER_RE.match(ln.strip())
+        if m:
+            return m.group(1)
+    return ""
+
+
 def _clean_name(middle, cont):
     """Isolasi nama: gabung baris utama + baris lanjutan, lalu ekstrak lewat
     helper BCA bersama (buang teks struktural dulu, baru normalisasi di engine)."""
@@ -39,6 +52,10 @@ class BCAPDFParser(BaseParser):
         with pdfplumber.open(path) as pdf:
             for pg in pdf.pages:
                 lines += (pg.extract_text() or "").split("\n")
+
+        owner = extract_pdf_owner(lines[:40])  # header selalu di awal dokumen
+        if owner:
+            self.meta["owner_name"] = owner
 
         txns, cur = [], None
         for ln in lines:

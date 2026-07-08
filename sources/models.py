@@ -105,6 +105,10 @@ class Upload(TimeStampedModel):
     recon_date = models.DateField(null=True, blank=True, help_text="tanggal rekonsiliasi")
     file = models.FileField(upload_to="uploads/%Y/%m/")
     original_name = models.CharField(max_length=255, blank=True)
+    owner_name = models.CharField(
+        max_length=100, blank=True,
+        help_text="Nama pemilik rekening dari header file (mis. HENDI) atau nama file",
+    )
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=UPLOADED)
     rows_parsed = models.IntegerField(default=0)
     rows_duplicate = models.IntegerField(default=0)
