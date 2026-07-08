@@ -20,7 +20,7 @@
   {% if date_from or date_to %}
   <p class="faint" style="margin:8px 0 0;font-size:12.5px">Menampilkan agregat batch
     {% if date_from %}dari <b>{{ date_from }}</b>{% endif %}{% if date_to %} sampai <b>{{ date_to }}</b>{% endif %} —
-    selisih, antrean tinjau, dan uang periksa dijumlah atas seluruh batch dalam rentang.</p>
+    selisih, area pengecekan, dan uang periksa dijumlah atas seluruh batch dalam rentang.</p>
   {% endif %}
 </div>
 
@@ -28,7 +28,7 @@
   <div class="card-head"><h3>Toko <span class="faint" style="font-weight:500">({{ rows|length }})</span></h3></div>
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>Toko</th><th>Rekon terakhir</th><th class="num">Selisih (DP+WD)</th><th class="num">Antrean tinjau</th><th class="num">Menunggu settlement</th><th class="num">Uang periksa (D)</th><th class="r">Aksi</th></tr></thead>
+    <thead><tr><th>Toko</th><th>Rekon terakhir</th><th class="num">Selisih (DP+WD)</th><th class="num">Area Pengecekan</th><th class="num">Menunggu settlement</th><th class="num">Uang periksa (D)</th><th class="r">Aksi</th></tr></thead>
     <tbody>
     {% for r in rows %}
       <tr>

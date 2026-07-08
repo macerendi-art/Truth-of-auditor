@@ -999,31 +999,57 @@ def _parse_date(s):
 
 @login_required
 def review_queue(request):
-    """Antrean semua hasil perlu-tinjau toko aktif, lintas batch/run.
+    """Area Pengecekan: hasil yang perlu dicek toko aktif, lintas batch/run —
+    tab perlu_tinjau (default) / tidak_cocok / tidak_ada_panel.
     Filter (pola sama dgn run_detail): DP/WD, rentang tanggal transaksi,
     bank pemain, bank title — chip dihitung DALAM filter terpilih."""
     active = _active_toko(request)
     if active is None:
         return render(request, "web/no_toko.html")
-    qs = (
-        MatchResult.objects.filter(
-            run__batch__toko=active, bucket=MatchResult.Bucket.TINJAU
-        )
-        .select_related("left", "right", "run", "run__batch")
-        .order_by("-run__batch__recon_date", "-score", "id")
+    TIDAK = MatchResult.Bucket.TIDAK
+    bucket = request.GET.get("bucket", "perlu_tinjau")
+    if bucket not in ("perlu_tinjau", "tidak_cocok", "tidak_ada_panel"):
+        bucket = "perlu_tinjau"  # param ngawur -> default (back-compat URL lama)
+    base = MatchResult.objects.filter(run__batch__toko=active).select_related(
+        "left", "right", "right__source_type", "right__upload", "run", "run__batch"
     )
     flow = request.GET.get("flow", "")
     if flow not in ("depo", "wd"):
         flow = ""
     if flow:
-        qs = qs.filter(Q(left__jenis=flow) | Q(left__isnull=True, right__jenis=flow))
+        base = base.filter(Q(left__jenis=flow) | Q(left__isnull=True, right__jenis=flow))
 
     date_from = _parse_date(request.GET.get("from", ""))
     date_to = _parse_date(request.GET.get("to", ""))
+    # Tanggal: sisi kredit; baris orphan (tanpa kiri) dinilai dari sisi uangnya.
     if date_from:
-        qs = qs.filter(left__occurred_at__date__gte=date_from)
+        base = base.filter(
+            Q(left__occurred_at__date__gte=date_from)
+            | Q(left__isnull=True, right__occurred_at__date__gte=date_from)
+        )
     if date_to:
-        qs = qs.filter(left__occurred_at__date__lte=date_to)
+        base = base.filter(
+            Q(left__occurred_at__date__lte=date_to)
+            | Q(left__isnull=True, right__occurred_at__date__lte=date_to)
+        )
+
+    # Hitungan tab DALAM flow+tanggal terpilih (angka jujur, pola run_detail).
+    tab_counts = {
+        "perlu_tinjau": base.filter(bucket=MatchResult.Bucket.TINJAU).count(),
+        "tidak_cocok": base.filter(bucket=TIDAK, left__isnull=False).count(),
+        "tidak_ada_panel": base.filter(bucket=TIDAK, left__isnull=True).count(),
+    }
+    if bucket == "tidak_cocok":
+        qs = base.filter(bucket=TIDAK, left__isnull=False)
+    elif bucket == "tidak_ada_panel":
+        # skor tak bermakna utk orphan -> urut waktu sisi uang
+        qs = base.filter(bucket=TIDAK, left__isnull=True).order_by(
+            "-run__batch__recon_date", "right__occurred_at", "id"
+        )
+    else:
+        qs = base.filter(bucket=MatchResult.Bucket.TINJAU)
+    if bucket != "tidak_ada_panel":
+        qs = qs.order_by("-run__batch__recon_date", "-score", "id")
 
     banks = [
         {"code": r["left__player_bank"], "n": r["n"]}
@@ -1043,6 +1069,11 @@ def review_queue(request):
     if btitle:
         qs = qs.filter(left__bank_title=btitle)
 
+    # Ringkasan total pada set terfilter penuh (sebelum paginasi) — pola run_detail.
+    totals = qs.aggregate(
+        kredit=Sum("left__amount"), saldo=Sum("right__amount"), n=Count("id")
+    )
+
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
     # nomor batch per-toko untuk tiap hasil di halaman ini
     for r in page.object_list:
@@ -1052,6 +1083,8 @@ def review_queue(request):
         )
     return render(request, "web/review_queue.html", {
         "page": page, "active_toko": active,
+        "bucket": bucket, "tab_counts": tab_counts, "totals": totals,
+        "hide_left": bucket == "tidak_ada_panel",
         "flow": flow, "bank": bank, "btitle": btitle,
         "banks": banks, "btitles": btitles,
         "date_from": request.GET.get("from", "") if date_from else "",
@@ -1179,6 +1212,7 @@ def review(request, pk):
         ).count()
     return render(request, "web/_result_row.html", {
         "r": r, "bucket_meta": BUCKET_META, "show_run_col": show_run_col,
+        "hide_left": request.POST.get("hide_left") == "1",
     })
 
 

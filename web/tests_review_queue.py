@@ -1,4 +1,5 @@
-"""Halaman /tinjau/: antrean perlu_tinjau lintas run untuk toko aktif, dengan RBAC."""
+"""Halaman /tinjau/ (Area Pengecekan): hasil perlu-dicek lintas run untuk toko
+aktif — tab perlu_tinjau / tidak_cocok / tidak_ada_panel + summary, dengan RBAC."""
 from datetime import datetime
 from decimal import Decimal
 
@@ -50,7 +51,7 @@ class ReviewQueueTests(TestCase):
 
     def test_kosong_empty_state(self):
         r = self.client.get(reverse("review_queue"))
-        self.assertContains(r, "Antrean kosong")
+        self.assertContains(r, "Tidak ada hasil")
 
     def test_rbac_auditor_toko_lain(self):
         User.objects.create_user("a2", "a2@a.co", "pw12345", role="auditor")
@@ -133,3 +134,82 @@ class ReviewQueueFilterTests(ReviewQueueTests):
         self.assertNotContains(r, "D-Y")
         # chip bank pemain tetap menawarkan DANA (dihitung dalam flow terpilih)
         self.assertContains(r, "DANA")
+
+
+class AreaPengecekanTests(ReviewQueueTests):
+    """Gelombang UAT: rename 'Area Pengecekan' + tab tidak_cocok / tidak_ada_panel
+    + ringkasan total di bawah tabel."""
+
+    def _hasil(self, *, bucket, ticket="", right_amount=None, reason="x"):
+        """MatchResult bebas bucket. ticket -> ada sisi kiri; right_amount -> ada sisi uang."""
+        up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+        batch = ReconBatch.objects.create(toko=self.lbs, tolerance=self.tol)
+        run = MatchRun.objects.create(
+            relation=MatchRun.Relation.PANEL_BANK, tolerance=self.tol, batch=batch
+        )
+        left = right = None
+        if ticket:
+            left = Transaction.objects.create(
+                upload=up, source_type=self.panel, toko=self.lbs, jenis="depo",
+                amount=Decimal("50000"), occurred_at=datetime(2026, 6, 27, 10, 0),
+                ticket_no=ticket, row_hash=f"q-{next(_seq)}", raw={},
+            )
+        if right_amount is not None:
+            bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+            upb = Upload.objects.create(source_type=bank, toko=self.lbs)
+            right = Transaction.objects.create(
+                upload=upb, source_type=bank, toko=self.lbs, jenis="depo",
+                amount=Decimal(right_amount), occurred_at=datetime(2026, 6, 27, 11, 0),
+                counterparty="ORPHAN GUY", row_hash=f"q-{next(_seq)}", raw={},
+            )
+        return MatchResult.objects.create(
+            run=run, bucket=bucket, reason_code=reason, left=left, right=right,
+        )
+
+    def test_heading_area_pengecekan(self):
+        r = self.client.get(reverse("review_queue"))
+        self.assertContains(r, "Area Pengecekan")
+
+    def test_default_hanya_perlu_tinjau(self):
+        self._tinjau(self.lbs, "D-TINJAU")
+        self._hasil(bucket=MatchResult.Bucket.TIDAK, ticket="D-TIDAK")
+        r = self.client.get(reverse("review_queue"))
+        self.assertContains(r, "D-TINJAU")
+        self.assertNotContains(r, "D-TIDAK")
+
+    def test_tab_tidak_cocok(self):
+        self._tinjau(self.lbs, "D-TINJAU")
+        self._hasil(bucket=MatchResult.Bucket.TIDAK, ticket="D-TIDAK")
+        self._hasil(bucket=MatchResult.Bucket.TIDAK, right_amount="75000", reason="no_panel")
+        r = self.client.get(reverse("review_queue"), {"bucket": "tidak_cocok"})
+        self.assertContains(r, "D-TIDAK")
+        self.assertNotContains(r, "D-TINJAU")
+        self.assertNotContains(r, "ORPHAN GUY")  # orphan tak ikut tab tidak_cocok
+
+    def test_tab_tidak_ada_panel(self):
+        self._hasil(bucket=MatchResult.Bucket.TIDAK, ticket="D-TIDAK")
+        self._hasil(bucket=MatchResult.Bucket.TIDAK, right_amount="75000", reason="no_panel")
+        r = self.client.get(reverse("review_queue"), {"bucket": "tidak_ada_panel"})
+        self.assertContains(r, "ORPHAN GUY")
+        self.assertNotContains(r, "D-TIDAK")
+
+    def test_summary_totbar(self):
+        self._tinjau(self.lbs, "D-A")
+        self._tinjau(self.lbs, "D-B")
+        r = self.client.get(reverse("review_queue"))
+        self.assertContains(r, "totbar")
+        self.assertContains(r, "100.000")  # 2 x 50.000 kredit (locale id: titik ribuan)
+
+    def test_tab_count_tampil(self):
+        self._tinjau(self.lbs, "D-TINJAU")
+        self._hasil(bucket=MatchResult.Bucket.TIDAK, right_amount="75000", reason="no_panel")
+        r = self.client.get(reverse("review_queue"))
+        self.assertContains(r, "Perlu Ditinjau")
+        self.assertContains(r, "Tidak Cocok")
+        self.assertContains(r, "Tidak Ada di Panel")
+
+    def test_bucket_param_tak_dikenal_fallback_default(self):
+        self._tinjau(self.lbs, "D-TINJAU")
+        r = self.client.get(reverse("review_queue"), {"bucket": "ngawur"})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "D-TINJAU")

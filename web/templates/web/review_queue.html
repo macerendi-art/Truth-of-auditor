@@ -1,31 +1,41 @@
 {% extends "web/app_base.html" %}
 {% load humanize %}
 {% load web_extras %}
-{% block title %}Antrean Tinjau · Truth of Auditor{% endblock %}
-{% block crumb %}Rekonsiliasi · Antrean Tinjau{% endblock %}
+{% block title %}Area Pengecekan · Truth of Auditor{% endblock %}
+{% block crumb %}Rekonsiliasi · Area Pengecekan{% endblock %}
+{% block content_class %}wide{% endblock %}
 {% block content %}
 <div class="page-head reveal">
   <div>
-    <h1>Antrean Tinjau</h1>
-    <p>Semua hasil perlu ditinjau untuk <b>{{ active_toko.name }}</b> — lintas batch, satu tempat.</p>
+    <h1>Area Pengecekan</h1>
+    <p>Hasil yang perlu dicek untuk <b>{{ active_toko.name }}</b> — lintas batch, satu tempat.</p>
   </div>
 </div>
 
 <div class="reveal" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+  <div class="tabs" style="margin-bottom:0">
+    <a href="?flow={{ flow }}&from={{ date_from }}&to={{ date_to }}" class="{% if bucket == 'perlu_tinjau' %}active{% endif %}">Perlu Ditinjau<span class="n">{{ tab_counts.perlu_tinjau|intcomma }}</span></a>
+    <a href="?bucket=tidak_cocok&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}" class="{% if bucket == 'tidak_cocok' %}active{% endif %}">Tidak Cocok<span class="n">{{ tab_counts.tidak_cocok|intcomma }}</span></a>
+    <a href="?bucket=tidak_ada_panel&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}" class="{% if bucket == 'tidak_ada_panel' %}active{% endif %}">Tidak Ada di Panel<span class="n">{{ tab_counts.tidak_ada_panel|intcomma }}</span></a>
+  </div>
+  <div class="seg" role="group" aria-label="Pilah arus Deposit atau Withdraw">
+    <a href="?bucket={{ bucket }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}" class="{% if not flow %}active{% endif %}">Semua</a>
+    <a href="?bucket={{ bucket }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&flow=depo" class="dp {% if flow == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit</a>
+    <a href="?bucket={{ bucket }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&flow=wd" class="wd {% if flow == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw</a>
+  </div>
+</div>
+
+<div class="reveal" style="margin-top:12px">
   <form method="get" class="row" style="align-items:flex-end;margin:0">
     <div class="field"><label>Dari tanggal (DP/WD)</label><input type="date" name="from" value="{{ date_from }}"></div>
     <div class="field"><label>Sampai tanggal</label><input type="date" name="to" value="{{ date_to }}"></div>
+    {% if bucket != 'perlu_tinjau' %}<input type="hidden" name="bucket" value="{{ bucket }}">{% endif %}
     {% if flow %}<input type="hidden" name="flow" value="{{ flow }}">{% endif %}
     {% if bank %}<input type="hidden" name="bank" value="{{ bank }}">{% endif %}
     {% if btitle %}<input type="hidden" name="btitle" value="{{ btitle }}">{% endif %}
     <button class="btn primary" type="submit">Filter</button>
-    {% if date_from or date_to or flow or bank or btitle %}<a class="btn" href="{% url 'review_queue' %}">Reset</a>{% endif %}
+    {% if date_from or date_to or flow or bank or btitle %}<a class="btn" href="{% url 'review_queue' %}{% if bucket != 'perlu_tinjau' %}?bucket={{ bucket }}{% endif %}">Reset</a>{% endif %}
   </form>
-  <div class="seg" role="group" aria-label="Pilah arus Deposit atau Withdraw">
-    <a href="?from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}" class="{% if not flow %}active{% endif %}">Semua</a>
-    <a href="?from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&flow=depo" class="dp {% if flow == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit</a>
-    <a href="?from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&flow=wd" class="wd {% if flow == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw</a>
-  </div>
 </div>
 
 {% if banks or btitles %}
@@ -34,9 +44,9 @@
   <details class="filter-fold"{% if bank %} open{% endif %}>
     <summary><span class="chev" aria-hidden="true">›</span>Filter bank pemain{% if bank %} <span class="n">· {{ bank }}</span>{% endif %}</summary>
     <div class="fold-body tabs sub">
-      <a href="?flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&btitle={{ btitle|urlencode }}" class="{% if not bank %}active{% endif %}">semua bank</a>
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&btitle={{ btitle|urlencode }}" class="{% if not bank %}active{% endif %}">semua bank</a>
       {% for b in banks %}
-      <a href="?flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&btitle={{ btitle|urlencode }}&bank={{ b.code|urlencode }}" class="{% if bank == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&btitle={{ btitle|urlencode }}&bank={{ b.code|urlencode }}" class="{% if bank == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
       {% endfor %}
     </div>
   </details>
@@ -45,9 +55,9 @@
   <details class="filter-fold"{% if btitle %} open{% endif %}>
     <summary><span class="chev" aria-hidden="true">›</span>Filter bank title{% if btitle %} <span class="n">· {{ btitle }}</span>{% endif %}</summary>
     <div class="fold-body tabs sub">
-      <a href="?flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}" class="{% if not btitle %}active{% endif %}">semua title</a>
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}" class="{% if not btitle %}active{% endif %}">semua title</a>
       {% for b in btitles %}
-      <a href="?flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ b.code|urlencode }}" class="{% if btitle == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ b.code|urlencode }}" class="{% if btitle == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
       {% endfor %}
     </div>
   </details>
@@ -56,16 +66,22 @@
 {% endif %}
 
 <form id="bulk-form">{% csrf_token %}</form>
-<div class="card pad0 reveal">
+<div class="card pad0 reveal" style="margin-top:14px">
   <div class="table-wrap tall" style="border:none">
-  <table id="tinjau-table">
-    <thead><tr><th style="width:28px"></th><th>Status</th><th>Panel</th><th>Username</th><th>Nama Lengkap</th><th class="col-hide">Player Bank</th><th class="col-hide">Bank Title</th><th class="col-hide">Handler</th><th class="num">Kredit/Koin</th><th>Mutasi Bank</th><th class="num">Saldo Bank</th><th>Alasan</th><th>Batch/Run</th><th style="text-align:center">Aksi</th></tr></thead>
+  <table id="tinjau-table"{% if hide_left %} class="lean"{% endif %}>
+    <thead><tr><th style="width:28px"></th><th>Status</th>{% if not hide_left %}<th>Panel</th><th>Username</th><th>Nama Lengkap</th><th class="col-hide">Player Bank</th><th class="col-hide">Bank Title</th><th class="col-hide">Handler</th><th class="num">Kredit/Koin</th>{% endif %}<th>Mutasi Bank</th><th class="num">Saldo Bank</th><th>Alasan</th><th>Batch/Run</th><th style="text-align:center">Aksi</th></tr></thead>
     <tbody>
     {% for r in page %}{% include "web/_result_row.html" with show_run_col=1 %}{% empty %}
-      <tr><td colspan="14" class="cell-empty">Antrean kosong — semua hasil sudah ditinjau.</td></tr>{% endfor %}
+      <tr><td colspan="{% if hide_left %}7{% else %}14{% endif %}" class="cell-empty">Tidak ada hasil pada tab ini — semua sudah dicek.</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>
+</div>
+
+<div class="totbar reveal">
+  <span><span class="lbl">Baris</span> <span class="val">{{ totals.n|default:0|intcomma }}</span></span>
+  {% if not hide_left %}<span><span class="lbl">Total Kredit/Koin</span> <span class="val" style="color:var(--ok)">Rp {{ totals.kredit|default:0|floatformat:0|intcomma }}</span></span>{% endif %}
+  <span><span class="lbl">Total Saldo Bank</span> <span class="val" style="color:var(--info)">Rp {{ totals.saldo|default:0|floatformat:0|intcomma }}</span></span>
 </div>
 
 {% pager page %}
