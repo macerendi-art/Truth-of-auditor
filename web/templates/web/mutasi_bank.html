@@ -1,0 +1,71 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% load web_extras %}
+{% block title %}Mutasi Bank · Truth of Auditor{% endblock %}
+{% block crumb %}Rekonsiliasi · Mutasi Bank{% endblock %}
+{% block content_class %}wide{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Mutasi Bank</h1>
+    <p>Baris mutasi bank &amp; gateway QRIS untuk <b>{{ active_toko.name }}</b> — urut persis file aslinya.</p>
+  </div>
+</div>
+
+<div class="card reveal" style="margin-bottom:18px">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+    <span class="faint" style="font-size:12px;font-weight:600;letter-spacing:.02em">SUMBER</span>
+    <div class="seg">
+      <a href="?flow={{ flow }}&from={{ date_from }}&to={{ date_to }}" class="{% if not src %}active{% endif %}">Semua</a>
+      <a href="?source=bank&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}" class="{% if src == 'bank' %}active{% endif %}">Bank</a>
+      <a href="?source=gateway&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}" class="{% if src == 'gateway' %}active{% endif %}">Gateway QRIS</a>
+    </div>
+    <div class="seg" role="group" aria-label="Pilah arus Deposit atau Withdraw">
+      <a href="?source={{ src }}&from={{ date_from }}&to={{ date_to }}" class="{% if not flow %}active{% endif %}">Semua</a>
+      <a href="?source={{ src }}&from={{ date_from }}&to={{ date_to }}&flow=depo" class="dp {% if flow == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit</a>
+      <a href="?source={{ src }}&from={{ date_from }}&to={{ date_to }}&flow=wd" class="wd {% if flow == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw</a>
+    </div>
+  </div>
+  <form method="get" class="row">
+    <div class="field" style="flex:2"><label>File mutasi</label>
+      <select name="upload"><option value="">Semua file</option>
+      {% for u in uploads %}<option value="{{ u.id }}" {% if sel_upload and sel_upload.id == u.id %}selected{% endif %}>{{ u.original_name|default:u }}{% if u.owner_name %} · a/n {{ u.owner_name }}{% endif %} · {{ u.rows_parsed|intcomma }} baris</option>{% endfor %}</select></div>
+    <div class="field"><label>Dari tanggal</label><input type="date" name="from" value="{{ date_from }}"></div>
+    <div class="field"><label>Sampai tanggal</label><input type="date" name="to" value="{{ date_to }}"></div>
+    {% if src %}<input type="hidden" name="source" value="{{ src }}">{% endif %}
+    {% if flow %}<input type="hidden" name="flow" value="{{ flow }}">{% endif %}
+    <button class="btn primary" type="submit">Filter</button>
+    {% if src or flow or sel_upload or date_from or date_to %}<a class="btn" href="{% url 'bank_mutations' %}">Reset</a>{% endif %}
+  </form>
+</div>
+
+<div class="card pad0 reveal">
+  <div class="table-wrap tall" style="border:none">
+  <table id="mutasi-table">
+    <thead><tr><th style="width:56px" class="num">No</th><th style="width:110px">Tanggal</th><th style="width:150px">Sumber</th><th>Nama (sesuai mutasi)</th><th>Keterangan</th><th style="width:86px">Jenis</th><th class="num" style="width:110px">Nominal</th><th class="num" style="width:120px">Saldo</th></tr></thead>
+    <tbody>
+    {% for t in page %}
+    <tr>
+      <td class="num mono faint">{{ page.start_index|add:forloop.counter0 }}</td>
+      <td><div class="mono" style="font-size:12.5px">{{ t.occurred_at|date:"d/m H:i"|default:"—" }}</div></td>
+      <td style="font-size:12px"><b>{{ t.source_label_full }}</b></td>
+      <td class="cell-tr" style="font-size:12.5px">
+        {% if t.counterparty %}<span title="{{ t.counterparty }}">{{ t.counterparty }}</span>
+        {% elif t.phone %}<span class="mono">{{ t.phone }}</span>{% if t.player_name %} · <span title="Nama dari data panel (perkiraan)">≈ {{ t.player_name }}</span>{% endif %}
+        {% else %}<span class="faint">—</span>{% endif %}
+      </td>
+      <td class="faint cell-tr" style="font-size:11.5px" title="{{ t.description }}">{{ t.description|truncatechars:90|default:"—" }}</td>
+      <td>{% if t.jenis == 'depo' %}<span class="badge ok">Deposit</span>{% elif t.jenis == 'wd' %}<span class="badge bad">Withdraw</span>{% elif t.jenis == 'admin' %}<span class="badge">Biaya Admin</span>{% else %}<span class="badge">{{ t.get_jenis_display }}</span>{% endif %}</td>
+      <td class="num mono" {% if t.money_delta < 0 %}style="color:var(--bad)"{% elif t.money_delta > 0 %}style="color:var(--ok)"{% endif %}>{{ t.amount|floatformat:0|intcomma }}</td>
+      <td class="num mono">{% if t.balance_after is not None %}{{ t.balance_after|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="8" class="cell-empty">Belum ada mutasi bank/gateway untuk filter ini.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+{% pager page %}
+{% endblock %}

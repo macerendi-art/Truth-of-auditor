@@ -14,6 +14,7 @@ urlpatterns = [
     path("run/<int:pk>/export/", views.export_run, name="export_run"),
     path("result/<int:pk>/review/", views.review, name="review"),
     path("run/<int:pk>/bulk-review/", views.bulk_review, name="bulk_review"),
+    path("mutasi-bank/", views.bank_mutations, name="bank_mutations"),
     path("tinjau/", views.review_queue, name="review_queue"),
     path("tokos/", views.toko_overview, name="toko_overview"),
     path("kelola/toko/", admin_views.kelola_toko, name="kelola_toko"),

@@ -1,4 +1,5 @@
 import os
+import re
 import zipfile
 from datetime import date as date_cls
 
@@ -1087,6 +1088,94 @@ def review_queue(request):
         "hide_left": bucket == "tidak_ada_panel",
         "flow": flow, "bank": bank, "btitle": btitle,
         "banks": banks, "btitles": btitles,
+        "date_from": request.GET.get("from", "") if date_from else "",
+        "date_to": request.GET.get("to", "") if date_to else "",
+    })
+
+
+# No. HP di keterangan mutasi e-wallet (GoPay/DANA): '085767555197' atau
+# '82279003062' (tanpa 0). \b menjaga kode alfanumerik (WS95011...) tak ikut.
+PHONE_RE = re.compile(r"\b0?8\d{8,12}\b")
+
+
+def _resolve_wallet_names(rows, toko):
+    """Baris mutasi tanpa nama (e-wallet, hanya HP): tempelkan r.phone + r.player_name.
+
+    Nama dicari di panel toko yang sama via segmen HP di raw['Player Bank']
+    ('KODE|NAMA|ACCT' — lihat parse_bank_triplet). Per halaman saja (<=40 baris,
+    <=40 query) — bukan jalur matching, murni tampilan.
+    """
+    for r in rows:
+        if r.counterparty or r.source_type.key not in ("bank", "gateway"):
+            continue
+        m = PHONE_RE.search(r.description or "")
+        if not m:
+            continue
+        r.phone = m.group(0)
+        suffix = r.phone.lstrip("0")
+        cand = (
+            Transaction.objects.filter(
+                toko=toko, source_type__key="panel",
+                **{"raw__Player Bank__icontains": suffix},
+            )
+            .order_by("-occurred_at")
+            .first()
+        )
+        if cand:
+            r.player_name = cand.counterparty or cand.username
+
+
+@login_required
+def bank_mutations(request):
+    """Sub-menu Mutasi Bank: baris mutasi bank + gateway (QRIS) apa adanya,
+    urut PERSIS file asli — grup per upload terbaru, di dalam file mengikuti
+    urutan parse (bulk_create mempertahankan urutan -> id menaik)."""
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    money_keys = ("bank", "gateway")
+    qs = (
+        Transaction.objects.filter(toko=active, source_type__key__in=money_keys)
+        .select_related("source_type", "upload", "account", "upload__account")
+        .order_by("-upload_id", "id")
+    )
+    src = request.GET.get("source", "")
+    if src not in money_keys:
+        src = ""
+    if src:
+        qs = qs.filter(source_type__key=src)
+
+    flow = request.GET.get("flow", "")
+    if flow not in ("depo", "wd"):
+        flow = ""
+    if flow:
+        qs = qs.filter(jenis=flow)
+
+    date_from = _parse_date(request.GET.get("from", ""))
+    date_to = _parse_date(request.GET.get("to", ""))
+    if date_from:
+        qs = qs.filter(occurred_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(occurred_at__date__lte=date_to)
+
+    # Dropdown per-file: hanya upload sumber uang milik toko aktif.
+    uploads = list(
+        Upload.objects.filter(toko=active, source_type__key__in=money_keys)
+        .order_by("-id")
+    )
+    upload_id = request.GET.get("upload", "")
+    sel_upload = None
+    if upload_id.isdigit():
+        sel_upload = next((u for u in uploads if u.id == int(upload_id)), None)
+        if sel_upload:  # id upload toko lain diabaikan (RBAC)
+            qs = qs.filter(upload=sel_upload)
+
+    page = Paginator(qs, 40).get_page(request.GET.get("page"))
+    _resolve_wallet_names(page.object_list, active)
+    return render(request, "web/mutasi_bank.html", {
+        "page": page, "active_toko": active,
+        "src": src, "flow": flow,
+        "uploads": uploads, "sel_upload": sel_upload,
         "date_from": request.GET.get("from", "") if date_from else "",
         "date_to": request.GET.get("to", "") if date_to else "",
     })
