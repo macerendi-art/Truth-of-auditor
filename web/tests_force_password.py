@@ -55,3 +55,43 @@ class GantiPasswordFormTests(TestCase):
         f = self._form("Lama-Kuat#88", "password", "password")
         self.assertFalse(f.is_valid())
         self.assertIn("new_password2", f.errors)
+
+
+class GantiPasswordViewTests(TestCase):
+    def setUp(self):
+        self.u = User.objects.create_user("ganti_u", password="Lama-Kuat#88", role="supervisor")
+        self.u.must_change_password = True
+        self.u.save(update_fields=["must_change_password"])
+        self.client.login(username="ganti_u", password="Lama-Kuat#88")
+
+    def _post(self, old="Lama-Kuat#88", n1="Baru-Beda#99", n2="Baru-Beda#99"):
+        return self.client.post(reverse("ganti_password"), {
+            "old_password": old, "new_password1": n1, "new_password2": n2,
+        })
+
+    def test_halaman_tampil(self):
+        r = self.client.get(reverse("ganti_password"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "password baru")
+
+    def test_sukses_flag_false_password_ganti_sesi_terjaga(self):
+        r = self._post()
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.url, reverse("dashboard"))
+        self.u.refresh_from_db()
+        self.assertFalse(self.u.must_change_password)
+        self.assertTrue(self.u.check_password("Baru-Beda#99"))
+        self.assertIn("_auth_user_id", self.client.session)  # tetap login
+
+    def test_old_salah_flag_tetap_true(self):
+        r = self._post(old="salah-banget")
+        self.assertEqual(r.status_code, 200)  # form dirender ulang
+        self.u.refresh_from_db()
+        self.assertTrue(self.u.must_change_password)
+        self.assertTrue(self.u.check_password("Lama-Kuat#88"))  # tak berubah
+
+    def test_baru_sama_lama_flag_tetap_true(self):
+        r = self._post(n1="Lama-Kuat#88", n2="Lama-Kuat#88")
+        self.assertEqual(r.status_code, 200)
+        self.u.refresh_from_db()
+        self.assertTrue(self.u.must_change_password)

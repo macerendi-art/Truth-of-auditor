@@ -5,6 +5,7 @@ from . import admin_views, views
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("set-toko/", views.set_toko, name="set_toko"),
+    path("ganti-password/", views.ganti_password, name="ganti_password"),
     path("upload/", views.upload, name="upload"),
     path("transactions/", views.transactions, name="transactions"),
     path("reconcile/", views.reconcile, name="reconcile"),

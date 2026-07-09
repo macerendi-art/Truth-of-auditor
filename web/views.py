@@ -4,7 +4,7 @@ import zipfile
 from datetime import date as date_cls
 
 from django.contrib import messages
-from django.contrib.auth import logout as auth_logout
+from django.contrib.auth import logout as auth_logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
@@ -36,6 +36,7 @@ from sources.models import SourceType, Upload
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
 from web.access import is_admin, tokos_for
+from web.forms import GantiPasswordForm
 from web.templatetags.web_extras import reason_label
 
 BUCKET_META = {
@@ -111,6 +112,27 @@ def set_toko(request):
     ):
         return redirect(nxt)
     return redirect("dashboard")
+
+
+@login_required
+def ganti_password(request):
+    """Halaman wajib ganti password (login pertama / setelah reset admin).
+
+    @login_required: bila sesi kedaluwarsa saat di sini, submit terlempar ke
+    /login/?next=... — menutup edge case sesi expired.
+    """
+    if request.method == "POST":
+        form = GantiPasswordForm(user=request.user, data=request.POST)
+        if form.is_valid():
+            user = form.save()  # set_password + simpan
+            user.must_change_password = False
+            user.save(update_fields=["must_change_password"])
+            update_session_auth_hash(request, user)  # jaga sesi, jangan ter-logout
+            messages.success(request, "Password berhasil diganti. Selamat bekerja!")
+            return redirect("dashboard")
+    else:
+        form = GantiPasswordForm(user=request.user)
+    return render(request, "registration/ganti_password.html", {"form": form})
 
 
 @login_required
