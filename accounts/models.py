@@ -17,6 +17,10 @@ class User(AbstractUser):
         related_name="assigned_users",
         help_text="Toko yang boleh diakses (hanya relevan untuk auditor)",
     )
+    must_change_password = models.BooleanField(
+        default=False,
+        help_text="Wajib ganti password saat login berikutnya (password sementara dari admin).",
+    )
 
     def __str__(self):
         return self.username
