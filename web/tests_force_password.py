@@ -95,3 +95,39 @@ class GantiPasswordViewTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.u.refresh_from_db()
         self.assertTrue(self.u.must_change_password)
+
+
+class ForcePasswordChangeMiddlewareTests(TestCase):
+    def setUp(self):
+        self.u = User.objects.create_user("gate_u", password="Lama-Kuat#88", role="supervisor")
+
+    def _login(self, flag):
+        self.u.must_change_password = flag
+        self.u.save(update_fields=["must_change_password"])
+        self.client.login(username="gate_u", password="Lama-Kuat#88")
+
+    def test_flag_true_dialihkan_dari_dashboard(self):
+        self._login(True)
+        r = self.client.get(reverse("dashboard"))
+        self.assertRedirects(r, reverse("ganti_password"))
+
+    def test_flag_true_dialihkan_dari_url_dalam(self):
+        self._login(True)
+        r = self.client.get(reverse("transactions"))
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r.url, reverse("ganti_password"))
+
+    def test_flag_true_boleh_buka_halaman_ganti(self):
+        self._login(True)
+        r = self.client.get(reverse("ganti_password"))
+        self.assertEqual(r.status_code, 200)
+
+    def test_flag_true_boleh_logout(self):
+        self._login(True)
+        r = self.client.post(reverse("logout"))
+        self.assertRedirects(r, reverse("login"), fetch_redirect_response=False)
+
+    def test_flag_false_akses_normal(self):
+        self._login(False)
+        r = self.client.get(reverse("dashboard"))
+        self.assertEqual(r.status_code, 200)
