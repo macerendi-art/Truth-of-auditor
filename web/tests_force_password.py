@@ -8,6 +8,37 @@ from sources.models import Toko
 User = get_user_model()
 
 
+class MustChangePasswordTriggerTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user("adm", password="Adm-Kuat#88", role="admin")
+        self.client.login(username="adm", password="Adm-Kuat#88")
+        self.lbs = Toko.objects.get(key="lbs")
+
+    def test_buat_user_baru_flag_true(self):
+        self.client.post(reverse("kelola_user"), {
+            "username": "budi", "password": "Budi-Kuat#88", "nama": "Budi",
+            "role": "auditor", "tokos": [self.lbs.id],
+        })
+        u = User.objects.get(username="budi")
+        self.assertTrue(u.must_change_password)
+
+    def test_reset_user_lain_flag_true(self):
+        target = User.objects.create_user("someone", password="Lama-Kuat#88", role="supervisor")
+        self.assertFalse(target.must_change_password)
+        self.client.post(reverse("kelola_user_edit", args=[target.pk]), {
+            "action": "reset_password", "password": "Baru-Kuat#99",
+        })
+        target.refresh_from_db()
+        self.assertTrue(target.must_change_password)
+
+    def test_reset_diri_sendiri_flag_tetap_false(self):
+        self.client.post(reverse("kelola_user_edit", args=[self.admin.pk]), {
+            "action": "reset_password", "password": "Adm-Baru#99",
+        })
+        self.admin.refresh_from_db()
+        self.assertFalse(self.admin.must_change_password)
+
+
 class MustChangePasswordFieldTests(TestCase):
     def test_default_false(self):
         u = User.objects.create_user("baru", password="Lama-Kuat#88", role="supervisor")

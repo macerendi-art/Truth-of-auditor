@@ -109,7 +109,10 @@ def kelola_user(request):
         if err:
             messages.error(request, err)
         else:
-            u = User.objects.create_user(username=username, password=password, first_name=nama, role=role)
+            u = User.objects.create_user(
+                username=username, password=password, first_name=nama, role=role,
+                must_change_password=True,  # wajib ganti password sementara saat login pertama
+            )
             if role == "auditor":
                 u.allowed_tokos.set(Toko.objects.filter(id__in=toko_ids, is_active=True))
             messages.success(request, f"User {username} ({role}) dibuat.")
@@ -154,6 +157,9 @@ def kelola_user_edit(request, pk):
             messages.error(request, pw_err)
         else:
             target.set_password(pw)
+            # reset oleh admin = password sementara → wajib ganti; kecuali admin
+            # me-reset password DIRINYA SENDIRI (dia memilih passwordnya sendiri).
+            target.must_change_password = target != request.user
             target.save()
             if target == request.user:
                 update_session_auth_hash(request, target)
