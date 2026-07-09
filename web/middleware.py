@@ -10,6 +10,10 @@ class ForcePasswordChangeMiddleware:
 
     Allowlist: halaman ganti password itu sendiri (hindari loop), logout
     (user harus bisa keluar), dan aset statis/media (agar CSS/font halaman termuat).
+    Catatan: meski `STATIC_URL`/`MEDIA_URL` ditulis tanpa garis miring depan
+    di settings.py, Django menormalisasinya jadi berawalan "/" saat runtime
+    (sama seperti `request.path`) — jadi keduanya dibandingkan apa adanya,
+    tanpa `lstrip("/")`.
     Harus dipasang SETELAH AuthenticationMiddleware (butuh request.user).
     """
 
@@ -22,6 +26,6 @@ class ForcePasswordChangeMiddleware:
             path = request.path
             allowed = (reverse("ganti_password"), reverse("logout"))
             asset_prefixes = tuple(p for p in (settings.STATIC_URL, settings.MEDIA_URL) if p)
-            if path not in allowed and not path.lstrip("/").startswith(asset_prefixes):
+            if path not in allowed and not path.startswith(asset_prefixes):
                 return redirect("ganti_password")
         return self.get_response(request)

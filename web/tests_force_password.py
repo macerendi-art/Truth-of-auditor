@@ -162,3 +162,15 @@ class ForcePasswordChangeMiddlewareTests(TestCase):
         self._login(False)
         r = self.client.get(reverse("dashboard"))
         self.assertEqual(r.status_code, 200)
+
+    def test_flag_true_aset_statis_dan_media_tidak_dialihkan(self):
+        from django.test import RequestFactory
+        from web.middleware import ForcePasswordChangeMiddleware
+        self.u.must_change_password = True
+        self.u.save(update_fields=["must_change_password"])
+        sentinel = object()
+        mw = ForcePasswordChangeMiddleware(lambda req: sentinel)
+        for p in ("/static/web/css/fonts.css", "/media/export/x.xlsx"):
+            req = RequestFactory().get(p)
+            req.user = self.u
+            self.assertIs(mw(req), sentinel, f"{p} seharusnya diteruskan, bukan di-redirect")
