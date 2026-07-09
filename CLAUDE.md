@@ -75,6 +75,7 @@ Railway (Nixpacks), config in `railway.json` / `Procfile`. Production is trigger
 
 - Design specs and implementation plans for completed features live in `docs/superpowers/{specs,plans}/` — check there for intent behind non-obvious decisions.
 - `db.sqlite3` is the local dev DB and is **gitignored** (contains real working data — never commit it). Git worktrees don't have it; copy it from the main checkout + `migrate` if a preview needs real data.
+- Tests that GET-render a template extending `web/base.html` need a `collectstatic`-generated `staticfiles.json` manifest (WhiteNoise `CompressedManifestStaticFilesStorage`), which is **gitignored**. Fresh worktrees/CI fail such tests with `ValueError: Missing staticfiles manifest entry for ...` until you run `python manage.py collectstatic --noinput` once. Same class of gap as `db.sqlite3`.
 - **Git flow:** commit per work chunk AND push to `origin/main` (fast-forward only, never force). A teammate (`sabian`) also lands on main — always `git fetch` + rebase before pushing.
 - **Pushing does NOT deploy.** Deploys are manual: `railway up --ci` run from the main checkout `/Users/macads/Truth-of-auditor` after fast-forwarding it to `origin/main` (running it from a worktree ships a stale tree). Never deploy without explicit confirmation — this is a live financial app.
 - Django 5.2 keeps the cached template loader on even in DEBUG — restart the dev server after editing templates before concluding an edit "didn't work".
