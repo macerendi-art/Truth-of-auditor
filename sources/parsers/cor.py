@@ -119,6 +119,53 @@ class CORPanelQRISParser(BaseParser):
         return out
 
 
+class CORQRISWDGatewayParser(BaseParser):
+    """Mutasi WD gateway QR UNO — sisi uang QRIS withdrawal keluarga panel
+    TM Gaming/Vigor (SLO/COR/WN25).
+
+    Kunci exact: `Order ID (Merchant)` (UUID penuh) == `Transaction ID` panel
+    QRIS WD -> reference-join pass 0b. Baris REFUND dilewati (payout gagal,
+    uang kembali). Baris SUCCESS ber-order non-UUID (transfer manual operator)
+    tetap diambil supaya muncul sebagai uang-tanpa-panel.
+    """
+
+    source_key = "gateway"
+
+    def parse(self, path, flow=""):
+        _, rows = read_xlsx_rows(path, header_row=1)
+        out = []
+        for r in rows:
+            order = str(r.get("Order ID (Merchant)", "") or "").strip()
+            status = str(r.get("Status", "") or "").strip().lower()
+            if not order or status != "success":
+                continue
+            amt = parse_decimal(r.get("Amount"))  # nett = angka yang dilihat panel
+            occurred = parse_dt(r.get("TransactionTime"))
+            acct = str(r.get("AccountNumber", "") or "").strip()
+            recipient = str(r.get("RecipientName", "") or "").strip()
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date() if occurred else None,
+                "jenis": "wd",
+                "amount": amt,
+                "credit_delta": Decimal("0"),
+                "money_delta": -amt,
+                "fee": parse_decimal(r.get("Fee")),
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": "",
+                "username": "",
+                "reference": order,
+                "counterparty": "" if recipient == acct else recipient,
+                "description": f"QRIS WD {r.get('Merchant Name', '')}".strip(),
+                "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
+            }
+            row["row_hash"] = row_hash("cor_qris_wd_gw", [order, amt, occurred])
+            out.append(row)
+        return out
+
+
 class CORQRISGatewayParser(BaseParser):
     source_key = "gateway"
 
