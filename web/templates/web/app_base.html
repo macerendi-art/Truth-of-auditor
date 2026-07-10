@@ -53,6 +53,8 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .side a.link .cnt.hot{background:var(--bad);color:#fff}
 .side .spacer{flex:1}
 .side .who{display:flex;align-items:center;gap:10px;border-top:1px solid rgba(255,255,255,.08);margin-top:10px;padding:14px 10px 4px;font-size:13px}
+.side .who .who-id{flex:1;min-width:0;display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;padding:6px;border-radius:8px;transition:background .15s}
+.side .who .who-id:hover{background:rgba(255,255,255,.06)}
 .side .who .avatar{width:32px;height:32px;border-radius:50%;background:var(--grad);color:#fff;display:grid;place-items:center;
   font-weight:700;font-size:13px;flex-shrink:0;box-shadow:0 4px 12px -4px rgba(37,99,235,.6)}
 .side .who .who-meta{flex:1;min-width:0}
@@ -400,8 +402,10 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
   {% endwith %}
   <div class="spacer"></div>
   <div class="who">
-    <span class="avatar">{{ request.user.username|first|upper }}</span>
-    <span class="who-meta"><b>{{ request.user.username }}</b><small>{{ request.user.get_role_display }}</small></span>
+    <a class="who-id" href="{% url 'ganti_password' %}" title="Ganti password akun">
+      <span class="avatar">{{ request.user.username|first|upper }}</span>
+      <span class="who-meta"><b>{{ request.user.username }}</b><small>{{ request.user.get_role_display }}</small></span>
+    </a>
     <form method="post" action="{% url 'logout' %}" style="display:inline">{% csrf_token %}<button type="submit" class="logout-link">Keluar →</button></form>
   </div>
 </aside>

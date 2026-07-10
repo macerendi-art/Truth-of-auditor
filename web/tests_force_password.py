@@ -174,3 +174,33 @@ class ForcePasswordChangeMiddlewareTests(TestCase):
             req = RequestFactory().get(p)
             req.user = self.u
             self.assertIs(mw(req), sentinel, f"{p} seharusnya diteruskan, bukan di-redirect")
+
+
+class GantiPasswordSelfServiceTests(TestCase):
+    """Chip user di nav -> /ganti-password/ (reset password sendiri), dan halaman
+    beradaptasi antara mode dipaksa vs sukarela."""
+
+    def setUp(self):
+        self.u = User.objects.create_user("selfu", password="Lama-Kuat#88", role="supervisor")
+        self.client.login(username="selfu", password="Lama-Kuat#88")
+
+    def test_chrome_punya_link_ke_ganti_password(self):
+        # chip nama user di app shell menautkan ke halaman ganti password
+        r = self.client.get(reverse("dashboard"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'href="%s"' % reverse("ganti_password"))
+
+    def test_halaman_sukarela_pakai_teks_netral_dan_tombol_kembali(self):
+        # user tak ber-flag membuka sendiri -> teks netral + link kembali, bukan teks "dipaksa"
+        r = self.client.get(reverse("ganti_password"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Kembali ke dashboard")
+        self.assertNotContains(r, "sementara dari admin")
+
+    def test_halaman_dipaksa_pakai_teks_keamanan(self):
+        self.u.must_change_password = True
+        self.u.save(update_fields=["must_change_password"])
+        r = self.client.get(reverse("ganti_password"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "sementara dari admin")
+        self.assertNotContains(r, "Kembali ke dashboard")
