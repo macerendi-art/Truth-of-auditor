@@ -49,6 +49,45 @@ def reason_tone(code):
     return REASON_LABELS.get(code, (code, "muted"))[1]
 
 
+# Peta kode aksi AuditLog → (label rapih, nada badge). Kode lama tetap di sini
+# supaya baris historis tetap terbaca.
+AKSI_LABELS = {
+    # alur rekonsiliasi
+    "reconcile":           ("Jalankan rekonsiliasi", "ok"),
+    "review":              ("Review hasil",          "src"),
+    "review_massal":       ("Review massal",         "src"),
+    "export_batch":        ("Export batch",          "src"),
+    "hapus_batch":         ("Hapus batch",           "bad"),
+    "hapus_upload":        ("Hapus upload",          "bad"),
+    "hapus_upload_massal": ("Hapus upload massal",   "bad"),
+    # kelola pengguna
+    "buat_user":           ("Buat user",             "ok"),
+    "ubah_user":           ("Ubah user",             "src"),
+    "reset_password":      ("Reset password",        "warn"),
+    "aktifkan_user":       ("Aktifkan user",         "ok"),
+    "nonaktifkan_user":    ("Nonaktifkan user",      "warn"),
+    "hapus_user":          ("Hapus user",            "bad"),
+    "ganti_password":      ("Ganti password sendiri", "src"),
+    # kelola toko
+    "buat_toko":           ("Buat toko",             "ok"),
+    "aktifkan_toko":       ("Aktifkan toko",         "ok"),
+    "nonaktifkan_toko":    ("Nonaktifkan toko",      "warn"),
+    "hapus_toko":          ("Hapus toko",            "bad"),
+}
+
+
+@register.filter
+def aksi_label(code):
+    """Kode aksi AuditLog → frasa rapih. Fallback: kode apa adanya."""
+    return AKSI_LABELS.get(code, (code, "muted"))[0] if code else "—"
+
+
+@register.filter
+def aksi_tone(code):
+    """Kode aksi AuditLog → kelas nada badge (ok/warn/bad/src/muted)."""
+    return AKSI_LABELS.get(code, (code, "muted"))[1] if code else "muted"
+
+
 @register.inclusion_tag("web/_pager.html", takes_context=True)
 def pager(context, page, on_each_side=5, on_ends=1):
     """Pager bernomor jendela-geser (elided) yang mempertahankan semua query kecuali `page`."""

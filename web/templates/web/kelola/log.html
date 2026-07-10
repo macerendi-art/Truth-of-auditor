@@ -1,0 +1,88 @@
+{% extends "web/app_base.html" %}
+{% load web_extras %}
+{% block title %}Log Audit · Truth of Auditor{% endblock %}
+{% block crumb %}Admin · Log Audit{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Log Audit</h1>
+    <p>Jejak aksi seluruh pengguna — siapa melakukan apa, kapan, pada objek apa. Riwayat tetap hidup walau user/toko sudah dihapus.</p>
+  </div>
+</div>
+
+<div class="card reveal">
+  <form method="get">
+    <div class="row">
+      <div class="field" style="flex:1.4">
+        <label>Cari (objek / pelaku / aksi)</label>
+        <input name="q" value="{{ f.q }}" placeholder="kata kunci…" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>Aksi</label>
+        <select name="aksi" class="f">
+          <option value="">Semua aksi</option>
+          {% for a in aksi_list %}<option value="{{ a }}" {% if a == f.aksi %}selected{% endif %}>{{ a|aksi_label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>Pengguna</label>
+        <select name="user" class="f">
+          <option value="">Semua pengguna</option>
+          {% for u in users %}<option value="{{ u.pk }}" {% if u.pk|stringformat:"s" == f.user %}selected{% endif %}>{{ u.username }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>Toko</label>
+        <select name="toko" class="f">
+          <option value="">Semua toko</option>
+          {% for t in tokos %}<option value="{{ t.pk }}" {% if t.pk|stringformat:"s" == f.toko %}selected{% endif %}>{{ t.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>Dari tanggal</label><input type="date" name="from" value="{{ f.from }}"></div>
+      <div class="field"><label>Sampai tanggal</label><input type="date" name="to" value="{{ f.to }}"></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button class="btn primary" type="submit">Filter</button>
+      <a class="btn" href="{% url 'kelola_log' %}">Reset</a>
+    </div>
+  </form>
+</div>
+
+<div class="card reveal" style="margin-top:14px">
+  <div class="twrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:150px">Waktu</th>
+          <th style="width:130px">Pelaku</th>
+          <th style="width:170px">Aksi</th>
+          <th>Objek</th>
+          <th style="width:90px">Toko</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in page %}
+        <tr>
+          <td class="num" style="white-space:nowrap">{{ log.created_at|date:"d M Y H:i" }}</td>
+          <td>
+            <b>{{ log.username|default:"—" }}</b>
+            {% if log.user %}<small style="display:block;color:var(--muted)">{{ log.user.get_role_display }}</small>
+            {% elif log.username %}<small style="display:block;color:var(--muted)">user dihapus</small>{% endif %}
+          </td>
+          <td><span class="badge {{ log.aksi|aksi_tone }}">{{ log.aksi|aksi_label }}</span></td>
+          <td>{{ log.objek|default:"—" }}</td>
+          <td>{% if log.toko %}{{ log.toko.name }}{% else %}—{% endif %}</td>
+          <td style="color:var(--muted);font-size:12.5px">
+            {% for k, v in log.detail.items %}<span style="white-space:nowrap">{{ k }}={{ v }}</span>{% if not forloop.last %} · {% endif %}{% empty %}—{% endfor %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="cell-empty"><div class="empty">Belum ada log untuk filter ini.</div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% pager page %}
+</div>
+{% endblock %}

@@ -98,3 +98,62 @@ class PencatatanAksiKelolaTests(TestCase):
         log = self._log("ganti_password")
         self.assertEqual(log.objek, "adm")
         self.assertEqual(log.username, "adm")
+
+
+class KelolaLogPageTests(TestCase):
+    """Halaman /kelola/log/: khusus admin, filter & search bekerja."""
+
+    def setUp(self):
+        self.adm = User.objects.create_user("adm", password="Adm-Kuat#88", role="admin")
+        self.spv = User.objects.create_user("spv", password="Spv-Kuat#88", role="supervisor")
+        self.lbs = Toko.objects.get(key="lbs")
+        catat(self.adm, "buat_user", "budi", role="auditor")
+        catat(self.adm, "hapus_batch", "Batch #3", toko=self.lbs, batch_pk=3)
+        catat(self.spv, "reconcile", "Batch #4", toko=self.lbs, batch_pk=4)
+
+    def _login_admin(self):
+        self.client.login(username="adm", password="Adm-Kuat#88")
+
+    def test_admin_bisa_buka_dan_isi_tampil(self):
+        self._login_admin()
+        r = self.client.get(reverse("kelola_log"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "budi")
+        self.assertContains(r, "Batch #3")
+        self.assertContains(r, "adm")
+
+    def test_supervisor_ditolak(self):
+        self.client.login(username="spv", password="Spv-Kuat#88")
+        r = self.client.get(reverse("kelola_log"))
+        self.assertRedirects(r, reverse("dashboard"))
+
+    def test_filter_aksi(self):
+        self._login_admin()
+        r = self.client.get(reverse("kelola_log"), {"aksi": "buat_user"})
+        self.assertContains(r, "budi")
+        self.assertNotContains(r, "Batch #3")
+
+    def test_search_q(self):
+        self._login_admin()
+        r = self.client.get(reverse("kelola_log"), {"q": "Batch #4"})
+        self.assertContains(r, "Batch #4")
+        self.assertNotContains(r, "budi")
+
+    def test_filter_user(self):
+        self._login_admin()
+        r = self.client.get(reverse("kelola_log"), {"user": str(self.spv.pk)})
+        self.assertContains(r, "Batch #4")
+        self.assertNotContains(r, "budi")
+
+    def test_filter_tanggal_kosongkan_masa_depan(self):
+        self._login_admin()
+        r = self.client.get(reverse("kelola_log"), {"from": "2099-01-01"})
+        self.assertContains(r, "Belum ada log")
+
+    def test_link_sidebar_hanya_admin(self):
+        self._login_admin()
+        r = self.client.get(reverse("dashboard"))
+        self.assertContains(r, reverse("kelola_log"))
+        self.client.login(username="spv", password="Spv-Kuat#88")
+        r = self.client.get(reverse("dashboard"))
+        self.assertNotContains(r, reverse("kelola_log"))

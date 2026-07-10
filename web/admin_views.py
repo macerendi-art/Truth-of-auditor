@@ -3,17 +3,19 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model, update_session_auth_hash
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 
 from core.audit import catat
+from core.models import AuditLog
 from reconciliation.engine import revert_late_settlements
 from reconciliation.models import MatchResult, ReconBatch
 from sources.models import Toko, Upload
 from transactions.models import Transaction
 from web.access import admin_required
-from web.views import _active_toko
+from web.views import _active_toko, _parse_date
 
 
 def _batch_no(batch):
@@ -191,6 +193,42 @@ def kelola_user_edit(request, pk):
         "tokos": Toko.objects.filter(is_active=True).order_by("name"),
         "roles": User.Role.choices,
         "target_toko_ids": set(target.allowed_tokos.values_list("id", flat=True)),
+    })
+
+
+@admin_required
+def kelola_log(request):
+    """Log audit lintas-toko: siapa melakukan apa, kapan — dengan filter & search."""
+    logs = AuditLog.objects.select_related("user", "toko").order_by("-id")
+    q = request.GET.get("q", "").strip()
+    aksi = request.GET.get("aksi", "").strip()
+    user_id = request.GET.get("user", "").strip()
+    toko_id = request.GET.get("toko", "").strip()
+    dfrom = _parse_date(request.GET.get("from", ""))
+    dto = _parse_date(request.GET.get("to", ""))
+    if q:
+        logs = logs.filter(
+            Q(objek__icontains=q) | Q(username__icontains=q) | Q(aksi__icontains=q)
+        )
+    if aksi:
+        logs = logs.filter(aksi=aksi)
+    if user_id.isdecimal():
+        logs = logs.filter(user_id=user_id)
+    if toko_id.isdecimal():
+        logs = logs.filter(toko_id=toko_id)
+    if dfrom:
+        logs = logs.filter(created_at__date__gte=dfrom)
+    if dto:
+        logs = logs.filter(created_at__date__lte=dto)
+    page = Paginator(logs, 40).get_page(request.GET.get("page"))
+    return render(request, "web/kelola/log.html", {
+        "page": page,
+        "aksi_list": AuditLog.objects.order_by("aksi")
+                    .values_list("aksi", flat=True).distinct(),
+        "users": get_user_model().objects.order_by("username"),
+        "tokos": Toko.objects.order_by("name"),
+        "f": {"q": q, "aksi": aksi, "user": user_id, "toko": toko_id,
+              "from": request.GET.get("from", ""), "to": request.GET.get("to", "")},
     })
 
 
