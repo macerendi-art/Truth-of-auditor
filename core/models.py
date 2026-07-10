@@ -23,6 +23,9 @@ class AuditLog(TimeStampedModel):
     user = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True
     )
+    # Snapshot identitas pelaku — FK di atas SET_NULL saat user dihapus,
+    # justru saat itulah "siapa" paling dibutuhkan.
+    username = models.CharField(max_length=150, blank=True, default="")
     toko = models.ForeignKey(
         "sources.Toko", on_delete=models.SET_NULL, null=True, blank=True
     )

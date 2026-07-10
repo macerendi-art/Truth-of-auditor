@@ -14,6 +14,7 @@ def catat(user, aksi, objek, toko=None, **detail):
     try:
         AuditLog.objects.create(
             user=user if getattr(user, "pk", None) else None,
+            username=getattr(user, "username", "") or "",
             toko=toko, aksi=aksi, objek=str(objek)[:200], detail=detail,
         )
     except Exception:  # noqa: BLE001
