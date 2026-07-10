@@ -83,13 +83,18 @@ class QRFlyerParser(BaseParser):
 
 
 class QHokiParser(BaseParser):
-    """QRIS HOKI (gateway MUL). Whitelabel Transaction ID = Ticket Panel (D...),
-    Transaction ID = UUID (juga muncul di Remarks panel)."""
+    """QRIS HOKI (gateway brand panel-Nexus: MUL/WLG/LBS). Whitelabel Transaction
+    ID = Ticket Panel (D...), Transaction ID = UUID (juga muncul di Remarks panel).
+    Sebagian brand mengekspornya sebagai CSV quoted (kolom identik xlsx)."""
 
     source_key = "gateway"
 
     def parse(self, path, flow=""):
-        _, rows = read_xlsx_rows(path, header_row=1)
+        if str(path).lower().endswith(".csv"):
+            with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+                rows = list(csv.DictReader(f))
+        else:
+            _, rows = read_xlsx_rows(path, header_row=1)
         out = []
         for r in rows:
             if str(r.get("Status", "") or "").strip().lower() != "success":

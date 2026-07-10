@@ -92,6 +92,8 @@ def detect_source(path, filename=""):
             add("bca_csv", 0.85)
         if "customer username" in c and "acquirer merchant" in c:
             add("rpay", 0.95)
+        if "whitelabel transaction id" in c:
+            add("qhoki", 0.95)  # sebagian brand ekspor laporan QRIS-HOKI sbg CSV
     elif ext == ".pdf":
         add("bca_pdf", 0.75)
 

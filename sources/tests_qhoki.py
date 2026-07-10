@@ -46,3 +46,52 @@ class QHokiTests(SimpleTestCase):
             self.assertEqual(QHokiParser().parse(path, flow="dp"), [])
         finally:
             os.remove(path)
+
+
+# Beberapa brand (mis. LBS) mengekspor laporan QRIS-HOKI sebagai CSV quoted,
+# bukan xlsx — format kolom identik. Laporan end user 2026-07-10:
+# "MUTASI DP QR HOKI hasilnya 0" padahal mutasi aslinya ada.
+QHOKI_CSV = (
+    '"Transaction Date","Paid Date","Finished Date","Settlement Date",'
+    '"Settled At","Member ID",Rrn,NMID,"Transaction ID",'
+    '"Whitelabel Transaction ID",Status,Amount,"Downline Fee Amount",'
+    '"Total Amount",Memo,"Payment Method"\n'
+    '"2026-07-08 11:40:59","2026-07-08 11:41:36","2026-07-08 11:41:38",'
+    '"2026-07-08 20:00:00","2026-07-08 20:04:36","wayannn1","00048356","",'
+    '"019f3fcc-b15f-7ee2-83ea-ad5cddc9a287","D6200001","Success","35000",'
+    '"455","34545","","qris"\n'
+)
+
+
+def _csvfile(text):
+    fd, path = tempfile.mkstemp(suffix=".csv"); os.close(fd)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
+
+
+class QHokiCSVTests(SimpleTestCase):
+    def test_parse_csv_variant(self):
+        path = _csvfile(QHOKI_CSV)
+        try:
+            rows = QHokiParser().parse(path, flow="dp")
+        finally:
+            os.remove(path)
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["ticket_no"], "D6200001")
+        self.assertEqual(r["reference"], "019f3fcc-b15f-7ee2-83ea-ad5cddc9a287")
+        self.assertEqual(str(r["amount"]), "35000")
+        self.assertEqual(r["username"], "wayannn1")
+        self.assertEqual(r["occurred_at"].day, 8)
+
+    def test_terdeteksi_dari_header_csv(self):
+        from sources.detect import detect_source
+        path = _csvfile(QHOKI_CSV)
+        try:
+            ranked = detect_source(path, "MUTASI DP QR HOKI LBS 08-07.csv")
+        finally:
+            os.remove(path)
+        self.assertTrue(ranked)
+        self.assertEqual(ranked[0]["parser_key"], "qhoki")
+        self.assertGreaterEqual(ranked[0]["confidence"], 0.9)
