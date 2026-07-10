@@ -555,4 +555,22 @@ git push origin HEAD:main
 
 ## Hasil Kalibrasi
 
-(diisi Task 5)
+Dijalankan 2026-07-10 pada DB scratch (sqlite), harness `validate_brands`.
+
+**SLO (folder SAMPLING VIGOR, 03-07-2026, toko scratch `slo`):**
+
+| Rail | Hasil | Reason |
+|---|---|---|
+| QRIS-WD (parser BARU `cor_qris_wd_gateway`) | **278/278 cocok (100%)** | semua `reference` (UUID penuh) |
+| QRIS-DP (parser lama `cor_qris_gateway`) | 5.166/5.166 cocok (100%; 6 baris spillover ke batch 02-07) | semua `reference` |
+| BANK-WD | 187/676 cocok | 489 `no_money` — mutasi BNI/BCA hanya PDF (dilewati), Mandiri terenkripsi; struktural, bukan matcher |
+| BANK-DP | 9/109 cocok | 100 `no_money` — idem |
+
+Mutasi WD QR UNO ter-ingest 287 baris SUCCESS (8 REFUND dilewati); 9 transfer manual non-UUID jadi uang-tanpa-panel sesuai desain.
+
+**M77/RPay (panel Nexus 09-07-2026 + `dp rpay.csv`, toko scratch `m77`):**
+
+- Panel ber-label `QRISRPAY`: 2.058 baris → **2.030 cocok (98,6%)** = 1.992 `amount+date+name` (username exact skor 100) + 38 `amount_fee`; 28 `no_money`.
+- Uang RPay terpakai 2.051/2.054.
+- 21 baris panel NXPAY/bank ikut menyedot uang RPay (pemain deposit nominal sama via dua kanal, ambigu tanpa ID — Remarks M77 terbukti TIDAK memuat UUID RPay, 0/2058). Di produksi terurai sendiri: file NXPay diklaim join ticket pass-0 sebelum pass username.
+- Rail lain `no_money` karena file uangnya memang tidak disertakan (hanya menguji RPay).
