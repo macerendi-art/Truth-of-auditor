@@ -89,3 +89,64 @@ class UnoWDRegistrationTests(SimpleTestCase):
         self.assertTrue(ranked)
         self.assertEqual(ranked[0]["parser_key"], "cor_qris_wd_gateway")
         self.assertGreaterEqual(ranked[0]["confidence"], 0.9)
+
+
+RPAY_HEADER = ("No.,Merchant,Customer Name,Customer Username,Date,UUID,"
+               "External ID,RRN,Acquirer Merchant,Time,Elapsed Time (s),Amount,Fee,Status")
+
+
+def _csv(lines):
+    fd, path = tempfile.mkstemp(suffix=".csv"); os.close(fd)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
+
+
+class RPayGatewayTests(SimpleTestCase):
+    def _parse(self, lines, flow=""):
+        from sources.parsers.gateways import RPayGatewayParser
+        path = _csv([RPAY_HEADER] + lines)
+        try:
+            return RPayGatewayParser().parse(path, flow=flow)
+        finally:
+            os.remove(path)
+
+    def test_dp_sukses_field_lengkap(self):
+        rows = self._parse([
+            '1,NOMINA ISI ULANG,kaleng1,kaleng1,"09 Jul 2026, 23:59",'
+            '93c8f884-bd54-445f-96df-e899a660cb64,46645580,619180666745,'
+            'Thundfire Game,49s,49,25000.0,325.0,success',
+        ])
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["jenis"], "depo")
+        self.assertEqual(str(r["amount"]), "25000.0")
+        self.assertGreater(r["money_delta"], 0)
+        self.assertEqual(r["username"], "kaleng1")
+        self.assertEqual(r["reference"], "")   # sengaja: aturan blocked engine
+        self.assertEqual(r["raw"]["UUID"], "93c8f884-bd54-445f-96df-e899a660cb64")
+        self.assertEqual(r["counterparty"], "")  # Customer Name == Username
+        self.assertEqual((r["occurred_at"].year, r["occurred_at"].month,
+                          r["occurred_at"].day, r["occurred_at"].hour,
+                          r["occurred_at"].minute), (2026, 7, 9, 23, 59))
+
+    def test_non_success_dilewati(self):
+        rows = self._parse([
+            '2,NOMINA ISI ULANG,irma30,irma30,"09 Jul 2026, 23:59",'
+            '8d422e0c-eb9c-4baa-a310-544055a7bac7,46645575,000139896397,'
+            'Frostcry Game,45s,45,50000.0,650.0,failed',
+        ])
+        self.assertEqual(rows, [])
+
+    def test_row_hash_stabil_dan_unik_per_uuid(self):
+        a = ('1,NOMINA ISI ULANG,kaleng1,kaleng1,"09 Jul 2026, 23:59",'
+             '93c8f884-bd54-445f-96df-e899a660cb64,46645580,619180666745,'
+             'Thundfire Game,49s,49,25000.0,325.0,success')
+        b = ('2,NOMINA ISI ULANG,irma30,irma30,"09 Jul 2026, 23:59",'
+             '8d422e0c-eb9c-4baa-a310-544055a7bac7,46645575,000139896397,'
+             'Frostcry Game,45s,45,25000.0,325.0,success')
+        h1 = self._parse([a])[0]["row_hash"]
+        h1b = self._parse([a])[0]["row_hash"]
+        h2 = self._parse([b])[0]["row_hash"]
+        self.assertEqual(h1, h1b)
+        self.assertNotEqual(h1, h2)
