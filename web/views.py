@@ -128,6 +128,7 @@ def ganti_password(request):
             user.must_change_password = False
             user.save(update_fields=["must_change_password"])
             update_session_auth_hash(request, user)  # jaga sesi, jangan ter-logout
+            catat(user, "ganti_password", user.username)
             messages.success(request, "Password berhasil diganti. Selamat bekerja!")
             return redirect("dashboard")
     else:

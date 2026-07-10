@@ -64,7 +64,8 @@ def kelola_toko(request):
         elif Toko.objects.filter(key=kode.lower()).exists():
             messages.error(request, f"Toko {kode.upper()} sudah ada.")
         else:
-            Toko.objects.create(key=kode.lower(), name=kode.upper())
+            t = Toko.objects.create(key=kode.lower(), name=kode.upper())
+            catat(request.user, "buat_toko", t.name, toko=t)
             messages.success(request, f"Toko {kode.upper()} ditambahkan.")
         return redirect("kelola_toko")
     if request.method == "POST" and request.POST.get("action") == "toggle":
@@ -75,6 +76,8 @@ def kelola_toko(request):
         t = get_object_or_404(Toko, pk=tid)
         t.is_active = not t.is_active
         t.save(update_fields=["is_active"])
+        catat(request.user, "aktifkan_toko" if t.is_active else "nonaktifkan_toko",
+              t.name, toko=t)
         messages.success(request, f"Toko {t.name} {'diaktifkan' if t.is_active else 'dinonaktifkan'}.")
         return redirect("kelola_toko")
     tokos = Toko.objects.annotate(
@@ -115,6 +118,7 @@ def kelola_user(request):
             )
             if role == "auditor":
                 u.allowed_tokos.set(Toko.objects.filter(id__in=toko_ids, is_active=True))
+            catat(request.user, "buat_user", username, role=role)
             messages.success(request, f"User {username} ({role}) dibuat.")
         return redirect("kelola_user")
     users = User.objects.prefetch_related("allowed_tokos").order_by("username")
@@ -148,6 +152,7 @@ def kelola_user_edit(request, pk):
             target.allowed_tokos.set(
                 Toko.objects.filter(id__in=toko_ids, is_active=True) if role == "auditor" else []
             )
+            catat(request.user, "ubah_user", target.username, role=role)
             messages.success(request, f"User {target.username} diperbarui.")
             return redirect("kelola_user")
     elif action == "reset_password":
@@ -163,6 +168,7 @@ def kelola_user_edit(request, pk):
             target.save()
             if target == request.user:
                 update_session_auth_hash(request, target)
+            catat(request.user, "reset_password", target.username)
             messages.success(request, f"Password {target.username} di-reset.")
             return redirect("kelola_user")
     elif action == "toggle":
@@ -171,6 +177,9 @@ def kelola_user_edit(request, pk):
         else:
             target.is_active = not target.is_active
             target.save(update_fields=["is_active"])
+            catat(request.user,
+                  "aktifkan_user" if target.is_active else "nonaktifkan_user",
+                  target.username)
             messages.success(
                 request,
                 f"User {target.username} {'diaktifkan' if target.is_active else 'dinonaktifkan'}.",
@@ -284,6 +293,7 @@ def delete_toko(request, pk):
             Upload.objects.filter(toko=t).delete()
             Transaction.objects.filter(toko=t).delete()
             t.delete()
+        catat(request.user, "hapus_toko", name, n_tx=n_tx, n_up=n_up, n_batch=n_batch)
         messages.success(
             request,
             f"Toko {name} dihapus permanen — {n_tx} transaksi, {n_up} upload, {n_batch} batch ikut terhapus.",
@@ -301,5 +311,6 @@ def delete_user(request, pk):
         else:
             username = target.username
             target.delete()
+            catat(request.user, "hapus_user", username)
             messages.success(request, f"Pengguna {username} dihapus permanen.")
     return redirect("kelola_user")

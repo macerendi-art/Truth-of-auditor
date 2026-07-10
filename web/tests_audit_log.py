@@ -25,3 +25,76 @@ class UsernameSnapshotTests(TestCase):
         log = AuditLog.objects.latest("id")
         self.assertIsNone(log.user)  # FK SET_NULL
         self.assertEqual(log.username, "pelaku2")  # identitas tetap hidup
+
+
+class PencatatanAksiKelolaTests(TestCase):
+    """Tiap aksi kelola user/toko + ganti password menulis 1 baris AuditLog."""
+
+    def setUp(self):
+        self.adm = User.objects.create_user("adm", password="Adm-Kuat#88", role="admin")
+        self.client.login(username="adm", password="Adm-Kuat#88")
+        self.lbs = Toko.objects.get(key="lbs")
+
+    def _log(self, aksi):
+        return AuditLog.objects.filter(aksi=aksi).latest("id")
+
+    def test_buat_user(self):
+        self.client.post(reverse("kelola_user"), {
+            "username": "budi", "password": "Budi-Kuat#88", "nama": "Budi",
+            "role": "auditor", "tokos": [self.lbs.id],
+        })
+        log = self._log("buat_user")
+        self.assertEqual(log.objek, "budi")
+        self.assertEqual(log.username, "adm")
+        self.assertEqual(log.detail.get("role"), "auditor")
+
+    def test_ubah_user(self):
+        t = User.objects.create_user("tgt", password="Tgt-Kuat#88", role="supervisor")
+        self.client.post(reverse("kelola_user_edit", args=[t.pk]), {
+            "action": "save", "nama": "Target", "role": "supervisor",
+        })
+        self.assertEqual(self._log("ubah_user").objek, "tgt")
+
+    def test_reset_password(self):
+        t = User.objects.create_user("tgt2", password="Tgt-Kuat#88", role="supervisor")
+        self.client.post(reverse("kelola_user_edit", args=[t.pk]), {
+            "action": "reset_password", "password": "Baru-Kuat#99",
+        })
+        self.assertEqual(self._log("reset_password").objek, "tgt2")
+
+    def test_toggle_user(self):
+        t = User.objects.create_user("tgt3", password="Tgt-Kuat#88", role="supervisor")
+        self.client.post(reverse("kelola_user_edit", args=[t.pk]), {"action": "toggle"})
+        self.assertEqual(self._log("nonaktifkan_user").objek, "tgt3")
+        self.client.post(reverse("kelola_user_edit", args=[t.pk]), {"action": "toggle"})
+        self.assertEqual(self._log("aktifkan_user").objek, "tgt3")
+
+    def test_hapus_user(self):
+        t = User.objects.create_user("tgt4", password="Tgt-Kuat#88", role="supervisor")
+        self.client.post(reverse("delete_user", args=[t.pk]))
+        self.assertEqual(self._log("hapus_user").objek, "tgt4")
+
+    def test_buat_toko(self):
+        self.client.post(reverse("kelola_toko"), {"action": "create", "kode": "ZZQ"})
+        self.assertEqual(self._log("buat_toko").objek, "ZZQ")
+
+    def test_toggle_toko(self):
+        t = Toko.objects.create(key="zzt", name="ZZT")
+        self.client.post(reverse("kelola_toko"), {"action": "toggle", "toko_id": str(t.id)})
+        self.assertEqual(self._log("nonaktifkan_toko").objek, "ZZT")
+
+    def test_hapus_toko(self):
+        t = Toko.objects.create(key="zzh", name="ZZH")
+        self.client.post(reverse("delete_toko", args=[t.pk]))
+        log = self._log("hapus_toko")
+        self.assertEqual(log.objek, "ZZH")
+        self.assertIn("n_tx", log.detail)
+
+    def test_ganti_password_sendiri(self):
+        self.client.post(reverse("ganti_password"), {
+            "old_password": "Adm-Kuat#88",
+            "new_password1": "Adm-Baru#99", "new_password2": "Adm-Baru#99",
+        })
+        log = self._log("ganti_password")
+        self.assertEqual(log.objek, "adm")
+        self.assertEqual(log.username, "adm")
