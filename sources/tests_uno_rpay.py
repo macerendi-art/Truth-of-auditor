@@ -150,3 +150,24 @@ class RPayGatewayTests(SimpleTestCase):
         h2 = self._parse([b])[0]["row_hash"]
         self.assertEqual(h1, h1b)
         self.assertNotEqual(h1, h2)
+
+
+class RPayRegistrationTests(SimpleTestCase):
+    def test_terdaftar_di_parsers(self):
+        from sources.services import PARSERS
+        from sources.parsers.gateways import RPayGatewayParser
+        self.assertIs(PARSERS.get("rpay"), RPayGatewayParser)
+
+    def test_terdeteksi_dari_header_csv(self):
+        from sources.detect import detect_source
+        path = _csv([RPAY_HEADER,
+                     '1,NOMINA ISI ULANG,kaleng1,kaleng1,"09 Jul 2026, 23:59",'
+                     '93c8f884-bd54-445f-96df-e899a660cb64,46645580,619180666745,'
+                     'Thundfire Game,49s,49,25000.0,325.0,success'])
+        try:
+            ranked = detect_source(path, "dp rpay.csv")
+        finally:
+            os.remove(path)
+        self.assertTrue(ranked)
+        self.assertEqual(ranked[0]["parser_key"], "rpay")
+        self.assertGreaterEqual(ranked[0]["confidence"], 0.9)

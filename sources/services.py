@@ -17,7 +17,7 @@ from .parsers.cor import (
     CORQRISGatewayParser,
     CORQRISWDGatewayParser,
 )
-from .parsers.gateways import NXPayParser, QRFlyerParser, QHokiParser
+from .parsers.gateways import NXPayParser, QRFlyerParser, QHokiParser, RPayGatewayParser
 from .parsers.panel import PanelParser
 
 # parser_key -> kelas parser (parser.source_key menentukan SourceType-nya)
@@ -34,6 +34,7 @@ PARSERS = {
     "cor_panel_qris": CORPanelQRISParser,
     "cor_qris_gateway": CORQRISGatewayParser,
     "cor_qris_wd_gateway": CORQRISWDGatewayParser,
+    "rpay": RPayGatewayParser,
     "qhoki": QHokiParser,
 }
 

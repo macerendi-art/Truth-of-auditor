@@ -90,6 +90,8 @@ def detect_source(path, filename=""):
             add("bri", 0.95)
         if ("cabang" in c and "keterangan" in c and "saldo" in c) or "bca" in fn:
             add("bca_csv", 0.85)
+        if "customer username" in c and "acquirer merchant" in c:
+            add("rpay", 0.95)
     elif ext == ".pdf":
         add("bca_pdf", 0.75)
 
