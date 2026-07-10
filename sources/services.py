@@ -11,7 +11,12 @@ from .models import SourceType, Upload
 from .parsers.banks import BCACSVParser, BRIParser, MandiriParser
 from .parsers.bca_pdf import BCAPDFParser
 from .parsers.bracket import BracketParser
-from .parsers.cor import CORPanelBankParser, CORPanelQRISParser, CORQRISGatewayParser
+from .parsers.cor import (
+    CORPanelBankParser,
+    CORPanelQRISParser,
+    CORQRISGatewayParser,
+    CORQRISWDGatewayParser,
+)
 from .parsers.gateways import NXPayParser, QRFlyerParser, QHokiParser
 from .parsers.panel import PanelParser
 
@@ -28,6 +33,7 @@ PARSERS = {
     "cor_panel_bank": CORPanelBankParser,
     "cor_panel_qris": CORPanelQRISParser,
     "cor_qris_gateway": CORQRISGatewayParser,
+    "cor_qris_wd_gateway": CORQRISWDGatewayParser,
     "qhoki": QHokiParser,
 }
 

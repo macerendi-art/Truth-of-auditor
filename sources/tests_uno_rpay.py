@@ -68,3 +68,24 @@ class UnoWDGatewayTests(SimpleTestCase):
         a = self._parse([baris])[0]["row_hash"]
         b = self._parse([baris])[0]["row_hash"]
         self.assertEqual(a, b)
+
+
+class UnoWDRegistrationTests(SimpleTestCase):
+    def test_terdaftar_di_parsers(self):
+        from sources.services import PARSERS
+        from sources.parsers.cor import CORQRISWDGatewayParser
+        self.assertIs(PARSERS.get("cor_qris_wd_gateway"), CORQRISWDGatewayParser)
+
+    def test_terdeteksi_dari_header(self):
+        from sources.detect import detect_source
+        path = _xlsx([UNO_WD_HEADER,
+                      ["Omega Vig66", "fd1a26d3-5dbe-411b-9f32-96e97184fe31",
+                       "081270553953", "081270553953", "800900", "800000", "900",
+                       "", "2026-07-03 23:54:40", "SUCCESS"]])
+        try:
+            ranked = detect_source(path, "MUTASI WD QR UNO SLO 03-07.xlsx")
+        finally:
+            os.remove(path)
+        self.assertTrue(ranked)
+        self.assertEqual(ranked[0]["parser_key"], "cor_qris_wd_gateway")
+        self.assertGreaterEqual(ranked[0]["confidence"], 0.9)

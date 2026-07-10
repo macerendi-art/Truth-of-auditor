@@ -75,6 +75,8 @@ def detect_source(path, filename=""):
             add("mandiri", 0.80)
         if _has(t, "orderid") and _has(t, "grandtotal") and _has(t, "branchnominal"):
             add("cor_qris_gateway", 0.95)
+        if _has(t, "order id (merchant)") and (_has(t, "recipientname") or _has(t, "accountnumber")):
+            add("cor_qris_wd_gateway", 0.95)
         if _has(t, "whitelabel transaction id") and _has(t, "nmid"):
             add("qhoki", 0.95)
         if _has(t, "from bank") and _has(t, "destination bank") and _has(t, "approved date"):
