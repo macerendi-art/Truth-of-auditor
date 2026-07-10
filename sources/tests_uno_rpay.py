@@ -152,6 +152,38 @@ class RPayGatewayTests(SimpleTestCase):
         self.assertNotEqual(h1, h2)
 
 
+class RPayHardeningTests(SimpleTestCase):
+    """Temuan review codex: normalisasi tanda & tanggal ambigu."""
+
+    def _parse(self, lines, flow=""):
+        from sources.parsers.gateways import RPayGatewayParser
+        path = _csv([RPAY_HEADER] + lines)
+        try:
+            return RPayGatewayParser().parse(path, flow=flow)
+        finally:
+            os.remove(path)
+
+    def test_nominal_negatif_dinormalkan_abs(self):
+        # Konsisten dgn parser gateway lain: tanda ditentukan flow, bukan file.
+        rows = self._parse([
+            '1,NOMINA ISI ULANG,kaleng1,kaleng1,"09 Jul 2026, 23:59",'
+            '93c8f884-bd54-445f-96df-e899a660cb64,46645580,619180666745,'
+            'Thundfire Game,49s,49,-25000.0,325.0,success',
+        ])
+        self.assertEqual(len(rows), 1)
+        self.assertGreater(rows[0]["money_delta"], 0)   # depo tetap uang masuk
+        self.assertGreater(rows[0]["amount"], 0)
+
+    def test_tanggal_numerik_dibaca_dayfirst(self):
+        # Vendor Indonesia: 09/07/2026 = 9 Juli, BUKAN 7 September.
+        rows = self._parse([
+            '1,NOMINA ISI ULANG,kaleng1,kaleng1,09/07/2026 23:59,'
+            '93c8f884-bd54-445f-96df-e899a660cb64,46645580,619180666745,'
+            'Thundfire Game,49s,49,25000.0,325.0,success',
+        ])
+        self.assertEqual((rows[0]["occurred_at"].month, rows[0]["occurred_at"].day), (7, 9))
+
+
 class RPayRegistrationTests(SimpleTestCase):
     def test_terdaftar_di_parsers(self):
         from sources.services import PARSERS

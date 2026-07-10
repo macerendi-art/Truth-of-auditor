@@ -95,3 +95,15 @@ class QHokiCSVTests(SimpleTestCase):
         self.assertTrue(ranked)
         self.assertEqual(ranked[0]["parser_key"], "qhoki")
         self.assertGreaterEqual(ranked[0]["confidence"], 0.9)
+
+    def test_baris_tanpa_id_dilewati(self):
+        # Temuan codex: baris tanpa wl DAN txid (drift header) menghasilkan
+        # row_hash yang cuma bergantung nominal -> saling tabrak & terbuang
+        # diam-diam. Baris tanpa identitas harus DILEWATI eksplisit.
+        path = _xlsx([HEADER,
+            ["2026-07-03 00:00:00", "", "", "", "", "u", "r", "", "", "",
+             "Success", "1000", "0", "1000", "", "qris"]])
+        try:
+            self.assertEqual(QHokiParser().parse(path, flow="dp"), [])
+        finally:
+            os.remove(path)

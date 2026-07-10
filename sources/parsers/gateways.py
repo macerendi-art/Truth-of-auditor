@@ -101,6 +101,10 @@ class QHokiParser(BaseParser):
                 continue
             wl = str(r.get("Whitelabel Transaction ID", "") or "").strip()
             txid = str(r.get("Transaction ID", "") or "").strip()
+            if not wl and not txid:
+                # Tanpa identitas apa pun row_hash cuma bergantung nominal ->
+                # baris senominal saling tabrak & terbuang diam-diam. Skip.
+                continue
             amt = abs(parse_decimal(r.get("Amount")))
             occurred = parse_dt(r.get("Transaction Date"))
             row = {
@@ -148,8 +152,11 @@ class RPayGatewayParser(BaseParser):
             status = str(r.get("Status", "") or "").strip().lower()
             if not uuid or status != "success":
                 continue
-            amt = parse_decimal(r.get("Amount"))
-            occurred = parse_dt(r.get("Date"))
+            # abs: tanda ditentukan flow (konsisten parser gateway lain);
+            # dayfirst: vendor Indonesia, 09/07 = 9 Juli (format bernama-bulan
+            # "09 Jul 2026" tak terpengaruh).
+            amt = abs(parse_decimal(r.get("Amount")))
+            occurred = parse_dt(r.get("Date"), dayfirst=True)
             username = str(r.get("Customer Username", "") or "").strip()
             cname = str(r.get("Customer Name", "") or "").strip()
             row = {
