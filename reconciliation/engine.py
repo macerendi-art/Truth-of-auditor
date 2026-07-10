@@ -95,6 +95,36 @@ def _route_ok(expected, owner, source_key):
                 return True
     return fuzz.partial_ratio(expected, owner) >= 85
 
+
+# --- Kunci kanal gateway ------------------------------------------------------
+# Panel mendeklarasikan kanal pembayarannya di bank_title ("QRISRPAY",
+# "NXPAY DEPOSIT QR", "QRISHOKI", ...); parser gateway menulis identitasnya di
+# awal description ("RPay ...", "NXPAY ...", "QHOKI ...", "QRFLYER ..."). Uang
+# gateway X dilarang dipasangkan pass identitas dengan baris panel yang menunjuk
+# gateway Y yang dikenal berbeda — mencegah deposit kembar beda kanal saling
+# curi saat file uang belum lengkap (kasus M77: uang RPay tersedot baris NXPAY).
+# Fail-open: token tak dikenal / kosong -> tanpa larangan (perilaku lama).
+_GW_CHANNEL_TOKENS = ("NXPAY", "RPAY", "HOKI", "FLYER")
+
+
+def _channel_from(text):
+    up = (text or "").upper()
+    for tok in _GW_CHANNEL_TOKENS:
+        if tok in up:
+            return tok
+    return ""
+
+
+def _panel_channel(t):
+    return _channel_from(getattr(t, "bank_title", ""))
+
+
+def _money_channel(t):
+    if t.source_type.key != "gateway":
+        return ""
+    # Hanya awalan description (ditulis parser sendiri) — bukan teks bebas.
+    return _channel_from((t.description or "")[:12])
+
 # Detail baku hasil no_money — juga dipakai untuk MENGEMBALIKAN hasil yang
 # di-flip late settlement, jadi string ini harus tetap satu sumber kebenaran.
 NO_MONEY_DETAIL = "Tak ada padanan nominal+tanggal di Mutasi Bank"
@@ -370,6 +400,9 @@ class _MoneyMatcher:
             d = p.occurred_at.date() if p.occurred_at else None
             if d is None:
                 return
+            pchan = getattr(p, "_chan", None)
+            if pchan is None:
+                pchan = p._chan = _panel_channel(p)
             amt, pos = int(abs(p.money_delta)), p.money_delta > 0
             if tol_amt:
                 keys = [(a, s) for (a, s) in bidx
@@ -380,6 +413,13 @@ class _MoneyMatcher:
                 for b in bidx.get(key, []):
                     if b.id in used or b.id in blocked or b.occurred_at is None:
                         continue
+                    if pchan:
+                        bchan = getattr(b, "_mchan", None)
+                        if bchan is None:
+                            bchan = b._mchan = _money_channel(b)
+                        # Kunci kanal: gateway berbeda yang sama-sama dikenal.
+                        if bchan and bchan != pchan:
+                            continue
                     delta = (b.occurred_at.date() - d).days
                     if lo <= delta <= hi:
                         yield b, delta
