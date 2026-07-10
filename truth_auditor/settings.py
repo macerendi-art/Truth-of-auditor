@@ -146,6 +146,13 @@ AUTH_PASSWORD_VALIDATORS = [
 # Bahasa Indonesia: intcomma/floatformat memakai pemisah ribuan titik (Rp 1.234.567)
 LANGUAGE_CODE = 'id'
 
+# Nix/Nixpacks glibc (prod Railway) tidak mencari tzdata di /usr/share/zoneinfo
+# secara default → TZ=Asia/Jakarta gagal di-resolve, fallback ke UTC, sehingga
+# datetime.now() (USE_TZ=False) mundur 7 jam. Arahkan TZDIR ke tzdata yang ada
+# SEBELUM Django memanggil time.tzset(), supaya waktu server benar-benar WIB (UTC+7).
+if os.path.isdir('/usr/share/zoneinfo'):
+    os.environ.setdefault('TZDIR', '/usr/share/zoneinfo')
+
 TIME_ZONE = 'Asia/Jakarta'
 
 USE_I18N = True
