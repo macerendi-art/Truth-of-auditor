@@ -51,4 +51,10 @@ Full suite hijau → commit → fetch+rebase → push origin/main. CLAUDE.md tid
 
 ## Hasil
 
-(diisi setelah eksekusi)
+Dieksekusi inline 2026-07-10 (4 task TDD):
+
+- Task A: field `AuditLog.username` + migrasi core 0002 (AddField + backfill RunPython) + `catat()` mengisi otomatis — 2 tes.
+- Task B: 10 aksi baru tercatat (buat/ubah/reset_password/aktifkan/nonaktifkan/hapus_user, buat/aktifkan/nonaktifkan/hapus_toko, ganti_password) — 9 tes.
+- Task C: halaman `/kelola/log/` + menu sidebar + AKSI_LABELS (badge nada) + filter aksi/user/toko/tanggal + search q — 7 tes; verifikasi visual preview (badge berwarna, "user dihapus" utk FK mati, filter q bekerja).
+- Suite penuh: **628 tes hijau** (610 → 628, +18).
+- Gotcha yang ketangkap tes sendiri: placeholder input search sempat memuat contoh nyata ("Batch #3, budi") sehingga assertContains palsu — placeholder harus netral.
