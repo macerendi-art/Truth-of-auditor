@@ -34,6 +34,16 @@ def is_bca_fee(desc):
     return bool(BCA_FEE_RE.search(str(desc or "")))
 
 
+# Fee transfer BRIVA (WD e-wallet via BRI): tiap transfer berpasangan baris
+# debit Rp1.000 ber-SEQ & deskripsi IDENTIK. Bukti data WLG 01-10 Jul 2026:
+# 182 pasangan persis, nol fee yatim, nol nominal BRIVA lain <10rb.
+BRIVA_FEE = Decimal("1000")
+
+
+def is_briva_fee(desc, money):
+    return money == -BRIVA_FEE and "BRIVA" in str(desc or "").upper()
+
+
 # ---------------------------------------------------------------------------
 # Isolasi nama (Task 4). Urutan wajib: buang teks struktural per-sumber DULU,
 # baru nama dinormalisasi (clean_name) di engine saat fuzzy matching.
@@ -147,7 +157,7 @@ class BRIParser(BaseParser):
                 "source_type": "bank",
                 "occurred_at": occurred,
                 "posted_date": occurred.date() if occurred else None,
-                "jenis": _jenis_from_money(money),
+                "jenis": "admin" if is_briva_fee(desc, money) else _jenis_from_money(money),
                 "amount": abs(money),
                 "credit_delta": Decimal("0"),
                 "money_delta": money,
