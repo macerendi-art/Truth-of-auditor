@@ -62,3 +62,11 @@ class BrivaFeeTests(SimpleTestCase):
         # jangan ikut ditandai admin.
         rows = self._parse([_row("11", DESC_BRIVA, "0.00", kredit="1000.00")])
         self.assertEqual(rows[0]["jenis"], "depo")
+
+    def test_nama_penerima_mengandung_kata_briva_tetap_wd(self):
+        # Temuan review adversarial: substring saja bisa salah tandai transfer
+        # NBMB Rp1.000 ke penerima bernama 'TOKO BRIVA JAYA'. Wajib BRIVA<digit>.
+        rows = self._parse([
+            _row("12", "NBMB Cantika Irsad TO TOKO BRIVA JAYA ESB:NBMB:0001500F:1", "1000.00"),
+        ])
+        self.assertEqual(rows[0]["jenis"], "wd")

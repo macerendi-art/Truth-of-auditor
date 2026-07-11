@@ -42,7 +42,11 @@ _DIGIT_RUN_RE = re.compile(r"\d{9,15}")
 # nomor sehingga deret totalnya 16-18 digit dan LOLOS dari _DIGIT_RUN_RE
 # (terpotong 15 digit + kode ikut terbawa). Kode kanal dari matriks klien:
 # DANA 88810, GOPAY 30135, OVO 88099, SHOPEEPAY 112, LINK AJA 91188.
-_BRIVA_RE = re.compile(r"BRIVA\s?(?:88810|30135|88099|91188|112)(\d{9,15})")
+# Dipakai via .sub() yang MENGGANTI span dengan nomornya: sekaligus membuang
+# deret tercemar kode dari hasil _DIGIT_RUN_RE (temuan review adversarial).
+_BRIVA_RE = re.compile(
+    r"BRIVA\s*(?:88810|30135|88099|91188|112)(\d{9,15})", re.IGNORECASE
+)
 
 
 def _panel_phone(t):
@@ -60,7 +64,10 @@ def _money_phones(t):
     text = " ".join(str(v) for v in (t.raw or {}).values())
     out = set()
     joined = text + " " + (t.counterparty or "")
-    for run in _DIGIT_RUN_RE.findall(joined) + _BRIVA_RE.findall(joined):
+    # Span BRIVA diganti nomor bersihnya SEBELUM scan deret digit: nomor ikut
+    # terekstrak DAN deret tercemar kode (mis. '301350831448892') hilang.
+    joined = _BRIVA_RE.sub(lambda m: f" {m.group(1)} ", joined)
+    for run in _DIGIT_RUN_RE.findall(joined):
         norm = run.lstrip("0").removeprefix("62").lstrip("0")
         if len(norm) >= 9:
             out.add(norm)

@@ -37,11 +37,14 @@ def is_bca_fee(desc):
 # Fee transfer BRIVA (WD e-wallet via BRI): tiap transfer berpasangan baris
 # debit Rp1.000 ber-SEQ & deskripsi IDENTIK. Bukti data WLG 01-10 Jul 2026:
 # 182 pasangan persis, nol fee yatim, nol nominal BRIVA lain <10rb.
+# Wajib pola 'BRIVA<digit>' (bukan substring) agar penerima transfer biasa
+# yang kebetulan bernama mengandung 'BRIVA' tidak ikut tertandai.
 BRIVA_FEE = Decimal("1000")
+BRIVA_DESC_RE = re.compile(r"BRIVA\s*\d{3}", re.IGNORECASE)
 
 
 def is_briva_fee(desc, money):
-    return money == -BRIVA_FEE and "BRIVA" in str(desc or "").upper()
+    return money == -BRIVA_FEE and bool(BRIVA_DESC_RE.search(str(desc or "")))
 
 
 # ---------------------------------------------------------------------------

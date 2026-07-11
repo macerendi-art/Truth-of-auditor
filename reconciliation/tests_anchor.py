@@ -259,3 +259,29 @@ class BrivaEWalletTests(TestCase):
         self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
         self.assertEqual(r.right, b)
         self.assertFalse(MatchResult.objects.filter(run=run, right=fee).exists())
+
+
+class BrivaPhoneExtractionTests(TestCase):
+    """Unit _money_phones utk pola BRIVA — hardening temuan review adversarial."""
+
+    def _phones(self, desc):
+        from types import SimpleNamespace
+        from reconciliation.engine import _money_phones
+        return _money_phones(SimpleNamespace(raw={"DESK_TRAN": desc}, counterparty=""))
+
+    def test_huruf_kecil_dan_spasi_ganda_tetap_terbaca(self):
+        for desc in ("briva30135083144889247NBMB",
+                     "BRIVA  30135083144889247NBMB"):
+            self.assertIn("83144889247", self._phones(desc), desc)
+
+    def test_deret_tercemar_kode_ikut_terbuang(self):
+        # '30135083144889247' TIDAK boleh menyisakan '301350831448892' sebagai
+        # anchor — rekening BRI 15 digit berawalan 30135 bisa salah nyangkut.
+        phones = self._phones("BRIVA30135083144889247NBMBAxxxx")
+        self.assertIn("83144889247", phones)
+        self.assertNotIn("301350831448892", phones)
+
+    def test_deret_lain_di_teks_tetap_diambil(self):
+        # Referensi ESB dsb. tetap ikut (perilaku lama, di luar span BRIVA).
+        phones = self._phones("BRIVA30135083144889247 ESB:NBMB:0200200P:174837810133")
+        self.assertIn("174837810133", phones)
