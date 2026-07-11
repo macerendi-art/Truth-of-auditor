@@ -185,3 +185,77 @@ class AnchorNomorHPTests(TestCase):
         self.assertEqual(r.bucket, MatchResult.Bucket.TIDAK)
         self.assertEqual(r.reason_code, "no_money")
         self.assertIsNone(r.right)
+
+
+class BrivaEWalletTests(TestCase):
+    """WD e-wallet via BRI: mutasi berpola 'BRIVA<kode kanal><no HP>' (kode 5/3
+    digit menempel di depan nomor → deret 16-18 digit, lolos dari regex deret
+    9-15). Kode dari matriks klien: DANA 88810, GOPAY 30135, OVO 88099,
+    SHOPEEPAY 112, LINK AJA 91188. Kasus prod WLG Batch #6 (10-Jul-2026):
+    15 WD GOPAY/LINKAJA jatuh 'identitas beda' padahal mutasinya ada."""
+
+    def setUp(self):
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bank = SourceType.objects.get_or_create(
+            key="bank", defaults={"name": "Bank", "is_money_source": True}
+        )[0]
+        self.tol = ToleranceProfile.objects.get_or_create(
+            name="Default", defaults={"date_window_days": 1, "fuzzy_threshold": 85}
+        )[0]
+        self.up = Upload.objects.create(source_type=self.panel)
+        self.upb = Upload.objects.create(source_type=self.bank)
+
+    def _panel(self, money, name, pbank, rh, dt):
+        return Transaction.objects.create(
+            upload=self.up, source_type=self.panel, jenis="wd",
+            amount=Decimal(abs(money)), money_delta=Decimal(money),
+            counterparty=name, occurred_at=dt, row_hash=rh,
+            raw={"Player Bank": pbank},
+        )
+
+    def _bank(self, money, desc, rh, dt):
+        return Transaction.objects.create(
+            upload=self.upb, source_type=self.bank, jenis="wd",
+            amount=Decimal(abs(money)), money_delta=Decimal(money),
+            counterparty="", occurred_at=dt, row_hash=rh,
+            description=desc, raw={"DESK_TRAN": desc},
+        )
+
+    DESC_GOPAY = ("BRIVA30135083144889247NBMBAxxxx Pxxxx "
+                  "BRIVA 30135083144889247NBMBAxxxx ESB:NBMB:0200200P:174837810133")
+
+    def test_gopay_briva_nomor_cocok(self):
+        # Kasus riil: turufc/Ariyo padli 70rb — HP di balik kode GOPAY 30135.
+        p = self._panel(-70000, "Ariyo padli", "GOPAY|Ariyo padli|083144889247",
+                        "p1", datetime(2026, 7, 10, 23, 41))
+        b = self._bank(-70000, self.DESC_GOPAY, "b1", datetime(2026, 7, 10, 23, 44))
+        run = run_match("panel_bank", self.tol)
+        r = MatchResult.objects.get(run=run, left=p)
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.right, b)
+        self.assertEqual(r.score, 100)
+
+    def test_linkaja_briva_nomor_cocok(self):
+        p = self._panel(-100000, "Sari Dewi", "LINK AJA|Sari Dewi|083147803695",
+                        "p1", datetime(2026, 7, 10, 20, 0))
+        b = self._bank(-100000,
+                       "BRIVA91188083147803695NBMBAxxxx Pxxxx "
+                       "BRIVA 91188083147803695NBMBAxxxx ESB:NBMB:0200200P:174837810188",
+                       "b1", datetime(2026, 7, 10, 20, 5))
+        run = run_match("panel_bank", self.tol)
+        r = MatchResult.objects.get(run=run, left=p)
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.right, b)
+
+    def test_baris_fee_seribu_tidak_terpakai(self):
+        # Tiap transfer BRIVA berpasangan baris fee Rp1.000 berdeskripsi IDENTIK
+        # (SEQ sama). Blocking nominal harus menjodohkan ke transfernya, bukan fee.
+        p = self._panel(-70000, "Ariyo padli", "GOPAY|Ariyo padli|083144889247",
+                        "p1", datetime(2026, 7, 10, 23, 41))
+        b = self._bank(-70000, self.DESC_GOPAY, "b1", datetime(2026, 7, 10, 23, 44))
+        fee = self._bank(-1000, self.DESC_GOPAY, "b2", datetime(2026, 7, 10, 23, 44))
+        run = run_match("panel_bank", self.tol)
+        r = MatchResult.objects.get(run=run, left=p)
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.right, b)
+        self.assertFalse(MatchResult.objects.filter(run=run, right=fee).exists())

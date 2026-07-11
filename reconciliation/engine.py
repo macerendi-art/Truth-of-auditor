@@ -38,6 +38,11 @@ def _wallet_label(name):
 
 _NORM_RE = re.compile(r"[^A-Z]")
 _DIGIT_RUN_RE = re.compile(r"\d{9,15}")
+# WD e-wallet via BRI: 'BRIVA<kode kanal><no HP>' — kode menempel di depan
+# nomor sehingga deret totalnya 16-18 digit dan LOLOS dari _DIGIT_RUN_RE
+# (terpotong 15 digit + kode ikut terbawa). Kode kanal dari matriks klien:
+# DANA 88810, GOPAY 30135, OVO 88099, SHOPEEPAY 112, LINK AJA 91188.
+_BRIVA_RE = re.compile(r"BRIVA\s?(?:88810|30135|88099|91188|112)(\d{9,15})")
 
 
 def _panel_phone(t):
@@ -54,7 +59,8 @@ def _money_phones(t):
     TOPUP, dst) menaruh nomor HP/VA tujuan di teks keterangan."""
     text = " ".join(str(v) for v in (t.raw or {}).values())
     out = set()
-    for run in _DIGIT_RUN_RE.findall(text + " " + (t.counterparty or "")):
+    joined = text + " " + (t.counterparty or "")
+    for run in _DIGIT_RUN_RE.findall(joined) + _BRIVA_RE.findall(joined):
         norm = run.lstrip("0").removeprefix("62").lstrip("0")
         if len(norm) >= 9:
             out.add(norm)
