@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
-from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max, OuterRef, Q, Sum
+from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max, Min, OuterRef, Q, Sum
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -38,6 +38,9 @@ from transactions.models import Transaction, specific_source_label
 from web.access import is_admin, tokos_for
 from web.breakdown import bracket_breakdown as hitung_bracket_breakdown
 from web.forms import GantiPasswordForm
+from web.monthly import monthly_summary
+from web.rekening import rekening_breakdown as hitung_rekening_breakdown
+from web.settlement import pending_settlement_rows
 from web.templatetags.web_extras import reason_label
 
 BUCKET_META = {
@@ -1228,6 +1231,85 @@ def bracket_breakdown(request):
         "data": data, "tanggal": tanggal, "latest": latest,
         "prev_date": tanggal - timedelta(days=1),
         "next_date": tanggal + timedelta(days=1),
+    })
+
+
+@login_required
+def settlement_pending(request):
+    """Settlement Tertunda: antrean baris kredit menunggu uang tiba (H+1),
+    dengan umur & sisa jendela. Filter DP/WD, urut tertua dulu."""
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    rows = pending_settlement_rows(active)
+    flow = request.GET.get("flow", "")
+    if flow == "depo":
+        rows = [r for r in rows if r["jenis"] == "depo"]
+    elif flow == "wd":
+        rows = [r for r in rows if r["jenis"] == "wd"]
+    else:
+        flow = ""
+    total_nominal = sum((r["nominal"] or 0) for r in rows)
+    page = Paginator(rows, 40).get_page(request.GET.get("page"))
+    return render(request, "web/settlement.html", {
+        "page": page, "flow": flow, "total_count": len(rows),
+        "total_nominal": total_nominal,
+    })
+
+
+@login_required
+def rekening_breakdown(request):
+    """Rincian Rekening: breakdown sisi uang (bank/gateway) per rekening operator
+    pada satu tanggal — Deposit/Withdraw/Admin/Net/Saldo + Selisih Kontrol."""
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    latest = Transaction.objects.filter(
+        toko=active, source_type__key__in=("bank", "gateway")
+    ).aggregate(m=Max("occurred_at__date"))["m"]
+    tanggal = _parse_date(request.GET.get("date", "")) or latest or date_cls.today()
+    data = hitung_rekening_breakdown(active, tanggal)
+    return render(request, "web/rekening.html", {
+        "data": data, "tanggal": tanggal, "latest": latest,
+        "prev_date": tanggal - timedelta(days=1),
+        "next_date": tanggal + timedelta(days=1),
+    })
+
+
+@login_required
+def monthly_overview(request):
+    """Ringkasan Bulanan: rekap batch harian toko aktif dalam satu bulan
+    (Panel/Uang DP & WD, selisih, bucket) langsung dari ReconBatch.summary."""
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    batch_dates = ReconBatch.objects.filter(
+        toko=active, recon_date__isnull=False
+    ).aggregate(m=Max("recon_date"), n=Min("recon_date"))
+    latest = batch_dates["m"]
+    sel = request.GET.get("month", "")
+    year = month = None
+    if len(sel) == 7 and sel[4] == "-":
+        try:
+            year, month = int(sel[:4]), int(sel[5:7])
+        except ValueError:
+            year = month = None
+    if year is None:
+        ref = latest or date_cls.today()
+        year, month = ref.year, ref.month
+    data = monthly_summary(active, year, month)
+    # daftar bulan yang punya batch (untuk dropdown)
+    months = sorted(
+        {(d.year, d.month) for d in ReconBatch.objects.filter(
+            toko=active, recon_date__isnull=False
+        ).values_list("recon_date", flat=True) if d},
+        reverse=True,
+    )
+    return render(request, "web/monthly.html", {
+        "data": data,
+        "bulan": date_cls(year, month, 1),
+        "months": [date_cls(y, m, 1) for y, m in months],
+        "sel_month": f"{year:04d}-{month:02d}",
     })
 
 

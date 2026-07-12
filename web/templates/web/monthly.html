@@ -1,0 +1,78 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% load web_extras %}
+{% block title %}Ringkasan Bulanan · Truth of Auditor{% endblock %}
+{% block crumb %}Ringkasan Bulanan{% endblock %}
+{% block content_class %}wide{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Ringkasan Bulanan</h1>
+    <p>Rekap rekonsiliasi harian <b>{{ active_toko.name }}</b> — Panel vs uang nyata (DP &amp; WD), selisih, dan hasil pencocokan per tanggal.</p>
+  </div>
+</div>
+
+<div class="card reveal" style="margin-bottom:18px">
+  <form method="get" class="row" style="align-items:flex-end">
+    <div class="field"><label>Bulan</label>
+      <select name="month" onchange="this.form.submit()">
+      {% for m in months %}<option value="{{ m|date:'Y-m' }}" {% if m|date:'Y-m' == sel_month %}selected{% endif %}>{{ m|date:"F Y" }}</option>{% endfor %}
+      {% if not months %}<option value="{{ sel_month }}" selected>{{ bulan|date:"F Y" }}</option>{% endif %}
+      </select></div>
+    <noscript><button class="btn primary" type="submit">Tampilkan</button></noscript>
+  </form>
+</div>
+
+{% if not data.rows %}
+<div class="card reveal">
+  <div class="cell-empty" style="padding:34px 12px;text-align:center">
+    Belum ada rekonsiliasi pada {{ bulan|date:"F Y" }}.
+    {% if months %}<br><a href="?month={{ months.0|date:'Y-m' }}" style="font-weight:600">Lihat bulan terakhir yang ada datanya → {{ months.0|date:"F Y" }}</a>{% endif %}
+  </div>
+</div>
+{% else %}
+<div class="card pad0 reveal">
+  <div class="table-wrap" style="border:none">
+  <table>
+    <thead><tr>
+      <th style="width:96px">Tanggal</th>
+      <th class="num">Panel DP</th><th class="num">Uang DP</th><th class="num">Selisih DP</th>
+      <th class="num">Panel WD</th><th class="num">Uang WD</th><th class="num">Selisih WD</th>
+      <th class="num" style="width:70px">Cocok</th><th class="num" style="width:70px">Tinjau</th><th class="num" style="width:78px">Tidak</th>
+      <th style="width:44px"></th>
+    </tr></thead>
+    <tbody>
+    {% for r in data.rows %}
+    <tr>
+      <td><b>{{ r.date|date:"d M" }}</b></td>
+      <td class="num mono">{{ r.dp_panel|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ r.dp_gross|floatformat:0|intcomma }}</td>
+      <td class="num">{% if r.dp_selisih == 0 %}<span class="badge ok">0</span>{% else %}<span class="badge {% if r.dp_selisih < 0 or r.dp_selisih > 0 %}warn{% endif %} mono">{{ r.dp_selisih|floatformat:0|intcomma }}</span>{% endif %}</td>
+      <td class="num mono">{{ r.wd_panel|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ r.wd_gross|floatformat:0|intcomma }}</td>
+      <td class="num">{% if r.wd_selisih == 0 %}<span class="badge ok">0</span>{% else %}<span class="badge warn mono">{{ r.wd_selisih|floatformat:0|intcomma }}</span>{% endif %}</td>
+      <td class="num mono" style="color:var(--ok)">{{ r.cocok|intcomma }}</td>
+      <td class="num mono">{% if r.tinjau %}<span style="color:var(--warn-ink,#a5670f)">{{ r.tinjau|intcomma }}</span>{% else %}0{% endif %}</td>
+      <td class="num mono">{% if r.tidak %}<span style="color:var(--bad)">{{ r.tidak|intcomma }}</span>{% else %}0{% endif %}</td>
+      <td class="num"><a href="{% url 'batch_detail' r.batch_id %}" title="Buka batch {{ r.date|date:'d M' }}" style="color:var(--brand-2)">›</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr style="font-weight:700">
+      <td>TOTAL</td>
+      <td class="num mono">{{ data.total.dp_panel|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.total.dp_gross|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.total.dp_selisih|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.total.wd_panel|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.total.wd_gross|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.total.wd_selisih|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.total.cocok|intcomma }}</td>
+      <td class="num mono">{{ data.total.tinjau|intcomma }}</td>
+      <td class="num mono">{{ data.total.tidak|intcomma }}</td>
+      <td></td>
+    </tr></tfoot>
+  </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

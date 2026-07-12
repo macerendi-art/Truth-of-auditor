@@ -1,0 +1,62 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% load web_extras %}
+{% block title %}Settlement Tertunda · Truth of Auditor{% endblock %}
+{% block crumb %}Settlement Tertunda{% endblock %}
+{% block content_class %}wide{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Settlement Tertunda</h1>
+    <p>Kredit <b>{{ active_toko.name }}</b> yang sudah tercatat tetapi uangnya belum tiba — menunggu settlement di run hari berikutnya (H+1).</p>
+  </div>
+</div>
+
+<div class="card reveal" style="margin-bottom:18px">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div class="seg" role="group" aria-label="Pilah arus Deposit atau Withdraw">
+      <a href="?" class="{% if not flow %}active{% endif %}">Semua</a>
+      <a href="?flow=depo" class="dp {% if flow == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit</a>
+      <a href="?flow=wd" class="wd {% if flow == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw</a>
+    </div>
+    <span class="spacer"></span>
+    <span class="faint" style="font-size:12px">{{ total_count|intcomma }} baris menunggu · total Rp{{ total_nominal|floatformat:0|intcomma }}</span>
+  </div>
+</div>
+
+<div class="card pad0 reveal">
+  <div class="table-wrap tall" style="border:none">
+  <table>
+    <thead><tr>
+      <th style="width:96px">Tanggal</th><th style="width:120px">Ticket</th><th>Username</th>
+      <th style="width:90px">Bank pemain</th><th>Jenis</th>
+      <th class="num">Nominal</th><th class="num" style="width:80px">Umur</th>
+      <th class="num" style="width:150px">Batas settle</th>
+    </tr></thead>
+    <tbody>
+    {% for r in page %}
+    <tr>
+      <td><b>{{ r.tanggal|date:"d M Y"|default:"—" }}</b></td>
+      <td class="mono" style="font-size:12px">{{ r.ticket|default:"—" }}</td>
+      <td style="font-size:12.5px">{{ r.username|default:"—" }}</td>
+      <td style="font-size:12px">{{ r.player_bank|default:"—" }}</td>
+      <td>{% if r.jenis == 'depo' %}<span class="badge ok">Deposit</span>{% elif r.jenis == 'wd' %}<span class="badge bad">Withdraw</span>{% else %}<span class="badge">{{ r.jenis }}</span>{% endif %}</td>
+      <td class="num mono">{{ r.nominal|floatformat:0|intcomma }}</td>
+      <td class="num mono">{% if r.umur is not None %}{{ r.umur }} hari{% else %}—{% endif %}</td>
+      <td class="num">
+        {% if r.sisa is None %}<span class="faint">—</span>
+        {% elif r.sisa < 0 %}<span class="badge bad" title="Lewat batas — jalankan rekonsiliasi">lewat batas</span>
+        {% elif r.sisa == 0 %}<span class="badge warn" title="Kadaluarsa bila tidak settle di run berikutnya">{{ r.batas|date:"d M" }} · terakhir</span>
+        {% else %}<span class="badge ok">{{ r.batas|date:"d M" }} · sisa {{ r.sisa }} hari</span>{% endif %}
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="8" class="cell-empty" style="padding:30px 12px;text-align:center">Tidak ada kredit yang menunggu settlement — semua sudah tercocokkan.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+{% pager page %}
+{% endblock %}
