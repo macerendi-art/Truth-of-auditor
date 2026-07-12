@@ -1,0 +1,118 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% load web_extras %}
+{% block title %}Breakdown Bracket · Truth of Auditor{% endblock %}
+{% block crumb %}Transaksi · Breakdown Bracket{% endblock %}
+{% block content_class %}wide{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Breakdown Bracket (FR)</h1>
+    <p>Isi FR harian <b>{{ active_toko.name }}</b> per FR Account — pergerakan per rekening &amp; pivot per kategori, dengan kontrol saldo berjalan.</p>
+  </div>
+</div>
+
+<div class="card reveal" style="margin-bottom:18px">
+  <form method="get" class="row" style="align-items:flex-end">
+    <div class="field"><label>Tanggal report</label><input type="date" name="date" value="{{ tanggal|date:'Y-m-d' }}"></div>
+    <button class="btn primary" type="submit">Terapkan</button>
+    <div class="seg" role="group" aria-label="Geser satu hari">
+      <a href="?date={{ prev_date|date:'Y-m-d' }}" title="Sehari sebelumnya">‹ {{ prev_date|date:"d/m" }}</a>
+      <a href="?date={{ next_date|date:'Y-m-d' }}" title="Sehari berikutnya">{{ next_date|date:"d/m" }} ›</a>
+    </div>
+    <span class="spacer"></span>
+    <span class="faint" style="font-size:12px">{{ data.count|intcomma }} baris FR pada {{ tanggal|date:"d M Y" }}</span>
+  </form>
+</div>
+
+{% if not data.accounts %}
+<div class="card reveal">
+  <div class="cell-empty" style="padding:34px 12px;text-align:center">
+    Belum ada data bracket untuk tanggal ini.
+    {% if latest %}<br><a href="?date={{ latest|date:'Y-m-d' }}" style="font-weight:600">Lihat tanggal terakhir yang ada datanya → {{ latest|date:"d M Y" }}</a>
+    {% else %}<br><span class="faint">Upload file FR Bracket dulu lewat menu <a href="{% url 'upload' %}">Upload</a>.</span>{% endif %}
+  </div>
+</div>
+{% else %}
+
+<div class="card pad0 reveal" style="margin-bottom:18px">
+  <div style="padding:16px 18px 4px">
+    <h2 style="margin:0;font-size:15px">Pergerakan per Bank</h2>
+    <p class="faint" style="margin:4px 0 10px;font-size:12px">Rekap deposit &amp; withdraw per FR Account. Pending DP tidak dihitung.</p>
+  </div>
+  <div class="table-wrap" style="border:none">
+  <table>
+    <thead><tr>
+      <th style="width:44px" class="num">No</th><th>FR Account</th>
+      <th class="num">Deposit</th><th class="num">Withdraw</th><th class="num">Net</th>
+      <th class="num" style="width:70px">Trx</th><th class="num">Saldo Akhir</th>
+    </tr></thead>
+    <tbody>
+    {% for a in data.accounts %}
+    <tr>
+      <td class="num mono faint">{{ forloop.counter }}</td>
+      <td style="font-size:12.5px"><b>{{ a.name }}</b>{% if a.role %} <span class="badge" style="font-size:10px">{{ a.role }}</span>{% endif %}</td>
+      <td class="num mono" {% if a.deposit > 0 %}style="color:var(--ok)"{% endif %}>{{ a.deposit|floatformat:0|intcomma }}</td>
+      <td class="num mono" {% if a.withdraw > 0 %}style="color:var(--bad)"{% endif %}>{{ a.withdraw|floatformat:0|intcomma }}</td>
+      <td class="num mono" {% if a.net < 0 %}style="color:var(--bad)"{% elif a.net > 0 %}style="color:var(--ok)"{% endif %}>{{ a.net|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ a.trx|intcomma }}</td>
+      <td class="num mono">{% if a.saldo_akhir is not None %}{{ a.saldo_akhir|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr style="font-weight:700">
+      <td></td><td>TOTAL</td>
+      <td class="num mono">{{ data.total.deposit|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.total.withdraw|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.total.net|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.total.trx|intcomma }}</td>
+      <td class="num mono">{% if data.total.saldo_akhir is not None %}{{ data.total.saldo_akhir|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
+    </tr></tfoot>
+  </table>
+  </div>
+</div>
+
+<div class="card pad0 reveal">
+  <div style="padding:16px 18px 4px">
+    <h2 style="margin:0;font-size:15px">Control Bracket Transaction <span class="faint" style="font-weight:500">(Harian)</span></h2>
+    <p class="faint" style="margin:4px 0 10px;font-size:12px">Breakdown per kategori FR, mutasi bertanda. <b>Selisih Kontrol</b> = Saldo Akhir − (Saldo Awal + Total Mutasi) — idealnya 0; nilai lain berarti saldo berjalan FR tidak konsisten dengan mutasinya.</p>
+  </div>
+  <div class="table-wrap" style="border:none">
+  <table>
+    <thead><tr>
+      <th style="width:44px" class="num">No</th><th>FR Account</th>
+      <th class="num">Saldo Awal</th>
+      {% for slug, label in data.kolom %}<th class="num">{{ label }}</th>{% endfor %}
+      <th class="num">Total Mutasi</th><th class="num">Saldo Akhir</th>
+      <th class="num" title="Saldo Akhir − (Saldo Awal + Total Mutasi)">Selisih Kontrol</th>
+    </tr></thead>
+    <tbody>
+    {% for a in data.accounts %}
+    <tr>
+      <td class="num mono faint">{{ forloop.counter }}</td>
+      <td style="font-size:12.5px;white-space:nowrap"><b>{{ a.name }}</b>{% if a.role %} <span class="badge" style="font-size:10px">{{ a.role }}</span>{% endif %}</td>
+      <td class="num mono">{% if a.saldo_awal is not None %}{{ a.saldo_awal|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
+      {% for slug, label in data.kolom %}{% with v=a.kategori|raw_get:slug %}
+      <td class="num mono">{% if v == "" %}<span class="faint">·</span>{% else %}<span {% if v < 0 %}style="color:var(--bad)"{% endif %}>{{ v|floatformat:0|intcomma }}</span>{% endif %}</td>
+      {% endwith %}{% endfor %}
+      <td class="num mono" style="font-weight:600">{{ a.mutasi|floatformat:0|intcomma }}</td>
+      <td class="num mono">{% if a.saldo_akhir is not None %}{{ a.saldo_akhir|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
+      <td class="num">{% if a.selisih is None %}<span class="faint">—</span>{% elif a.selisih == 0 %}<span class="badge ok">0</span>{% else %}<span class="badge bad mono">{{ a.selisih|floatformat:0|intcomma }}</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr style="font-weight:700">
+      <td></td><td>TOTAL</td>
+      <td class="num mono">{% if data.total.saldo_awal is not None %}{{ data.total.saldo_awal|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
+      {% for slug, label in data.kolom %}{% with v=data.total.kategori|raw_get:slug %}
+      <td class="num mono">{% if v == "" %}<span class="faint">·</span>{% else %}{{ v|floatformat:0|intcomma }}{% endif %}</td>
+      {% endwith %}{% endfor %}
+      <td class="num mono">{{ data.total.mutasi|floatformat:0|intcomma }}</td>
+      <td class="num mono">{% if data.total.saldo_akhir is not None %}{{ data.total.saldo_akhir|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
+      <td class="num">{% if data.total.selisih is None %}<span class="faint">—</span>{% elif data.total.selisih == 0 %}<span class="badge ok">0</span>{% else %}<span class="badge bad mono">{{ data.total.selisih|floatformat:0|intcomma }}</span>{% endif %}</td>
+    </tr></tfoot>
+  </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

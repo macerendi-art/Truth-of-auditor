@@ -1,7 +1,7 @@
 import os
 import re
 import zipfile
-from datetime import date as date_cls
+from datetime import date as date_cls, timedelta
 
 from django.contrib import messages
 from django.contrib.auth import logout as auth_logout, update_session_auth_hash
@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
-from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, OuterRef, Q, Sum
+from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max, OuterRef, Q, Sum
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -36,6 +36,7 @@ from sources.models import SourceType, Upload
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
 from web.access import is_admin, tokos_for
+from web.breakdown import bracket_breakdown as hitung_bracket_breakdown
 from web.forms import GantiPasswordForm
 from web.templatetags.web_extras import reason_label
 
@@ -1206,6 +1207,27 @@ def bank_mutations(request):
         "uploads": uploads, "sel_upload": sel_upload,
         "date_from": request.GET.get("from", "") if date_from else "",
         "date_to": request.GET.get("to", "") if date_to else "",
+    })
+
+
+@login_required
+def bracket_breakdown(request):
+    """Sub-menu Breakdown Bracket: isi FR harian per FR Account — kartu
+    "Pergerakan per Bank" (rekap DP/WD/Net/Trx/Saldo) + "Control Bracket
+    Transaction" (pivot kategori asli FR + Selisih Kontrol). Lihat
+    docs/superpowers/specs/2026-07-12-breakdown-bracket-design.md."""
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    latest = Transaction.objects.filter(
+        toko=active, source_type__key="bracket"
+    ).aggregate(m=Max("posted_date"))["m"]
+    tanggal = _parse_date(request.GET.get("date", "")) or latest or date_cls.today()
+    data = hitung_bracket_breakdown(active, tanggal)
+    return render(request, "web/breakdown_bracket.html", {
+        "data": data, "tanggal": tanggal, "latest": latest,
+        "prev_date": tanggal - timedelta(days=1),
+        "next_date": tanggal + timedelta(days=1),
     })
 
 
