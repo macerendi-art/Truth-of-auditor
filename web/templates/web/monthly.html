@@ -46,10 +46,10 @@
     <tr>
       <td><b>{{ r.date|date:"d M" }}</b></td>
       <td class="num mono">{{ r.dp_panel|floatformat:0|intcomma }}</td>
-      <td class="num mono">{{ r.dp_gross|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ r.dp_uang|floatformat:0|intcomma }}</td>
       <td class="num">{% if r.dp_selisih == 0 %}<span class="badge ok">0</span>{% else %}<span class="badge {% if r.dp_selisih < 0 or r.dp_selisih > 0 %}warn{% endif %} mono">{{ r.dp_selisih|floatformat:0|intcomma }}</span>{% endif %}</td>
       <td class="num mono">{{ r.wd_panel|floatformat:0|intcomma }}</td>
-      <td class="num mono">{{ r.wd_gross|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ r.wd_uang|floatformat:0|intcomma }}</td>
       <td class="num">{% if r.wd_selisih == 0 %}<span class="badge ok">0</span>{% else %}<span class="badge warn mono">{{ r.wd_selisih|floatformat:0|intcomma }}</span>{% endif %}</td>
       <td class="num mono" style="color:var(--ok)">{{ r.cocok|intcomma }}</td>
       <td class="num mono">{% if r.tinjau %}<span style="color:var(--warn-ink,#a5670f)">{{ r.tinjau|intcomma }}</span>{% else %}0{% endif %}</td>
@@ -61,10 +61,10 @@
     <tfoot><tr style="font-weight:700">
       <td>TOTAL</td>
       <td class="num mono">{{ data.total.dp_panel|floatformat:0|intcomma }}</td>
-      <td class="num mono">{{ data.total.dp_gross|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.total.dp_uang|floatformat:0|intcomma }}</td>
       <td class="num mono">{{ data.total.dp_selisih|floatformat:0|intcomma }}</td>
       <td class="num mono">{{ data.total.wd_panel|floatformat:0|intcomma }}</td>
-      <td class="num mono">{{ data.total.wd_gross|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.total.wd_uang|floatformat:0|intcomma }}</td>
       <td class="num mono">{{ data.total.wd_selisih|floatformat:0|intcomma }}</td>
       <td class="num mono">{{ data.total.cocok|intcomma }}</td>
       <td class="num mono">{{ data.total.tinjau|intcomma }}</td>

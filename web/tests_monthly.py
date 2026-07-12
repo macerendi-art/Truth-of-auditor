@@ -10,12 +10,12 @@ from sources.models import Toko
 from web.monthly import monthly_summary
 
 
-def _summary(dp_panel, dp_gross, wd_panel, wd_gross, cocok, tinjau, tidak):
+def _summary(dp_panel, dp_uang, wd_panel, wd_uang, cocok, tinjau, tidak):
     return {
-        "dp": {"panel": dp_panel, "money_gross": dp_gross, "money_matched": dp_gross,
-               "money": dp_gross, "selisih": dp_panel - dp_gross},
-        "wd": {"panel": wd_panel, "money_gross": wd_gross, "money_matched": wd_gross,
-               "money": wd_gross, "selisih": wd_panel - wd_gross},
+        "dp": {"panel": dp_panel, "money_gross": dp_uang, "money_matched": dp_uang,
+               "money": dp_uang, "selisih": dp_panel - dp_uang},
+        "wd": {"panel": wd_panel, "money_gross": wd_uang, "money_matched": wd_uang,
+               "money": wd_uang, "selisih": wd_panel - wd_uang},
         "buckets": {"cocok": cocok, "perlu_tinjau": tinjau, "tidak_cocok": tidak},
     }
 
@@ -42,7 +42,7 @@ class MonthlySummaryTests(_Data):
         r0 = data["rows"][0]
         self.assertEqual(r0["date"], date(2026, 6, 27))
         self.assertEqual(r0["dp_panel"], 100)
-        self.assertEqual(r0["dp_gross"], 90)
+        self.assertEqual(r0["dp_uang"], 90)
         self.assertEqual(r0["dp_selisih"], 10)
         self.assertEqual(r0["wd_selisih"], 0)
         self.assertEqual(r0["cocok"], 50)
@@ -51,9 +51,9 @@ class MonthlySummaryTests(_Data):
         self.assertIsNotNone(r0["batch_id"])
         t = data["total"]
         self.assertEqual(t["dp_panel"], 160)
-        self.assertEqual(t["dp_gross"], 150)
+        self.assertEqual(t["dp_uang"], 150)
         self.assertEqual(t["wd_panel"], 240)
-        self.assertEqual(t["wd_gross"], 230)
+        self.assertEqual(t["wd_uang"], 230)
         self.assertEqual(t["cocok"], 70)
         self.assertEqual(t["tinjau"], 3)
         self.assertEqual(t["tidak"], 3)

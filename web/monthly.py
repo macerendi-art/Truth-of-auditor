@@ -18,14 +18,17 @@ def _num(d, *keys):
 def _row(batch):
     s = batch.summary or {}
     dp, wd, buckets = s.get("dp") or {}, s.get("wd") or {}, s.get("buckets") or {}
+    # 'uang' = uang yang BERPASANGAN ke panel (matched), bukan gross — supaya
+    # Panel − Uang = Selisih persis (selisih = panel − matched), sama seperti
+    # kartu batch harian. Gross bisa jauh > panel (uang orphan/lintas-hari).
     return {
         "date": batch.recon_date,
         "batch_id": batch.id,
         "dp_panel": _num(dp, "panel"),
-        "dp_gross": _num(dp, "money_gross"),
+        "dp_uang": _num(dp, "money"),
         "dp_selisih": _num(dp, "selisih"),
         "wd_panel": _num(wd, "panel"),
-        "wd_gross": _num(wd, "money_gross"),
+        "wd_uang": _num(wd, "money"),
         "wd_selisih": _num(wd, "selisih"),
         "cocok": _num(buckets, "cocok"),
         "tinjau": _num(buckets, "perlu_tinjau"),
@@ -34,7 +37,7 @@ def _row(batch):
 
 
 _SUM_KEYS = (
-    "dp_panel", "dp_gross", "dp_selisih", "wd_panel", "wd_gross", "wd_selisih",
+    "dp_panel", "dp_uang", "dp_selisih", "wd_panel", "wd_uang", "wd_selisih",
     "cocok", "tinjau", "tidak",
 )
 
