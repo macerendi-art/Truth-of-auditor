@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The virtualenv is at `.venv`. Activate it first: `source .venv/bin/activate`.
 
 ```bash
-python manage.py test                         # run all tests (~495)
+python manage.py test                         # run all tests (~684)
 python manage.py test web.tests_reconcile     # one module
 python manage.py test web.tests_reconcile.SomeTestCase.test_x   # one test
 python manage.py runserver                     # dev server (sqlite, DEBUG=True)
@@ -38,7 +38,7 @@ Everything flows through two stages. Understanding these two modules explains mo
 
 - **`sources/detect.py`** `detect_source(path, filename)` sniffs header tokens / extension and returns ranked `{parser_key, confidence}`. The web upload flow auto-detects, and only asks the user to confirm when confidence < 0.8.
 - **`sources/services.py`** `ingest(parser_key, file_path, ...)` is the single entry point: picks the parser from the `PARSERS` dict, decrypts first if the file is an encrypted xlsx (OLE2 magic bytes → `msoffcrypto`, Mandiri e-statements), runs it, and bulk-creates `Transaction` rows inside one atomic block.
-- **`sources/parsers/`** one class per format (`panel`, `bracket`, `banks.py` → BRI/BCA-CSV/Mandiri, `bca_pdf`, `gateways.py` → NXPay/QRFlyer). Each subclasses `BaseParser` and returns a list of dicts whose keys **exactly match `Transaction` fields**. Shared parsing helpers (decimal/date parsing for both `intl` and `id` number formats, ticket/ref regexes, `clean_name`, `row_hash`) live in **`sources/parsers/base.py`**.
+- **`sources/parsers/`** one class per format (`panel`, `bracket`, `banks.py` → BRI/BCA-CSV/Mandiri, `bca_pdf`, `gateways.py` → NXPay/QRFlyer/RPay/QHoki, `cor.py` → COR/Gacor25 panel-bank/QRIS/QRIS-WD). Each subclasses `BaseParser` and returns a list of dicts whose keys **exactly match `Transaction` fields**. Shared parsing helpers (decimal/date parsing for both `intl` and `id` number formats, ticket/ref regexes, `clean_name`, `row_hash`, the styles-tolerant `read_xlsx_rows`) live in **`sources/parsers/base.py`**.
 - **Idempotency:** every row gets a `row_hash` (stable hash of key fields). `ingest` skips hashes that already exist for that `(source_type, toko)`, so re-importing the same file is safe.
 
 To add a new source format: write a parser subclass, register it in `PARSERS` (`services.py`), and add a detection signature in `detect.py`.
@@ -51,6 +51,13 @@ To add a new source format: write a parser subclass, register it in `PARSERS` (`
 - **`run_batch(toko, ...)`** is the top-level orchestrator the UI calls: checks completeness, runs the applicable relations, aggregates DP/WD totals, and — **only on success, as the last step** — "consumes" the transactions by setting `consumed_by_batch`. Consumed rows are excluded from future completeness/matching (`_active()` filters `consumed_by_batch__isnull=True`); deleting a batch frees them again (`SET_NULL`). The whole run is wrapped in `transaction.atomic()`, so a failed run rolls back completely (no orphan batch, nothing consumed).
 - **Daily runs & late settlement:** the web always passes `recon_date` (one batch per `(toko, recon_date)`, guarded by view + unique constraint; redoing a date = delete the old batch first). On success, unmatched credit rows (`tidak_cocok`/`no_money`) still inside `date_window_days` are **not** consumed — they stay active "menunggu settlement". The next day's run matches them against newly-uploaded money rows; a hit **flips the original MatchResult in its home batch** (`reason_code="late_settlement"`, marked `resolved_by_batch`, home summary recomputed via `refresh_batch_summary`) and the credit row is consumed into its home batch. Carried rows never create new results in the resolving batch and are excluded from its gross totals (shown separately as "Settlement tertunda"). Unmatched carried rows past the window expire quietly into their home batch (recorded in `summary["late_settlement"]["expired"]`). Deleting a resolving batch calls `revert_late_settlements` first, restoring flips and reactivating carried/expired rows. **Retro write-back:** brand-new rows dated D < recon_date whose date already has a batch are written back to that batch (results into its runs, gross totals incremented via `_add_retro_gross`, consumed there); the current batch only notes them in `summary["retro"]`.
 - The `include` dict threads through every matcher/aggregator to let a run opt specific sources in/out (panel_dp, panel_wd, bracket, bank, gateway). `include=None` means "all", the legacy behavior.
+
+### 3. Read-only reporting views (`web/`)
+
+Several pages aggregate existing rows **query-time — no new tables or migrations**, so they apply retroactively to production data and never touch the engine. Each has a pure aggregation module (unit-tested without rendering) called by a thin view:
+
+- **`web/breakdown.py`** (`/bracket/`, "Control Bracket per FR Account") and **`web/rekening.py`** (`/rekening/`, per bank/gateway account) pivot straight off `Transaction.raw` via `KeyTextTransform`. Both derive per-account opening/closing balance with the **order-independent** `_saldo_batas` (in `breakdown.py`): real FR/bank rows shuffle within the same minute and backdated entries make the `Jam` stamp lie, so a positional first/last balance is wrong — instead it matches the multiset of pre-balances (`balance − delta`) against balances; a broken/non-unique chain falls back to `(Jam, id)` so the inconsistency surfaces in the **"Selisih Kontrol"** column (ideally 0) rather than being hidden.
+- **`web/monthly.py`** (`/bulanan/`) reads `ReconBatch.summary` as-is per day (use `money`/matched, **not** `money_gross` — gross can dwarf panel). **`web/settlement.py`** (`/settlement/`) lists still-waiting credit rows via the engine's `_carried_results`. **`web/exports.py`** builds the Excel workbooks for the Export page and per-run export.
 
 ## Domain model conventions (critical, easy to get wrong)
 
@@ -67,6 +74,8 @@ All money is normalized to **rupiah** on the canonical `Transaction`. Sign and s
 ## Access control (`web/access.py`)
 
 RBAC is scoped **per Toko** (brand/site). `tokos_for(user)` is the single source of truth: admins/supervisors see all active Tokos; auditors see only `allowed_tokos`. The custom user model is `accounts.User` (roles: admin/supervisor/auditor; no public signup). The active Toko lives in the session (`active_toko_id`) and is injected into every template by the `web.context_processors.toko` context processor. Web views live in `web/views.py` (reconciliation flow) and `web/admin_views.py` (Toko/user management, deletes).
+
+`web/middleware.py` `ForcePasswordChangeMiddleware` (registered right after `AuthenticationMiddleware`) gates **every** request for users flagged `must_change_password` → redirected to `/ganti-password/` until they change it (admins set the flag when creating a user or resetting someone else's password). Sensitive admin/account actions are written to `core.models.AuditLog` via `core.audit.catat`, which snapshots the actor's username so the trail survives a later user deletion (`/kelola/log/`, admin-only).
 
 ## Deployment
 
