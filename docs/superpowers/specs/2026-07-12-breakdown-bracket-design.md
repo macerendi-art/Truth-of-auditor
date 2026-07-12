@@ -62,8 +62,16 @@ Halaman `/bracket/` (login + RBAC toko standar), filter tanggal tunggal
    Total Mutasi, Saldo Akhir, **Selisih Kontrol** (badge hijau 0 / merah).
    + baris TOTAL.
 
-Saldo Awal = `balance_after − money_delta` baris pertama ber-balance;
-Saldo Akhir = `balance_after` baris terakhir ber-balance (urut `(Jam, id)`).
+Saldo Awal/Akhir diambil **kebal urutan** (temuan verifikasi data nyata LBS
+28/06: FR mengacak urutan baris dalam menit yang sama, dan entry *backdated*
+membuat cap Jam menyesatkan): pada rantai saldo yang konsisten, tepat satu
+pre-balance (`balance − delta`) tak pernah muncul sebagai balance baris lain
+(= Saldo Awal) dan tepat satu balance tak pernah jadi pre-balance baris lain
+(= Saldo Akhir), apa pun urutannya. Bila kandidat tidak tunggal (rantai putus
+= anomali FR asli), fallback ke urutan `(Jam, id)` sehingga selisihnya justru
+muncul di kolom kontrol. Hasil kalibrasi: 21/21 akun LBS 28/06 selisih 0,
+enam kolom total identik ke rupiah dengan situs referensi, dan kasus yang
+situs referensi tambal dengan "Akuran" 5,95jt ter-resolve eksak.
 
 Semua baris bracket ikut (termasuk `jenis="admin"` dan baris ter-consume
 batch) — ini view data, bukan matching.

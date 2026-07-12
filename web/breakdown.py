@@ -14,6 +14,7 @@ Semua baris bracket ikut dihitung (termasuk fee `jenis="admin"` dan baris yang
 sudah di-consume batch): ini view data, bukan matching. Tanpa migrasi — kolom
 diambil query-time dari JSON `raw`, jadi berlaku retroaktif untuk data lama.
 """
+from collections import Counter
 from decimal import Decimal
 
 from django.db.models.fields.json import KeyTextTransform
@@ -58,6 +59,34 @@ def _slug_kategori(value):
     return s
 
 
+def _saldo_batas(items):
+    """(saldo_awal, saldo_akhir) akun dari baris ber-balance — kebal acak urutan.
+
+    FR nyata mengacak urutan baris DI DALAM menit yang sama, jadi baris
+    pertama/terakhir menurut (Jam, id) belum tentu ujung rantai saldo. Pada
+    rantai yang konsisten, tepat SATU pre-balance (balance − delta) tidak
+    pernah muncul sebagai balance baris lain (= saldo awal) dan tepat satu
+    balance tidak pernah menjadi pre-balance baris lain (= saldo akhir),
+    apa pun urutannya. Bila kandidat tidak tunggal (rantai putus = anomali
+    FR asli), jatuh kembali ke urutan (Jam, id) agar selisihnya justru
+    muncul di kolom kontrol.
+    """
+    bals, pres = Counter(), Counter()
+    for _jam, _pk, delta, balance, _slug in items:
+        if balance is not None:
+            bals[balance] += 1
+            pres[balance - delta] += 1
+    if not bals:
+        return None, None
+    awal = list((pres - bals).elements())
+    akhir = list((bals - pres).elements())
+    if len(awal) == 1 and len(akhir) == 1:
+        return awal[0], akhir[0]
+    first = next(t for t in items if t[3] is not None)
+    last = next(t for t in reversed(items) if t[3] is not None)
+    return first[3] - first[2], last[3]
+
+
 def _pecah_akun(account):
     """'BANK BRI | YOGA | WITHDRAW' → ('BANK BRI — YOGA', 'WITHDRAW');
     'QRIS HOKI | DEPOSIT / WITHDRAW' → ('QRIS HOKI', 'DEPOSIT / WITHDRAW')."""
@@ -97,7 +126,6 @@ def bracket_breakdown(toko, tanggal):
         items.sort(key=lambda t: (t[0], t[1]))  # (Jam, id) = kronologi file
         kategori_sum, mutasi, trx = {}, NOL, 0
         deposit = withdraw = NOL
-        saldo_awal = saldo_akhir = None
         for _jam, _pk, delta, balance, slug in items:
             kategori_sum[slug] = kategori_sum.get(slug, NOL) + delta
             mutasi += delta
@@ -107,10 +135,7 @@ def bracket_breakdown(toko, tanggal):
             elif slug == "withdrawal":
                 withdraw += delta
                 trx += 1
-            if balance is not None:
-                if saldo_awal is None:
-                    saldo_awal = balance - delta  # sebelum baris ber-saldo pertama
-                saldo_akhir = balance  # baris ber-saldo terakhir
+        saldo_awal, saldo_akhir = _saldo_batas(items)
         withdraw = abs(withdraw)
         selisih = None
         if saldo_awal is not None and saldo_akhir is not None:

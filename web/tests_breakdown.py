@@ -77,6 +77,18 @@ class AgregasiPivotTests(_BracketData):
         self.assertEqual(acc["saldo_akhir"], Decimal("150000"))  # baris jam 14:00
         self.assertEqual(acc["selisih"], Decimal("0"))
 
+    def test_urutan_acak_dalam_menit_sama_tidak_memicu_alarm_palsu(self):
+        # FR nyata mengacak urutan baris DI DALAM menit yang sama. Rantai saldo:
+        # 100rb → (+50rb) 150rb → (+30rb) 180rb → (+10rb) 190rb, tapi baris
+        # ditulis file dengan urutan acak. Saldo awal/akhir harus tetap benar.
+        self.fr("QRIS FLYER | DEPOSIT / WITHDRAW", "Deposit", "30000", "180000", jam="00:01")
+        self.fr("QRIS FLYER | DEPOSIT / WITHDRAW", "Deposit", "10000", "190000", jam="00:01")
+        self.fr("QRIS FLYER | DEPOSIT / WITHDRAW", "Deposit", "50000", "150000", jam="00:01")
+        (acc,) = bracket_breakdown(self.toko, TGL)["accounts"]
+        self.assertEqual(acc["saldo_awal"], Decimal("100000"))
+        self.assertEqual(acc["saldo_akhir"], Decimal("190000"))
+        self.assertEqual(acc["selisih"], Decimal("0"))
+
     def test_varian_withdraw_disatukan_ke_withdrawal(self):
         self.fr("BANK BNI | FITRIA | WITHDRAW", "Withdraw", "-70000", "30000")
         (acc,) = bracket_breakdown(self.toko, TGL)["accounts"]
