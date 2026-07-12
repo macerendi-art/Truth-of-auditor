@@ -51,6 +51,7 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .side a.link .cnt{margin-left:auto;font-size:11px;font-weight:700;background:rgba(255,255,255,.1);color:var(--side-ink);
   border-radius:99px;padding:1px 8px;font-variant-numeric:tabular-nums}
 .side a.link .cnt.hot{background:var(--bad);color:#fff}
+.side a.link.sub{padding-left:38px;font-size:12.5px}
 .side .spacer{flex:1}
 .side .who{display:flex;align-items:center;gap:10px;border-top:1px solid rgba(255,255,255,.08);margin-top:10px;padding:14px 10px 4px;font-size:13px}
 .side .who .who-id{flex:1;min-width:0;display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;padding:6px;border-radius:8px;transition:background .15s}
@@ -383,12 +384,14 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>Upload</a>
   <a class="link {% if '/transactions' in p %}active{% endif %}" href="{% url 'transactions' %}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>Transaksi</a>
+  <a class="link sub {% if '/bracket' in p %}active{% endif %}" href="{% url 'bracket_breakdown' %}">
+    Breakdown Bracket</a>
   <a class="link {% if '/reconcile' in p or '/batch' in p or '/run' in p %}active{% endif %}" href="{% url 'reconcile' %}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v16a2 2 0 0 0 2 2h12"/><path d="M18 8l-4-4 4-4"/><path d="M2 12h13a4 4 0 0 1 4 4v4"/></svg>Rekonsiliasi
     {% if pending_review_count %}<span class="cnt {% if pending_review_count > 200 %}hot{% endif %}">{{ pending_review_count }}</span>{% endif %}</a>
-  <a class="link {% if '/mutasi-bank' in p %}active{% endif %}" href="{% url 'bank_mutations' %}" style="padding-left:38px;font-size:12.5px">
+  <a class="link sub {% if '/mutasi-bank' in p %}active{% endif %}" href="{% url 'bank_mutations' %}">
     Mutasi Bank</a>
-  <a class="link {% if '/tinjau' in p %}active{% endif %}" href="{% url 'review_queue' %}" style="padding-left:38px;font-size:12.5px">
+  <a class="link sub {% if '/tinjau' in p %}active{% endif %}" href="{% url 'review_queue' %}">
     Area Pengecekan{% if pending_review_count %} <span class="cnt {% if pending_review_count > 200 %}hot{% endif %}">{{ pending_review_count }}</span>{% endif %}</a>
   <a class="link {% if p == '/export/' %}active{% endif %}" href="{% url 'export_center' %}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export</a>
