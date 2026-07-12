@@ -18,6 +18,17 @@ class BankTripletTests(SimpleTestCase):
             parse_bank_triplet("OTH - 4840394374 - IGNATIUS IVAN / WITHDRAW BCA"),
             ("OTH", "4840394374", "IGNATIUS IVAN / WITHDRAW BCA"))
 
+    def test_triplet_tanpa_spasi(self):
+        # Rail QRIS/UNOPAY menulis "KODE-NOREK-NAMA" rapat (tanpa spasi kelilingi
+        # '-'), berbeda dari rail bank yang pakai " - ". Harus tetap terpecah 3.
+        self.assertEqual(
+            parse_bank_triplet("DANA-081261612552-MHD ACHIR FADLI PASARIBU"),
+            ("DANA", "081261612552", "MHD ACHIR FADLI PASARIBU"))
+        # nama boleh memuat '-' internal -> hanya 2 pemisah pertama yang dipecah
+        self.assertEqual(
+            parse_bank_triplet("BCA-8295463623-RYAN-GRIFFITH"),
+            ("BCA", "8295463623", "RYAN-GRIFFITH"))
+
     def test_triplet_kosong(self):
         self.assertEqual(parse_bank_triplet(""), ("", "", ""))
         self.assertEqual(parse_bank_triplet(None), ("", "", ""))
@@ -116,6 +127,32 @@ class CORPanelQRISTests(SimpleTestCase):
             self.assertEqual(CORPanelQRISParser().parse(path, flow="dp"), [])
         finally:
             os.remove(path)
+
+    # WD QRIS/UNOPAY: Destination Bank rapat "KODE-NOREK-NAMA" (tanpa spasi).
+    # Regresi prod 11-07-2026: player_bank memuat string 42+ karakter penuh ->
+    # varchar(40) overflow di Postgres. Harus jadi kode bank pendek + nama pemain.
+    WD_HEADER = ["#", "Approved Date", "Requested Date", "Username",
+                 "Transaction ID", "Destination Bank", "Amount", "Status", "By"]
+
+    def test_wd_destination_bank_rapat(self):
+        path = _xlsx([
+            self.WD_HEADER,
+            ["1", "11 Jul 2026 23:03:05", "11 Jul 2026 23:02:56", "batako87",
+             "1d4c8093-f8b0-482a-af1f-dc452ef7ed6a",
+             "DANA-081261612552-MHD ACHIR FADLI PASARIBU", "800000", "success",
+             "gacor25sub42"],
+        ])
+        try:
+            rows = CORPanelQRISParser().parse(path, flow="wd")
+        finally:
+            os.remove(path)
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["jenis"], "wd")
+        self.assertEqual(r["player_bank"], "DANA")
+        self.assertLessEqual(len(r["player_bank"]), 40)   # tak boleh overflow
+        self.assertEqual(r["counterparty"], "MHD ACHIR FADLI PASARIBU")
+        self.assertEqual(r["reference"], "1d4c8093-f8b0-482a-af1f-dc452ef7ed6a")
 
 
 class CORQRISGatewayTests(SimpleTestCase):

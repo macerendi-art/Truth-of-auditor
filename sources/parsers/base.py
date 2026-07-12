@@ -237,22 +237,29 @@ def derive_bank_fields(source_key, raw):
     """(player_bank, bank_title) dari `raw` sesuai sumber. ('', '') bila tak berlaku.
 
     Sisi kredit (panel/bracket) saja; sumber uang (bank/gateway) -> ('', '').
+    Dipotong 40 char (lebar kolom): pengaman kalau sumber tak terduga menaruh
+    string panjang di segmen kode — ingest jangan sampai crash lagi.
     """
     spec = _BANK_FIELDS.get(source_key)
     if not spec:
         return "", ""
     raw = raw or {}
     pkey, psep, tkey, tsep = spec
-    return bank_code(raw.get(pkey), psep), bank_code(raw.get(tkey), tsep)
+    return bank_code(raw.get(pkey), psep)[:40], bank_code(raw.get(tkey), tsep)[:40]
 
 
 def parse_bank_triplet(value):
     """String COR "KODE - NOREK - NAMA" -> (kode, norek, nama). Nama boleh memuat
-    ' - ' internal (mis. '.../ WITHDRAW BCA') -> hanya split 2 pemisah pertama."""
+    '-' internal (mis. '.../ WITHDRAW BCA') -> hanya split 2 pemisah pertama.
+
+    Pemisah boleh berspasi (rail bank: "BCA - 294 - BAGAS") ATAU rapat (rail
+    QRIS/UNOPAY: "DANA-0812-MHD ACHIR"). Regresi prod 11-07-2026: format rapat
+    tak terpecah -> seluruh string masuk `player_bank` -> varchar(40) overflow.
+    """
     s = str(value or "").strip()
     if not s:
         return "", "", ""
-    parts = [p.strip() for p in s.split(" - ", 2)]
+    parts = [p.strip() for p in re.split(r"\s*-\s*", s, maxsplit=2)]
     while len(parts) < 3:
         parts.append("")
     return parts[0].upper(), parts[1], parts[2]
