@@ -5,6 +5,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Truth of Auditor{% endblock %}</title>
+<link rel="icon" href="{% static 'web/img/favicon.ico' %}" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="{% static 'web/img/favicon-32.png' %}">
+<link rel="icon" type="image/png" sizes="16x16" href="{% static 'web/img/favicon-16.png' %}">
+<link rel="apple-touch-icon" sizes="180x180" href="{% static 'web/img/apple-touch-icon.png' %}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@500;600;700&display=swap" rel="stylesheet">
@@ -25,6 +29,8 @@
 html,body{margin:0;padding:0}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);
   min-height:100vh;-webkit-font-smoothing:antialiased;letter-spacing:.1px}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:url("{% static 'web/img/bg-main.jpg' %}") center/cover no-repeat;opacity:.5}
 a{color:inherit;text-decoration:none}
 h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .muted{color:var(--muted)} .faint{color:var(--faint)}
@@ -35,6 +41,8 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .shell{display:flex;min-height:100vh}
 .side{width:var(--sidew);flex-shrink:0;background:var(--side);color:var(--side-ink);
   display:flex;flex-direction:column;padding:18px 14px;position:sticky;top:0;height:100vh;z-index:60}
+.side::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;border-radius:inherit;
+  background:url("{% static 'web/img/bg-sidebar.jpg' %}") bottom center/cover no-repeat;opacity:.6}
 .side .brand{display:flex;align-items:center;gap:11px;padding:6px 10px 18px;font-family:'Sora';font-weight:700;font-size:15.5px}
 .side .brand .logo{width:33px;height:33px;border-radius:9px;background:var(--grad);display:grid;place-items:center;
   box-shadow:0 6px 18px -6px rgba(37,99,235,.7);flex-shrink:0}
