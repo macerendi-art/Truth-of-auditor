@@ -257,3 +257,34 @@ class DeleteUserTests(TestCase):
         r = c2.post(reverse("delete_user", args=[self.target.pk]), follow=True)
         self.assertContains(r, "Akses ditolak")
         self.assertTrue(User.objects.filter(username="budi").exists())
+
+
+class KelolaTokoCountTests(TestCase):
+    """Kolom jumlah transaksi/upload per toko di /kelola/toko/.
+
+    Karakterisasi + penjaga dua regresi: (a) hitungan terkali-silang
+    (join Toko×Transaction×Upload menggandakan angka bila tanpa distinct),
+    (b) bentuk annotate ganda distinct = join-explosion — terukur 29,8 dtk
+    di prod (497rb tx), halaman putih; hitungan harus via agregat terpisah."""
+
+    def setUp(self):
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+        self.lbs = Toko.objects.get(key="lbs")
+        self.slo = Toko.objects.get(key="slo")
+        st = SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})[0]
+        up = Upload.objects.create(source_type=st, toko=self.lbs)
+        from datetime import datetime
+        from decimal import Decimal
+        for i in range(3):  # 3 tx dalam 1 upload: hitungan silang akan menggandakan
+            Transaction.objects.create(
+                upload=up, source_type=st, toko=self.lbs, jenis="depo",
+                amount=Decimal("50000"), money_delta=Decimal("50000"),
+                occurred_at=datetime(2026, 6, 27, 10, 0), row_hash=f"kc{i}",
+            )
+
+    def test_jumlah_tx_dan_upload_akurat(self):
+        r = self.client.get(reverse("kelola_toko"))
+        counts = {t.key: (t.n_tx, t.n_up) for t in r.context["tokos"]}
+        self.assertEqual(counts["lbs"], (3, 1))   # bukan (3,3)/(9,1) hasil kali-silang
+        self.assertEqual(counts["slo"], (0, 0))   # toko tanpa data tetap tampil 0

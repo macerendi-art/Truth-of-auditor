@@ -82,10 +82,15 @@ def kelola_toko(request):
               t.name, toko=t)
         messages.success(request, f"Toko {t.name} {'diaktifkan' if t.is_active else 'dinonaktifkan'}.")
         return redirect("kelola_toko")
-    tokos = Toko.objects.annotate(
-        n_tx=Count("transaction", distinct=True),
-        n_up=Count("upload", distinct=True),
-    ).order_by("name")
+    # Jumlah per toko WAJIB dua query agregat terpisah — annotate ganda
+    # Count(distinct) atas dua relasi meledakkan join Toko×Transaction×Upload
+    # (497rb tx × ratusan upload): terukur 29,8 dtk di prod = halaman putih.
+    tx_counts = dict(Transaction.objects.values_list("toko").annotate(n=Count("id")))
+    up_counts = dict(Upload.objects.values_list("toko").annotate(n=Count("id")))
+    tokos = list(Toko.objects.order_by("name"))
+    for t in tokos:
+        t.n_tx = tx_counts.get(t.id, 0)
+        t.n_up = up_counts.get(t.id, 0)
     return render(request, "web/kelola/toko.html", {"tokos": tokos})
 
 
