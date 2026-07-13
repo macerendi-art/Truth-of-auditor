@@ -229,12 +229,25 @@ class RPayWDGatewayTests(SimpleTestCase):
         ])
         self.assertEqual(rows, [])
 
-    def test_belum_approved_dilewati(self):
+    def test_transfer_pending_dilewati(self):
+        # Transfer belum sukses = uang belum keluar -> jangan dihitung.
         rows = self._parse([
             '1,BOBA MINUMAN SEGAR,"12 Jul 2026, 17:57",uuidx,W2546823,BCA,'
-            'NAMA,2230090087,1000000.0,1000000.0,5000.0,Pending,Success',
+            'NAMA,2230090087,1000000.0,1000000.0,5000.0,Approved,Pending',
         ])
         self.assertEqual(rows, [])
+
+    def test_selalu_wd_walau_flow_dp(self):
+        # Laporan disbursement tak pernah deposit: salah-pilih flow=dp di UI
+        # TIDAK boleh membalik tanda jadi uang masuk (hardening review codex).
+        rows = self._parse([
+            '1,BOBA MINUMAN SEGAR,"12 Jul 2026, 17:57",'
+            '316bb4a5-3ebe-479a-abb7-e7eb50679984,W2546823,BCA,NAMA,223,'
+            '1000000.0,1000000.0,5000.0,Approved,Success',
+        ], flow="dp")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["jenis"], "wd")
+        self.assertLess(rows[0]["money_delta"], 0)   # tetap uang keluar
 
     def test_row_hash_stabil_dan_unik(self):
         a = ('1,BOBA MINUMAN SEGAR,"12 Jul 2026, 17:57",'

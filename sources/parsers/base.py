@@ -259,7 +259,14 @@ def parse_bank_triplet(value):
     s = str(value or "").strip()
     if not s:
         return "", "", ""
-    parts = [p.strip() for p in re.split(r"\s*-\s*", s, maxsplit=2)]
+    # Utamakan pemisah berspasi " - " (rail bank): perilaku IDENTIK versi lama,
+    # jadi kode/norek yang memuat '-' internal (mis. "LAIN-LAIN - 000 - NAMA",
+    # "DANA - 0812-6161 - NAMA") tetap utuh. Hanya kalau TAK ada " - " sama sekali
+    # (rail QRIS/UNOPAY rapat "DANA-0812-NAMA") baru pecah pada '-' polos.
+    parts = s.split(" - ", 2)
+    if len(parts) == 1:
+        parts = s.split("-", 2)
+    parts = [p.strip() for p in parts]
     while len(parts) < 3:
         parts.append("")
     return parts[0].upper(), parts[1], parts[2]

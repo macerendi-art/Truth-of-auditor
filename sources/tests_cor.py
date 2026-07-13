@@ -29,6 +29,14 @@ class BankTripletTests(SimpleTestCase):
             parse_bank_triplet("BCA-8295463623-RYAN-GRIFFITH"),
             ("BCA", "8295463623", "RYAN-GRIFFITH"))
 
+    def test_triplet_berspasi_dgn_hyphen_internal(self):
+        # Rail bank (" - "): kode/norek ber-'-' internal HARUS utuh — pemisah
+        # berspasi diutamakan supaya tak ada regresi vs perilaku lama.
+        self.assertEqual(parse_bank_triplet("LAIN-LAIN - 000 - NAMA"),
+                         ("LAIN-LAIN", "000", "NAMA"))
+        self.assertEqual(parse_bank_triplet("DANA - 0812-6161 - NAMA"),
+                         ("DANA", "0812-6161", "NAMA"))
+
     def test_triplet_kosong(self):
         self.assertEqual(parse_bank_triplet(""), ("", "", ""))
         self.assertEqual(parse_bank_triplet(None), ("", "", ""))

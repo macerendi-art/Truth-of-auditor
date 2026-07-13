@@ -192,7 +192,8 @@ class RPayWDGatewayParser(BaseParser):
     `reference`: Remarks panel Nexus terbukti tak memuatnya, dan aturan blocked
     engine mengasingkan gateway ber-reference asing dari pencocokan (pelajaran
     sama dgn RPay DP). `Disbursed Amount` = uang riil keluar (== Withdrawal Amount
-    panel, terverifikasi 12-07-2026). Hanya baris Approved + Transfer Success.
+    panel, terverifikasi 12-07-2026). Hanya baris `Transfer Status` = Success
+    (uang benar-benar keluar); selalu WD (`flow` diabaikan).
     """
 
     source_key = "gateway"
@@ -200,24 +201,27 @@ class RPayWDGatewayParser(BaseParser):
     def parse(self, path, flow=""):
         with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
             rows = list(csv.DictReader(f))
-        is_wd = flow != "dp"  # laporan disbursement default WD
         out = []
         for r in rows:
             ticket = str(r.get("External ID", "") or "").strip()
-            approval = str(r.get("Approval Status", "") or "").strip().lower()
+            # Transfer Status = Success => uang benar-benar keluar. Ini satu-satunya
+            # penentu (deteksi pun mengunci token "transfer status", jadi konsisten:
+            # tak ada baris tersaring diam-diam karena kolom lain hilang).
             transfer = str(r.get("Transfer Status", "") or "").strip().lower()
-            if not ticket or approval != "approved" or transfer != "success":
+            if not ticket or transfer != "success":
                 continue
             amt = abs(parse_decimal(r.get("Disbursed Amount")))
             occurred = parse_dt(r.get("Date"), dayfirst=True)
+            # Selalu WD: laporan disbursement tak pernah jadi deposit. `flow`
+            # diabaikan supaya salah-pilih DP di UI tak bisa membalik tanda.
             row = {
                 "source_type": "gateway",
                 "occurred_at": occurred,
                 "posted_date": occurred.date() if occurred else None,
-                "jenis": "wd" if is_wd else "depo",
+                "jenis": "wd",
                 "amount": amt,
                 "credit_delta": Decimal("0"),
-                "money_delta": _money(amt, "wd" if is_wd else "dp"),
+                "money_delta": -amt,
                 "fee": parse_decimal(r.get("Fee")),
                 "bonus": Decimal("0"),
                 "balance_after": None,
@@ -228,7 +232,10 @@ class RPayWDGatewayParser(BaseParser):
                 "description": f"RPAY WD {r.get('Bank Name', '')}".strip(),
                 "raw": {k: ("" if v is None else str(v)) for k, v in r.items() if k},
             }
+            # UUID RafflesPay unik per percobaan disbursement; + ticket sebagai
+            # cadangan. TANPA nominal supaya idempotensi tak goyah oleh format
+            # angka ("1000000" vs "1000000.0" vs "1000000.00").
             row["row_hash"] = row_hash(
-                "rpay_wd", [str(r.get("UUID", "") or "").strip(), ticket, amt])
+                "rpay_wd", [str(r.get("UUID", "") or "").strip(), ticket])
             out.append(row)
         return out
