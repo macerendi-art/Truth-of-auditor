@@ -176,3 +176,40 @@ class MutasiBankSaldoTests(MutasiBankBase):
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, "4.964.637")  # locale id
         self.assertContains(r, "TANPA-SALDO")
+
+
+class MutasiBankCoverageTests(MutasiBankBase):
+    """Dropdown file & banner duplikat: file ekspor bank rolling saling tumpang-
+    tindih; dedup row_hash menempatkan baris di upload PERTAMA yang memuatnya.
+    Kasus nyata LBS 10/07: file '10_07 BRI' 697 baris -> hanya 47 baru, sisanya
+    tercatat di file 08/09-Juli; user mengira 'mutasi kepotong'. UI harus
+    menjelaskan: rentang isi nyata per file + banner saat ada duplikat."""
+
+    def test_dropdown_menampilkan_rentang_isi_file(self):
+        up = self._up(self.bank, name="10_07_bri.csv")
+        self._tx(up, self.bank, dt=datetime(2026, 7, 10, 14, 38))
+        self._tx(up, self.bank, dt=datetime(2026, 7, 11, 4, 51))
+        r = self.client.get(reverse("bank_mutations"))
+        u = next(x for x in r.context["uploads"] if x.id == up.id)
+        self.assertEqual(u.cover_lo, datetime(2026, 7, 10, 14, 38))
+        self.assertEqual(u.cover_hi, datetime(2026, 7, 11, 4, 51))
+        self.assertContains(r, "10/07 14:38")     # rentang tampil di option
+        self.assertContains(r, "11/07 04:51")
+
+    def test_banner_duplikat_saat_file_terpilih(self):
+        up = self._up(self.bank, name="10_07_bri.csv")
+        up.rows_parsed, up.rows_duplicate = 47, 650
+        up.save(update_fields=["rows_parsed", "rows_duplicate"])
+        self._tx(up, self.bank, dt=datetime(2026, 7, 10, 14, 38))
+        r = self.client.get(reverse("bank_mutations"), {"upload": up.id})
+        self.assertContains(r, "650")                      # jumlah duplikat disebut
+        self.assertContains(r, "duplikat")                 # penjelasan tampil
+        self.assertContains(r, "sudah tercatat")           # ...di file lebih awal
+
+    def test_tanpa_duplikat_tidak_ada_banner(self):
+        up = self._up(self.bank, name="bersih.csv")
+        up.rows_parsed = 1
+        up.save(update_fields=["rows_parsed"])
+        self._tx(up, self.bank)
+        r = self.client.get(reverse("bank_mutations"), {"upload": up.id})
+        self.assertNotContains(r, "sudah tercatat")

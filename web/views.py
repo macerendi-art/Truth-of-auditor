@@ -1199,6 +1199,19 @@ def bank_mutations(request):
     if src:
         upload_qs = upload_qs.filter(source_type__key=src)
     uploads = list(upload_qs.order_by("-id"))
+    # Rentang isi NYATA per file (satu query agregat, bukan per upload).
+    # File ekspor bank sering rolling/tumpang-tindih: baris duplikat di-skip
+    # dedup dan tercatat di upload TERDAHULU, jadi file baru bisa berisi
+    # hanya "ekor"-nya — tanpa rentang ini user mengira mutasinya kepotong
+    # (kasus nyata LBS 10/07: 697 baris file -> 47 baru, sisanya di file 08-09/07).
+    cover = {
+        r["upload_id"]: (r["lo"], r["hi"])
+        for r in Transaction.objects.filter(upload__in=uploads)
+        .values("upload_id")
+        .annotate(lo=Min("occurred_at"), hi=Max("occurred_at"))
+    }
+    for u in uploads:
+        u.cover_lo, u.cover_hi = cover.get(u.id, (None, None))
     upload_id = request.GET.get("upload", "")
     sel_upload = None
     if upload_id.isdigit():
