@@ -1217,15 +1217,43 @@ def bank_mutations(request):
         .values("upload_id")
         .annotate(lo=Min("occurred_at"), hi=Max("occurred_at"))
     }
+    # Baris duplikat ter-link (isi file yang tercatat di upload terdahulu):
+    # ikut dihitung agar jumlah baris + rentang dropdown = ISI FILE utuh.
+    through = Upload.duplicate_transactions.through
+    linked = {
+        r["upload_id"]: (r["n"], r["lo"], r["hi"])
+        for r in through.objects.filter(upload__in=uploads)
+        .values("upload_id")
+        .annotate(
+            n=Count("transaction_id"),
+            lo=Min("transaction__occurred_at"),
+            hi=Max("transaction__occurred_at"),
+        )
+    }
     for u in uploads:
-        u.cover_lo, u.cover_hi = cover.get(u.id, (None, None))
+        lo, hi = cover.get(u.id, (None, None))
+        n_link, dlo, dhi = linked.get(u.id, (0, None, None))
+        u.n_dup_linked = n_link
+        u.n_rows_file = u.rows_parsed + n_link
+        u.cover_lo = min((d for d in (lo, dlo) if d), default=None)
+        u.cover_hi = max((d for d in (hi, dhi) if d), default=None)
     upload_id = request.GET.get("upload", "")
     sel_upload = None
     if upload_id.isdigit():
         # cari di daftar ter-scope src → ganti sumber otomatis mereset pilihan file
         sel_upload = next((u for u in uploads if u.id == int(upload_id)), None)
         if sel_upload:  # id upload toko lain / sumber lain diabaikan (RBAC + konsistensi)
-            qs = qs.filter(upload=sel_upload)
+            dup_ids = list(sel_upload.duplicate_transactions.values_list("id", flat=True))
+            if dup_ids:
+                # ISI FILE UTUH: baris milik file + baris yang di-skip dedup
+                # (tercatat di upload terdahulu). Urut waktu — posisi asli baris
+                # duplikat di file tak tersimpan, dan ekspor bank kronologis.
+                # id__in list terbatas (≤ isi file), BUKAN OR lintas-join.
+                qs = qs.filter(Q(upload=sel_upload) | Q(id__in=dup_ids)).order_by(
+                    "occurred_at", "id"
+                )
+            else:
+                qs = qs.filter(upload=sel_upload)
 
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
     _resolve_wallet_names(page.object_list, active)

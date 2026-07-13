@@ -146,11 +146,16 @@ def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, pr
             existing = set(
                 Transaction.objects.filter(source_type=st, toko=toko).values_list("row_hash", flat=True)
             )
-            objs, seen, dup = [], set(), 0
+            objs, seen, dup, dup_tercatat = [], set(), 0, set()
             for row in rows:
                 rh = row["row_hash"]
                 if rh in existing or rh in seen:
                     dup += 1
+                    # Baris yang sudah tercatat lewat UPLOAD TERDAHULU di-link ke
+                    # upload ini agar "isi file" tetap bisa ditampilkan utuh
+                    # (repeat DALAM file yang sama bukan isi file terdahulu).
+                    if rh in existing:
+                        dup_tercatat.add(rh)
                     continue
                 seen.add(rh)
                 objs.append(
@@ -180,6 +185,12 @@ def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, pr
                     )
                 )
             Transaction.objects.bulk_create(objs, batch_size=1000)
+            if dup_tercatat:
+                up.duplicate_transactions.add(
+                    *Transaction.objects.filter(
+                        source_type=st, toko=toko, row_hash__in=dup_tercatat
+                    ).values_list("id", flat=True)
+                )
             up.rows_parsed = len(objs)
             up.rows_duplicate = dup
             up.save(update_fields=["rows_parsed", "rows_duplicate"])

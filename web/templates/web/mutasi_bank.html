@@ -29,7 +29,7 @@
   <form method="get" class="row">
     <div class="field" style="flex:2"><label>File mutasi</label>
       <select name="upload"><option value="">Semua file</option>
-      {% for u in uploads %}<option value="{{ u.id }}" {% if sel_upload and sel_upload.id == u.id %}selected{% endif %}>{{ u.original_name|default:u }}{% if u.owner_name %} · a/n {{ u.owner_name }}{% endif %} · {{ u.rows_parsed|intcomma }} baris{% if u.cover_lo %} · {{ u.cover_lo|date:"d/m H:i" }}–{{ u.cover_hi|date:"d/m H:i" }}{% endif %}</option>{% endfor %}</select></div>
+      {% for u in uploads %}<option value="{{ u.id }}" {% if sel_upload and sel_upload.id == u.id %}selected{% endif %}>{{ u.original_name|default:u }}{% if u.owner_name %} · a/n {{ u.owner_name }}{% endif %} · {{ u.n_rows_file|intcomma }} baris{% if u.cover_lo %} · {{ u.cover_lo|date:"d/m H:i" }}–{{ u.cover_hi|date:"d/m H:i" }}{% endif %}</option>{% endfor %}</select></div>
     <div class="field"><label>Dari tanggal</label><input type="date" name="from" value="{{ date_from }}"></div>
     <div class="field"><label>Sampai tanggal</label><input type="date" name="to" value="{{ date_to }}"></div>
     {% if src %}<input type="hidden" name="source" value="{{ src }}">{% endif %}
@@ -39,9 +39,13 @@
   </form>
 </div>
 
-{% if sel_upload and sel_upload.rows_duplicate %}
+{% if sel_upload and sel_upload.n_dup_linked %}
+<div class="msg info reveal" style="margin-bottom:16px">
+  <span>Isi file ini ditampilkan <b>utuh: {{ sel_upload.n_rows_file|intcomma }} baris</b> — {{ sel_upload.rows_parsed|intcomma }} baris baru lewat file ini + <b>{{ sel_upload.n_dup_linked|intcomma }} baris</b> yang juga ada di file ini namun sudah tercatat lewat file terdahulu (bergaris putus pada tanggalnya — arahkan kursor untuk melihat file asalnya). Tidak ada baris yang dihitung dua kali.</span>
+</div>
+{% elif sel_upload and sel_upload.rows_duplicate %}
 <div class="msg warning reveal" style="margin-bottom:16px">
-  <span>File ini tumpang-tindih dengan file sebelumnya: <b>{{ sel_upload.rows_duplicate|intcomma }} baris duplikat</b> otomatis dilewati dan <b>sudah tercatat</b> di file yang di-upload lebih dulu — di sini hanya tampil <b>{{ sel_upload.rows_parsed|intcomma }} baris baru</b>{% if sel_upload.cover_lo %} ({{ sel_upload.cover_lo|date:"d/m H:i" }}–{{ sel_upload.cover_hi|date:"d/m H:i" }}){% endif %}. Untuk melihat mutasi lengkap satu tanggal, pilih <b>Semua file</b> lalu gunakan filter tanggal.</span>
+  <span>File ini tumpang-tindih dengan file sebelumnya: <b>{{ sel_upload.rows_duplicate|intcomma }} baris duplikat</b> otomatis dilewati dan <b>sudah tercatat</b> di file yang di-upload lebih dulu — di sini hanya tampil <b>{{ sel_upload.rows_parsed|intcomma }} baris baru</b>{% if sel_upload.cover_lo %} ({{ sel_upload.cover_lo|date:"d/m H:i" }}–{{ sel_upload.cover_hi|date:"d/m H:i" }}){% endif %}. File ini di-upload sebelum pembaruan pemetaan duplikat, jadi untuk melihat mutasi lengkap satu tanggal pilih <b>Semua file</b> lalu gunakan filter tanggal.</span>
 </div>
 {% endif %}
 
@@ -53,7 +57,7 @@
     {% for t in page %}
     <tr>
       <td class="num mono faint">{{ page.start_index|add:forloop.counter0 }}</td>
-      <td><div class="mono" style="font-size:12.5px">{{ t.occurred_at|date:"d/m H:i"|default:"—" }}</div></td>
+      <td><div class="mono" style="font-size:12.5px">{% if sel_upload and t.upload_id != sel_upload.id %}<span title="Tercatat lewat file: {{ t.upload.original_name }}" style="text-decoration:underline dotted;text-underline-offset:3px;cursor:help">{{ t.occurred_at|date:"d/m H:i"|default:"—" }}</span>{% else %}{{ t.occurred_at|date:"d/m H:i"|default:"—" }}{% endif %}</div></td>
       <td style="font-size:12px"><b>{{ t.source_label_full }}</b></td>
       <td class="cell-tr" style="font-size:12.5px">
         {% if t.counterparty %}<span title="{{ t.counterparty }}">{{ t.counterparty }}</span>

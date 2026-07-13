@@ -213,3 +213,67 @@ class MutasiBankCoverageTests(MutasiBankBase):
         self._tx(up, self.bank)
         r = self.client.get(reverse("bank_mutations"), {"upload": up.id})
         self.assertNotContains(r, "sudah tercatat")
+
+
+class MutasiBankFileUtuhTests(MutasiBankBase):
+    """Filter per-file = ISI FILE UTUH, bukan hanya baris yang diatribusikan.
+
+    File rolling: baris tumpang-tindih tercatat di upload TERDAHULU (dedup),
+    tapi ingest me-link baris itu ke upload barunya (duplicate_transactions).
+    Saat file dipilih, view menggabungkan keduanya — kasus nyata LBS 12/07:
+    file DP BRI 13 baris hanya tampil 1 baris -> user mengira "gak kebaca full".
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.up1 = self._up(self.bank, name="11_07_bri.csv")
+        self.dulu = self._tx(self.up1, self.bank, counterparty="ROW-DULU",
+                             dt=datetime(2026, 7, 12, 0, 10))
+        self.lain = self._tx(self.up1, self.bank, counterparty="ROW-LAIN-BUKAN-ISI",
+                             dt=datetime(2026, 7, 11, 9, 0))
+        self.up2 = self._up(self.bank, name="12_07_bri.csv")
+        self.up2.rows_parsed, self.up2.rows_duplicate = 1, 1
+        self.up2.save(update_fields=["rows_parsed", "rows_duplicate"])
+        self.baru = self._tx(self.up2, self.bank, counterparty="ROW-BARU",
+                             dt=datetime(2026, 7, 12, 22, 16))
+        self.up2.duplicate_transactions.add(self.dulu)
+
+    def test_filter_file_tampilkan_isi_utuh_urut_waktu(self):
+        r = self.client.get(reverse("bank_mutations"), {"upload": self.up2.id})
+        html = r.content.decode()
+        self.assertContains(r, "ROW-DULU")                 # baris duplikat ikut tampil
+        self.assertContains(r, "ROW-BARU")
+        self.assertNotContains(r, "ROW-LAIN-BUKAN-ISI")    # baris file lain yg BUKAN isi file ini
+        self.assertLess(html.index("ROW-DULU"), html.index("ROW-BARU"))  # kronologis
+
+    def test_banner_info_dan_penanda_file_asal(self):
+        r = self.client.get(reverse("bank_mutations"), {"upload": self.up2.id})
+        self.assertContains(r, "utuh")                     # banner: isi file ditampilkan utuh
+        self.assertContains(r, "msg info")
+        self.assertNotContains(r, "msg warning")
+        self.assertContains(r, "Tercatat lewat file: 11_07_bri.csv")  # tooltip baris duplikat
+
+    def test_file_lama_tanpa_link_fallback_banner_lama(self):
+        """Upload sebelum fitur ini (ada rows_duplicate, tanpa link) tetap jujur:
+        tampil baris atribusi saja + banner peringatan lama."""
+        self.up2.duplicate_transactions.clear()
+        r = self.client.get(reverse("bank_mutations"), {"upload": self.up2.id})
+        self.assertContains(r, "ROW-BARU")
+        self.assertNotContains(r, "ROW-DULU")
+        self.assertContains(r, "msg warning")
+        self.assertContains(r, "sudah tercatat")
+
+    def test_dropdown_jumlah_dan_rentang_gabungan(self):
+        r = self.client.get(reverse("bank_mutations"))
+        u = next(x for x in r.context["uploads"] if x.id == self.up2.id)
+        self.assertEqual(u.n_rows_file, 2)                          # 1 baru + 1 link
+        self.assertEqual(u.cover_lo, datetime(2026, 7, 12, 0, 10))  # rentang mencakup baris link
+        self.assertEqual(u.cover_hi, datetime(2026, 7, 12, 22, 16))
+
+    def test_filter_flow_dan_tanggal_tetap_berlaku(self):
+        wd_dulu = self._tx(self.up1, self.bank, jenis="wd", counterparty="ROW-WD-DULU",
+                           amount="-7000", dt=datetime(2026, 7, 12, 6, 58))
+        self.up2.duplicate_transactions.add(wd_dulu)
+        r = self.client.get(reverse("bank_mutations"), {"upload": self.up2.id, "flow": "depo"})
+        self.assertContains(r, "ROW-DULU")
+        self.assertNotContains(r, "ROW-WD-DULU")           # flow filter tetap meng-AND

@@ -40,3 +40,5 @@ class UploadAdmin(admin.ModelAdmin):
     list_filter = ("source_type", "status", "flow")
     search_fields = ("original_name",)
     date_hierarchy = "recon_date"
+    # M2M link duplikat bisa ratusan ribu pilihan — jangan render sebagai widget form.
+    exclude = ("duplicate_transactions",)

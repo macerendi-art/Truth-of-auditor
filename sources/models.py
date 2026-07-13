@@ -112,6 +112,14 @@ class Upload(TimeStampedModel):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=UPLOADED)
     rows_parsed = models.IntegerField(default=0)
     rows_duplicate = models.IntegerField(default=0)
+    # Baris file ini yang di-skip dedup karena SUDAH tercatat lewat upload
+    # terdahulu (file ekspor bank sering rolling/tumpang-tindih). Link ini
+    # yang membuat "isi file" tetap bisa ditampilkan utuh per-file.
+    duplicate_transactions = models.ManyToManyField(
+        "transactions.Transaction",
+        related_name="duplicated_in_uploads",
+        blank=True,
+    )
     error = models.TextField(blank=True)
     uploaded_by = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True
