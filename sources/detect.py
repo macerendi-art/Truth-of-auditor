@@ -92,6 +92,8 @@ def detect_source(path, filename=""):
             add("bca_csv", 0.85)
         if "customer username" in c and "acquirer merchant" in c:
             add("rpay", 0.95)
+        if "external id" in c and "disbursed amount" in c and "transfer status" in c:
+            add("rpay_wd", 0.95)  # RafflesPay WD/disbursement (BBS/BO7)
         if "whitelabel transaction id" in c:
             add("qhoki", 0.95)  # sebagian brand ekspor laporan QRIS-HOKI sbg CSV
     elif ext == ".pdf":

@@ -184,6 +184,104 @@ class RPayHardeningTests(SimpleTestCase):
         self.assertEqual((rows[0]["occurred_at"].month, rows[0]["occurred_at"].day), (7, 9))
 
 
+# Laporan WD/disbursement RafflesPay (BBS/BO7) — format BEDA dari RPay DP:
+# TANPA Customer Username, kunci = External ID (tiket W...) == Ticket Number panel.
+RPAY_WD_HEADER = ("No.,Merchant,Date,UUID,External ID,Bank Name,Account Name,"
+                  "Account Number,Requested Amount,Disbursed Amount,Fee,"
+                  "Approval Status,Transfer Status")
+
+
+class RPayWDGatewayTests(SimpleTestCase):
+    def _parse(self, lines, flow="wd"):
+        from sources.parsers.gateways import RPayWDGatewayParser
+        path = _csv([RPAY_WD_HEADER] + lines)
+        try:
+            return RPayWDGatewayParser().parse(path, flow=flow)
+        finally:
+            os.remove(path)
+
+    def test_wd_sukses_ticket_anchor(self):
+        rows = self._parse([
+            '1,BOBA MINUMAN SEGAR,"12 Jul 2026, 17:57",'
+            '316bb4a5-3ebe-479a-abb7-e7eb50679984,W2546823,BCA,'
+            'HERDIANSYAH KAMARUZZAMAN,2230090087,1000000.0,1000000.0,5000.0,'
+            'Approved,Success',
+        ])
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["jenis"], "wd")
+        self.assertEqual(r["ticket_no"], "W2546823")     # == tiket panel WD -> pass 0
+        self.assertEqual(str(r["amount"]), "1000000.0")  # Disbursed = uang riil keluar
+        self.assertLess(r["money_delta"], 0)             # WD = uang keluar
+        self.assertEqual(str(r["credit_delta"]), "0")
+        self.assertEqual(str(r["fee"]), "5000.0")
+        self.assertEqual(r["reference"], "")             # UUID di raw saja (aturan blocked)
+        self.assertEqual(r["raw"]["UUID"], "316bb4a5-3ebe-479a-abb7-e7eb50679984")
+        self.assertEqual(r["counterparty"], "HERDIANSYAH KAMARUZZAMAN")
+        self.assertEqual(r["username"], "")
+        self.assertEqual((r["occurred_at"].month, r["occurred_at"].day,
+                          r["occurred_at"].hour), (7, 12, 17))
+
+    def test_transfer_gagal_dilewati(self):
+        rows = self._parse([
+            '1,BOBA MINUMAN SEGAR,"12 Jul 2026, 17:57",uuidx,W2546823,BCA,'
+            'NAMA,2230090087,1000000.0,1000000.0,5000.0,Approved,Failed',
+        ])
+        self.assertEqual(rows, [])
+
+    def test_belum_approved_dilewati(self):
+        rows = self._parse([
+            '1,BOBA MINUMAN SEGAR,"12 Jul 2026, 17:57",uuidx,W2546823,BCA,'
+            'NAMA,2230090087,1000000.0,1000000.0,5000.0,Pending,Success',
+        ])
+        self.assertEqual(rows, [])
+
+    def test_row_hash_stabil_dan_unik(self):
+        a = ('1,BOBA MINUMAN SEGAR,"12 Jul 2026, 17:57",'
+             '316bb4a5-3ebe-479a-abb7-e7eb50679984,W2546823,BCA,NAMA,223,'
+             '1000000.0,1000000.0,5000.0,Approved,Success')
+        b = ('2,BOBA MINUMAN SEGAR,"12 Jul 2026, 17:12",'
+             '48fa2c52-a20d-4b61-b0ec-7298642c4510,W2546782,SEABANK,X,901,'
+             '1750000.0,1750000.0,5000.0,Approved,Success')
+        self.assertEqual(self._parse([a])[0]["row_hash"], self._parse([a])[0]["row_hash"])
+        self.assertNotEqual(self._parse([a])[0]["row_hash"], self._parse([b])[0]["row_hash"])
+
+
+class RPayWDRegistrationTests(SimpleTestCase):
+    def test_terdaftar_di_parsers(self):
+        from sources.services import PARSERS
+        from sources.parsers.gateways import RPayWDGatewayParser
+        self.assertIs(PARSERS.get("rpay_wd"), RPayWDGatewayParser)
+
+    def test_terdeteksi_dari_header_csv(self):
+        from sources.detect import detect_source
+        path = _csv([RPAY_WD_HEADER,
+                     '1,BOBA MINUMAN SEGAR,"12 Jul 2026, 17:57",'
+                     '316bb4a5-3ebe-479a-abb7-e7eb50679984,W2546823,BCA,NAMA,223,'
+                     '1000000.0,1000000.0,5000.0,Approved,Success'])
+        try:
+            ranked = detect_source(path, "12_07_2026 BBS WD QRIS RPAY.csv")
+        finally:
+            os.remove(path)
+        self.assertTrue(ranked)
+        self.assertEqual(ranked[0]["parser_key"], "rpay_wd")
+        self.assertGreaterEqual(ranked[0]["confidence"], 0.9)
+
+    def test_tidak_bentrok_dengan_rpay_dp(self):
+        # DP RPay (Customer Username + Acquirer Merchant, TANPA Disbursed Amount)
+        # tetap ke-detect sebagai `rpay`, bukan `rpay_wd`.
+        from sources.detect import detect_source
+        path = _csv([RPAY_HEADER,
+                     '1,NOMINA ISI ULANG,kaleng1,kaleng1,"09 Jul 2026, 23:59",'
+                     '93c8f884-bd54-445f-96df-e899a660cb64,46645580,619180666745,'
+                     'Thundfire Game,49s,49,25000.0,325.0,success'])
+        try:
+            ranked = detect_source(path, "dp rpay.csv")
+        finally:
+            os.remove(path)
+        self.assertEqual(ranked[0]["parser_key"], "rpay")
+
+
 class RPayRegistrationTests(SimpleTestCase):
     def test_terdaftar_di_parsers(self):
         from sources.services import PARSERS

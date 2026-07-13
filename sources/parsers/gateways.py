@@ -180,3 +180,55 @@ class RPayGatewayParser(BaseParser):
             row["row_hash"] = row_hash("rpay", [uuid, amt])
             out.append(row)
         return out
+
+
+class RPayWDGatewayParser(BaseParser):
+    """Gateway RafflesPay sisi WD/disbursement (CSV, brand panel-Nexus mis. BBS/BO7).
+
+    Beda dari `RPayGatewayParser` (rail DP: anchor `Customer Username` == username
+    panel). Laporan disbursement ini TANPA username — kunci pasti = `External ID`
+    (nomor tiket `W...`) == `Ticket Number` panel WD -> pass 0 ticket-join engine
+    (pola sama NXPay/QHoki). `UUID` RafflesPay DISIMPAN di raw saja, TIDAK di
+    `reference`: Remarks panel Nexus terbukti tak memuatnya, dan aturan blocked
+    engine mengasingkan gateway ber-reference asing dari pencocokan (pelajaran
+    sama dgn RPay DP). `Disbursed Amount` = uang riil keluar (== Withdrawal Amount
+    panel, terverifikasi 12-07-2026). Hanya baris Approved + Transfer Success.
+    """
+
+    source_key = "gateway"
+
+    def parse(self, path, flow=""):
+        with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+            rows = list(csv.DictReader(f))
+        is_wd = flow != "dp"  # laporan disbursement default WD
+        out = []
+        for r in rows:
+            ticket = str(r.get("External ID", "") or "").strip()
+            approval = str(r.get("Approval Status", "") or "").strip().lower()
+            transfer = str(r.get("Transfer Status", "") or "").strip().lower()
+            if not ticket or approval != "approved" or transfer != "success":
+                continue
+            amt = abs(parse_decimal(r.get("Disbursed Amount")))
+            occurred = parse_dt(r.get("Date"), dayfirst=True)
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date() if occurred else None,
+                "jenis": "wd" if is_wd else "depo",
+                "amount": amt,
+                "credit_delta": Decimal("0"),
+                "money_delta": _money(amt, "wd" if is_wd else "dp"),
+                "fee": parse_decimal(r.get("Fee")),
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": ticket,
+                "username": "",
+                "reference": "",
+                "counterparty": str(r.get("Account Name", "") or "").strip(),
+                "description": f"RPAY WD {r.get('Bank Name', '')}".strip(),
+                "raw": {k: ("" if v is None else str(v)) for k, v in r.items() if k},
+            }
+            row["row_hash"] = row_hash(
+                "rpay_wd", [str(r.get("UUID", "") or "").strip(), ticket, amt])
+            out.append(row)
+        return out
