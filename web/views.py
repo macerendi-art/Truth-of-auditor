@@ -1318,21 +1318,37 @@ def toko_overview(request):
     """Ringkasan lintas toko (scoped RBAC): status rekon terakhir, selisih,
     antrean tinjau, menunggu settlement, uang periksa D.
     Filter tanggal (?from&to): selisih/tinjau/uang-D diagregasi atas batch
-    DALAM rentang; 'rekon terakhir' = batch terakhir dalam rentang."""
-    from reconciliation.engine import pending_settlement_count
+    DALAM rentang; 'rekon terakhir' = batch terakhir dalam rentang.
+    Semua angka diambil lewat query AGREGAT lintas toko (bukan per toko) —
+    versi per-toko membuat klik menu Toko ~1,5 dtk di prod (24 toko × 3 query)."""
+    from reconciliation.engine import pending_settlement_counts
 
     date_from = _parse_date(request.GET.get("from", ""))
     date_to = _parse_date(request.GET.get("to", ""))
     filtered = bool(date_from or date_to)
-    tokos = tokos_for(request.user)
+    tokos = list(tokos_for(request.user))
+
+    batch_qs = ReconBatch.objects.filter(toko__in=tokos, recon_date__isnull=False)
+    tinjau_qs = MatchResult.objects.filter(
+        run__batch__toko__in=tokos, bucket=MatchResult.Bucket.TINJAU
+    )
+    if date_from:
+        batch_qs = batch_qs.filter(recon_date__gte=date_from)
+        tinjau_qs = tinjau_qs.filter(run__batch__recon_date__gte=date_from)
+    if date_to:
+        batch_qs = batch_qs.filter(recon_date__lte=date_to)
+        tinjau_qs = tinjau_qs.filter(run__batch__recon_date__lte=date_to)
+    batches_by_toko = {}
+    for b in batch_qs.order_by("recon_date"):
+        batches_by_toko.setdefault(b.toko_id, []).append(b)
+    tinjau_by_toko = dict(
+        tinjau_qs.values_list("run__batch__toko").annotate(n=Count("id"))
+    )
+    pending_by_toko = pending_settlement_counts(tokos)
+
     rows = []
     for t in tokos:
-        batches = ReconBatch.objects.filter(toko=t, recon_date__isnull=False)
-        if date_from:
-            batches = batches.filter(recon_date__gte=date_from)
-        if date_to:
-            batches = batches.filter(recon_date__lte=date_to)
-        batches = list(batches.order_by("recon_date"))
+        batches = batches_by_toko.get(t.id, [])
         last = batches[-1] if batches else None
         # tanpa filter: perilaku lama (angka batch TERAKHIR saja);
         # dengan filter: agregat seluruh batch dalam rentang.
@@ -1344,16 +1360,10 @@ def toko_overview(request):
             total += abs((s.get("wd") or {}).get("selisih") or 0)
             uang_d += ((s.get("unmatched_money") or {}).get("d") or {}).get("n") or 0
         st = "" if last is None else ("ok" if total == 0 else ("warn" if total < 10_000_000 else "bad"))
-        tinjau_qs = MatchResult.objects.filter(
-            run__batch__toko=t, bucket=MatchResult.Bucket.TINJAU
-        )
-        if date_from:
-            tinjau_qs = tinjau_qs.filter(run__batch__recon_date__gte=date_from)
-        if date_to:
-            tinjau_qs = tinjau_qs.filter(run__batch__recon_date__lte=date_to)
         rows.append({
             "toko": t, "last": last, "selisih": total, "status": st,
-            "tinjau": tinjau_qs.count(), "pending": pending_settlement_count(t),
+            "tinjau": tinjau_by_toko.get(t.id, 0),
+            "pending": pending_by_toko.get(t.id, 0),
             "uang_d": uang_d,
             "has_batch": last is not None,
         })

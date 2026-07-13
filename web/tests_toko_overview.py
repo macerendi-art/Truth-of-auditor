@@ -2,11 +2,15 @@
 from datetime import date
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
-from reconciliation.models import ReconBatch, ToleranceProfile
+from reconciliation.engine import _carried_results, pending_settlement_count
+from reconciliation.models import MatchResult, ReconBatch, ToleranceProfile
 from sources.models import Toko
+from web.tests_settlement import _SettleData
 
 User = get_user_model()
 
@@ -88,3 +92,57 @@ class TokoOverviewDateFilterTests(TokoOverviewTests):
         r = self.client.get(reverse("toko_overview"), {"from": "bukan-tanggal"})
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, ">1.000<")      # fallback perilaku tanpa filter
+
+
+class PendingCountEngineTests(_SettleData):
+    """pending_settlement_count: hitungan di SQL harus setara semantik dict
+    _carried_results (dedup per left_id) — bukan jumlah baris MatchResult mentah."""
+
+    def test_hasil_ganda_left_sama_dihitung_sekali(self):
+        tx = self.waiting(date(2026, 6, 28), ticket="W1")
+        # hasil no_money GANDA untuk baris kredit yang sama (kasus defensif dict)
+        MatchResult.objects.create(
+            run=self._runs[date(2026, 6, 28)], bucket=MatchResult.Bucket.TIDAK,
+            reason_code="no_money", left=tx,
+        )
+        self.waiting(date(2026, 6, 29), ticket="W2", username="susi")
+        self.assertEqual(pending_settlement_count(self.toko), 2)
+        self.assertEqual(
+            pending_settlement_count(self.toko), len(_carried_results(self.toko))
+        )
+
+    def test_count_satu_query_tanpa_materialisasi_objek(self):
+        for i, d in enumerate((date(2026, 6, 27), date(2026, 6, 28), date(2026, 6, 29))):
+            self.waiting(d, ticket=f"W{i}", username=f"user{i}")
+        with CaptureQueriesContext(connection) as ctx:
+            n = pending_settlement_count(self.toko)
+        self.assertEqual(n, 3)
+        self.assertEqual(len(ctx), 1)
+        # COUNT dikerjakan database — bukan menarik seluruh baris lalu len() di Python
+        # (awas: substring "COUNT" saja ada di kolom acCOUNT_id — wajib bentuk agregatnya)
+        self.assertIn(
+            "COUNT(DISTINCT", ctx[0]["sql"].upper(),
+            f"bukan query agregat: {ctx[0]['sql'][:120]}",
+        )
+
+
+class TokoOverviewQueryGrowthTests(TestCase):
+    """Jumlah query /tokos/ harus KONSTAN terhadap jumlah toko (anti N+1).
+    Di prod 24 toko × 3 query/toko ≈ 1,5 dtk per klik menu Toko."""
+
+    def setUp(self):
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+
+    def test_query_tidak_tumbuh_saat_toko_bertambah(self):
+        self.client.get(reverse("toko_overview"))  # warm-up: cache ContentType dkk.
+        with CaptureQueriesContext(connection) as before:
+            self.assertEqual(self.client.get(reverse("toko_overview")).status_code, 200)
+        for i in range(6):
+            Toko.objects.create(key=f"qq{i}", name=f"QQ{i}")
+        with CaptureQueriesContext(connection) as after:
+            self.assertEqual(self.client.get(reverse("toko_overview")).status_code, 200)
+        self.assertEqual(
+            len(before), len(after),
+            f"query tumbuh {len(before)}→{len(after)} saat toko bertambah (N+1)",
+        )

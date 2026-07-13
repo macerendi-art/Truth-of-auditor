@@ -8,7 +8,7 @@ from collections import Counter, defaultdict
 from datetime import date, timedelta
 
 from django.db import transaction as db_tx
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from rapidfuzz import fuzz
 
 from sources.parsers.base import clean_name
@@ -622,28 +622,39 @@ def _matched_money(runs):
     return dp, wd
 
 
-def _carried_results(toko):
-    """left_id → MatchResult no_money LAMA (dari batch lain) milik baris kredit yang
-    masih AKTIF — carry-over "menunggu settlement" dari run harian sebelumnya.
+def _carried_qs(tokos):
+    """Filter dasar carry-over "menunggu settlement" untuk banyak toko sekaligus —
+    hasil no_money LAMA milik baris kredit yang masih AKTIF.
     Hanya relasi UANG (no_money); hasil no_bracket PANEL_BRACKET tidak ikut.
     Run CLI tanpa batch diabaikan (tak ada batch asal untuk konsumsi/flip)."""
-    qs = (
-        MatchResult.objects.filter(
-            bucket=MatchResult.Bucket.TIDAK, reason_code="no_money",
-            left__isnull=False, left__toko=toko,
-            left__consumed_by_batch__isnull=True,
-            run__batch__isnull=False,
-            run__relation__in=[MatchRun.Relation.PANEL_BANK, MatchRun.Relation.BRACKET_BANK],
-        )
-        .select_related("left", "run", "run__batch")
-        .order_by("id")
+    return MatchResult.objects.filter(
+        bucket=MatchResult.Bucket.TIDAK, reason_code="no_money",
+        left__isnull=False, left__toko__in=tokos,
+        left__consumed_by_batch__isnull=True,
+        run__batch__isnull=False,
+        run__relation__in=[MatchRun.Relation.PANEL_BANK, MatchRun.Relation.BRACKET_BANK],
     )
+
+
+def _carried_results(toko):
+    """left_id → MatchResult no_money carry-over (lihat `_carried_qs`)."""
+    qs = _carried_qs([toko]).select_related("left", "run", "run__batch").order_by("id")
     return {r.left_id: r for r in qs}  # id terbesar menang (defensif bila ganda)
 
 
 def pending_settlement_count(toko):
-    """Jumlah baris kredit yang masih AKTIF menunggu settlement (untuk info UI)."""
-    return len(_carried_results(toko))
+    """Jumlah baris kredit yang masih AKTIF menunggu settlement (untuk info UI).
+    COUNT(DISTINCT left) di SQL — setara len(_carried_results) tapi tanpa
+    materialisasi objek (halaman /tokos/ sempat ~1,5 dtk karena ini per toko)."""
+    return pending_settlement_counts([toko]).get(toko.id, 0)
+
+
+def pending_settlement_counts(tokos):
+    """toko_id → jumlah menunggu settlement, SATU query agregat untuk semua toko."""
+    rows = _carried_qs(tokos).values_list("left__toko").annotate(
+        n=Count("left_id", distinct=True)
+    )
+    return dict(rows)
 
 
 def _retro_homes(toko, recon_date, date_from, date_to, include, exclude_ids=None):
