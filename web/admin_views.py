@@ -7,6 +7,7 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 
 from core.audit import catat
 from core.models import AuditLog
@@ -294,6 +295,11 @@ def bulk_delete_uploads(request):
                 f"{len(dilewati)} file dilewati karena dipakai hasil rekonsiliasi: "
                 f"{', '.join(dilewati)}. Hapus batch terkait dulu.",
             )
+    # Kembali ke halaman riwayat asal (digit-only → aman dari open redirect);
+    # halaman yang jadi kosong usai hapus di-clamp get_page ke halaman terakhir.
+    page = request.POST.get("page", "")
+    if page.isdigit():
+        return redirect(f"{reverse('upload')}?page={page}")
     return redirect("upload")
 
 

@@ -331,10 +331,11 @@ def _analyze_file(name, fileobj):
     }
 
 
-def _uploads_for(toko, limit=20):
-    """Riwayat upload toko, dianotasi `locked` (buktinya dipakai hasil rekon:
-    direferensi MatchResult left/right ATAU dikonsumsi batch). Tombol Hapus
-    per-baris dinonaktifkan; server (`_locking_batches`) tetap penjaga terakhir.
+def _uploads_for(toko):
+    """Riwayat upload toko (queryset penuh, terbaru dulu — view yang memaginasi),
+    dianotasi `locked` (buktinya dipakai hasil rekon: direferensi MatchResult
+    left/right ATAU dikonsumsi batch). Tombol Hapus per-baris dinonaktifkan;
+    server (`_locking_batches`) tetap penjaga terakhir.
 
     left/right WAJIB dua Exists TERPISAH — bentuk lama `Q(left…) | Q(right…)`
     dalam SATU subquery memaksa Postgres OR lintas dua join (tak bisa pakai
@@ -352,8 +353,14 @@ def _uploads_for(toko, limit=20):
             Exists(ref_left) | Exists(ref_right) | Exists(consumed),
             output_field=BooleanField(),
         ))
-        .order_by("-id")[:limit]
+        .order_by("-id")
     )
+
+
+def _uploads_page(toko, request):
+    """Halaman riwayat upload (20/halaman, pager seragam) — dulu terpotong 20
+    terakhir sehingga file tanggal lama tak bisa dihapus dari UI."""
+    return Paginator(_uploads_for(toko), 20).get_page(request.GET.get("page"))
 
 
 @login_required
@@ -426,13 +433,13 @@ def upload(request):
         return render(request, "web/upload.html", {
             "preview": preview, "parsers": sorted(PARSERS.keys()),
             "flows": ["", "dp", "wd"], "active_toko": active,
-            "uploads": _uploads_for(active),
+            "uploads": _uploads_page(active, request),
         })
     from reconciliation.engine import check_completeness
 
     return render(request, "web/upload.html", {
         "parsers": sorted(PARSERS.keys()), "active_toko": active,
-        "uploads": _uploads_for(active),
+        "uploads": _uploads_page(active, request),
         "comp": check_completeness(active),
     })
 

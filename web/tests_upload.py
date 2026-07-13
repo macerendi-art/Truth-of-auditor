@@ -171,3 +171,41 @@ class UploadLockedAnnotationTests(TestCase):
         self.assertTrue(locked[up_right.original_name], "referensi right harus mengunci")
         self.assertTrue(locked[up_cons.original_name], "konsumsi batch harus mengunci")
         self.assertFalse(locked[up_free.original_name], "upload bebas tidak terkunci")
+
+
+class UploadHistoryPaginationTests(TestCase):
+    """Riwayat Upload berhalaman (pager seragam spt halaman lain) — end user
+    perlu menghapus file tanggal lama yang dulu tersembunyi di luar 20 terakhir."""
+
+    def setUp(self):
+        self.u = User_ = get_user_model().objects.create_user(
+            "adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+        self.lbs = Toko.objects.get(key="lbs")
+        st = SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})[0]
+        for i in range(25):  # tertua = riwayat-00 (id terkecil, halaman terakhir)
+            Upload.objects.create(source_type=st, toko=self.lbs,
+                                  original_name=f"riwayat-{i:02d}.xlsx", uploaded_by=self.u)
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
+
+    def test_riwayat_berhalaman_20_per_halaman(self):
+        r = self.client.get(reverse("upload"))
+        self.assertEqual(len(r.context["uploads"]), 20)          # hal 1 = 20 terbaru
+        self.assertContains(r, "riwayat-24.xlsx")
+        self.assertNotContains(r, "riwayat-00.xlsx")             # tertua tak di hal 1
+        self.assertContains(r, "?page=2")                        # pager tampil
+        r2 = self.client.get(reverse("upload"), {"page": "2"})
+        self.assertContains(r2, "riwayat-00.xlsx")               # tertua kini terjangkau
+        self.assertEqual(len(r2.context["uploads"]), 5)
+
+    def test_jumlah_total_file_ditampilkan(self):
+        r = self.client.get(reverse("upload"))
+        self.assertContains(r, "25 file")                        # total, bukan "20 file terakhir"
+
+    def test_bulk_delete_kembali_ke_halaman_asal(self):
+        target = Upload.objects.filter(toko=self.lbs).order_by("id").first()
+        r = self.client.post(reverse("bulk_delete_uploads"),
+                             {"upload_ids": [target.id], "page": "2"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r["Location"], reverse("upload") + "?page=2")
+        self.assertFalse(Upload.objects.filter(pk=target.pk).exists())

@@ -209,15 +209,16 @@
 </div>
 {% endif %}
 
-{% load humanize %}
+{% load humanize %}{% load web_extras %}
 <form method="post" action="{% url 'bulk_delete_uploads' %}" id="bulkform"
       onsubmit="return confirm('Hapus semua upload terpilih? Semua transaksinya ikut terhapus. Tidak bisa dibatalkan.')">
 {% csrf_token %}
+<input type="hidden" name="page" value="{{ uploads.number }}">
 <div class="card pad0 reveal">
   <div class="card-head">
     <h3>Riwayat Upload — {{ active_toko.name }}</h3>
     <div style="display:flex;align-items:center;gap:10px">
-      <span class="sub">{{ uploads|length }} file terakhir</span>
+      <span class="sub">{{ uploads.paginator.count|intcomma }} file</span>
       {% if is_admin_user %}<button type="submit" class="btn sm ghost danger" id="bulkDelBtn" disabled>Hapus terpilih (<span id="selCount">0</span>)</button>{% endif %}
     </div>
   </div>
@@ -248,6 +249,7 @@
   </table>
   </div>
 </div>
+{% pager uploads %}
 </form>
 {% if is_admin_user %}
 <script>
