@@ -114,3 +114,60 @@ class UploadHistoryTests(TestCase):
         r = self.client.get(reverse("upload"))
         self.assertContains(r, "lbs-file.xlsx")
         self.assertNotContains(r, "slo-file.xlsx")
+
+
+class UploadLockedAnnotationTests(TestCase):
+    """Anotasi `locked` di _uploads_for: upload terkunci bila buktinya dipakai
+    hasil rekon (MatchResult left/right) ATAU transaksinya dikonsumsi batch.
+    Karakterisasi semantik — penjaga saat query-nya dioptimalkan (split Exists;
+    bentuk OR-dalam-satu-subquery = seq-scan MatchResult per baris di Postgres,
+    terukur 10,8 dtk utk 20 upload di prod)."""
+
+    def setUp(self):
+        from reconciliation.models import ToleranceProfile
+
+        User = get_user_model()
+        self.u = User.objects.create_user("aud", "a@a.co", "pw12345", role="supervisor")
+        self.toko = Toko.objects.get(key="lbs")
+        self.st = SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})[0]
+        self.tol = ToleranceProfile.objects.get_or_create(
+            name="Default", defaults={"date_window_days": 1}
+        )[0]
+        self._n = 0
+
+    def _upload_with_tx(self):
+        self._n += 1
+        up = Upload.objects.create(source_type=self.st, toko=self.toko,
+                                   original_name=f"f{self._n}.xlsx", uploaded_by=self.u)
+        tx = Transaction.objects.create(
+            upload=up, source_type=self.st, toko=self.toko, jenis="depo",
+            amount=Decimal("50000"), money_delta=Decimal("50000"),
+            occurred_at=datetime(2026, 6, 27, 10, 0), row_hash=f"lk{self._n}",
+        )
+        return up, tx
+
+    def _locked_map(self):
+        from web.views import _uploads_for
+
+        return {u.original_name: u.locked for u in _uploads_for(self.toko)}
+
+    def test_locked_bila_left_right_consumed_dan_bebas(self):
+        from reconciliation.models import MatchResult, MatchRun, ReconBatch
+
+        run = MatchRun.objects.create(relation=MatchRun.Relation.PANEL_BANK, tolerance=self.tol)
+        up_left, tx_left = self._upload_with_tx()
+        MatchResult.objects.create(run=run, bucket=MatchResult.Bucket.TIDAK,
+                                   reason_code="no_money", left=tx_left)
+        up_right, tx_right = self._upload_with_tx()
+        MatchResult.objects.create(run=run, bucket=MatchResult.Bucket.COCOK, right=tx_right)
+        up_cons, tx_cons = self._upload_with_tx()
+        batch = ReconBatch.objects.create(toko=self.toko, tolerance=self.tol)
+        tx_cons.consumed_by_batch = batch
+        tx_cons.save(update_fields=["consumed_by_batch"])
+        up_free, _ = self._upload_with_tx()
+
+        locked = self._locked_map()
+        self.assertTrue(locked[up_left.original_name], "referensi left harus mengunci")
+        self.assertTrue(locked[up_right.original_name], "referensi right harus mengunci")
+        self.assertTrue(locked[up_cons.original_name], "konsumsi batch harus mengunci")
+        self.assertFalse(locked[up_free.original_name], "upload bebas tidak terkunci")
