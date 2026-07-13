@@ -10,8 +10,9 @@
 <link rel="icon" type="image/png" sizes="16x16" href="{% static 'web/img/favicon-16.png' %}">
 <link rel="apple-touch-icon" sizes="180x180" href="{% static 'web/img/apple-touch-icon.png' %}">
 <link rel="stylesheet" href="{% static 'web/css/fonts.css' %}">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+{# vendor self-host (dulu cdnjs/unpkg): CDN eksternal render-blocking = layar gelap saat CDN lambat #}
+<script src="{% static 'web/vendor/gsap-3.12.5.min.js' %}"></script>
+<script src="{% static 'web/vendor/htmx-1.9.12.min.js' %}"></script>
 <style>
 :root{
   --bg:#080a11; --bg2:#0f1320; --panel:rgba(233,228,214,.04); --panel2:rgba(233,228,214,.07);

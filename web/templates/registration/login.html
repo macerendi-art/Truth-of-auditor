@@ -4,7 +4,8 @@
 
 {% block head %}
 <link rel="stylesheet" href="{% static 'web/css/login.css' %}">
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.167.1/build/three.module.js"}}</script>
+{# three.js self-host (dulu jsdelivr): import gagal = kartu login tak pernah reveal (stuck opacity 0) #}
+<script type="importmap">{"imports":{"three":"{% static 'web/vendor/three-0.167.1.module.min.js' %}"}}</script>
 <style>
   body{overflow:hidden}
   .auth{position:relative;z-index:2;min-height:100vh;display:grid;place-items:center;padding:24px}
