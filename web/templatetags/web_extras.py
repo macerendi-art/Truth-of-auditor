@@ -16,6 +16,7 @@ REASON_LABELS = {
     "ticket+amount":    ("Ticket & nominal sama",    "ok"),
     "ticket":           ("Ticket sama",              "ok"),
     "amount+date+name": ("Nominal · tanggal · nama", "ok"),
+    "alias_history":    ("Rekening langganan (riwayat)", "ok"),
     # perlu tinjau
     "amount_fee":       ("Selisih biaya transfer",   "warn"),
     "amount_mismatch":  ("Selisih nominal",          "warn"),

@@ -58,12 +58,13 @@ def _panel_phone(t):
     return digits.lstrip("0").removeprefix("62").lstrip("0")
 
 
-def _money_phones(t):
-    """Deret digit (≥9) di baris uang — mutasi VA e-wallet (FTFVA/DANA, GOPAY
-    TOPUP, dst) menaruh nomor HP/VA tujuan di teks keterangan."""
-    text = " ".join(str(v) for v in (t.raw or {}).values())
+def _phones_from(raw, counterparty=""):
+    """Deret digit (≥9) dari raw+counterparty baris uang — mutasi VA e-wallet
+    (FTFVA/DANA, GOPAY TOPUP, dst) menaruh nomor HP/VA tujuan di teks keterangan.
+    Level-raw supaya bisa dipakai juga utk baris historis via values_list."""
+    text = " ".join(str(v) for v in (raw or {}).values())
     out = set()
-    joined = text + " " + (t.counterparty or "")
+    joined = text + " " + (counterparty or "")
     # Span BRIVA diganti nomor bersihnya SEBELUM scan deret digit: nomor ikut
     # terekstrak DAN deret tercemar kode (mis. '301350831448892') hilang.
     joined = _BRIVA_RE.sub(lambda m: f" {m.group(1)} ", joined)
@@ -72,6 +73,10 @@ def _money_phones(t):
         if len(norm) >= 9:
             out.add(norm)
     return out
+
+
+def _money_phones(t):
+    return _phones_from(t.raw, t.counterparty)
 
 
 def _phone_match(pp, phones):
@@ -336,6 +341,64 @@ class PanelBracketMatcher:
         return out
 
 
+# --- Alias historis (K4) --------------------------------------------------------
+# Pemain memakai rekening pinjaman BERULANG. Bukti = hasil COCOK lama yang
+# ber-anchor identitas atau keputusan manusia; hasil ticket/reference gateway tak
+# relevan (peta ini khusus sisi bank).
+_ALIAS_EVIDENCE = (
+    "amount+date+name", "amount_fee", "alias_history", "late_settlement",
+    "manual_override",
+)
+
+
+def _alias_map(left_rows):
+    """Kamus alias dari SEJARAH pasangan COCOK: username → {nama rekening} dan
+    {nomor tujuan} yang pernah terbukti dipakai player itu. Diturunkan langsung
+    dari MatchResult hidup — tanpa tabel baru; batch sejarah dihapus = buktinya
+    hilang = aliasnya ikut hilang (self-healing). Per-toko (tak bocor antar toko)
+    dan per-username (tak bocor antar player)."""
+    toko_ids = {t.toko_id for t in left_rows}
+    if not toko_ids:
+        return {}, {}
+    pairs = (
+        MatchResult.objects.filter(
+            bucket=MatchResult.Bucket.COCOK,
+            reason_code__in=_ALIAS_EVIDENCE,
+            left__toko_id__in=toko_ids,
+            right__source_type__key="bank",
+        )
+        .exclude(left__username="")
+        .values_list("left__username", "right__counterparty", "right__raw")
+    )
+    alias_cp, alias_dest = {}, {}
+    for uname, cp, raw in pairs:
+        u = (uname or "").strip().lower()
+        if not u:
+            continue
+        k = clean_name(cp or "").upper()
+        if k:
+            alias_cp.setdefault(u, set()).add(k)
+        for ph in _phones_from(raw, cp):
+            alias_dest.setdefault(u, set()).add(ph)
+    return alias_cp, alias_dest
+
+
+def _is_alias(p, b, alias_cp, alias_dest):
+    """Rekening `b` pernah TERBUKTI dipakai username baris `p`?"""
+    u = (p.username or "").strip().lower()
+    if not u:
+        return False
+    if clean_name(b.counterparty or "").upper() in alias_cp.get(u, ()):
+        return True
+    dests = alias_dest.get(u)
+    if dests:
+        phones = getattr(b, "_phones", None)
+        if phones is None:
+            phones = b._phones = _money_phones(b)
+        return bool(phones & dests)
+    return False
+
+
 class _MoneyMatcher:
     """Cocokkan sisi kredit (Panel/Bracket) ke sisi UANG (Bank/Gateway) — multi-pass:
 
@@ -518,6 +581,11 @@ class _MoneyMatcher:
                         yield b, delta
 
         # --- pass 1: identitas kuat, assignment global urut skor ---
+        # Alias historis ikut di sini: rekening yang pernah TERBUKTI dipakai
+        # username ini (pasangan cocok lama / keputusan reviewer) → skor min 95,
+        # reason alias_history — hanya saat alias-lah anchor penentunya
+        # (identitas persis 100 tetap amount+date+name).
+        alias_cp, alias_dest = _alias_map(left)
         pairs = []
         for p in left:
             if p.id in matched:
@@ -525,16 +593,20 @@ class _MoneyMatcher:
             expected = _expected_owner(p)
             for b, delta in kandidat(p):
                 s = self._identity(p, b)
+                al = s < 100 and _is_alias(p, b, alias_cp, alias_dest)
+                if al:
+                    s = max(s, 95.0)
                 if s >= tol.fuzzy_threshold:
                     route = _route_ok(expected, owners.get(b.upload_id), b.source_type.key)
-                    pairs.append((s, route is True, -delta, p, b))
+                    pairs.append((s, route is True, -delta, p, b, al))
         # Ekor -id: seri total (skor+rute+tanggal) tetap deterministik di Postgres
         # (tanpa ORDER BY urutan pool arbitrary) — id terkecil menang.
         pairs.sort(key=lambda x: (x[0], x[1], x[2], -x[3].id, -x[4].id), reverse=True)
-        for s, _, _, p, b in pairs:
+        for s, _, _, p, b, al in pairs:
             if p.id in matched or b.id in used:
                 continue
-            emit(p, b, MatchResult.Bucket.COCOK, s, "amount+date+name")
+            emit(p, b, MatchResult.Bucket.COCOK, s,
+                 "alias_history" if al else "amount+date+name")
 
         # --- pass 2: near-miss identitas kuat (fee kecil & uang H-1) ---
         # Seleksi seri DETERMINISTIK: urutan pool arbitrary di Postgres, jadi
