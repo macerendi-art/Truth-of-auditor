@@ -27,6 +27,7 @@ REASON_LABELS = {
     "owner_fr+counterparty_cm": ("Rekening FR · lawan CM", "ok"),
     "owner_fr+rek_cm":  ("Rekening FR · norek lawan", "ok"),
     "owner_fr+kredit_masuk": ("Rekening FR · kredit masuk", "ok"),
+    "alias_history":    ("Rekening langganan (riwayat)", "ok"),
     # perlu tinjau
     "amount_fee":       ("Selisih biaya transfer",   "warn"),
     "amount_mismatch":  ("Selisih nominal",          "warn"),
