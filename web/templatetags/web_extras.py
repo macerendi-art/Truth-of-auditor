@@ -42,6 +42,7 @@ REASON_LABELS = {
     "no_panel":         ("Tak ada di panel",         "bad"),
     "no_money":         ("Belum ada uang masuk",     "bad"),
     "no_fr":            ("Tak ada di FR Sesama CM",  "bad"),
+    "gateway_unpaid":   ("QR belum settle",          "bad"),
 }
 
 

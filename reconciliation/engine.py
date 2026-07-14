@@ -148,6 +148,28 @@ def _money_channel(t):
     # Hanya awalan description (ditulis parser sendiri) — bukan teks bebas.
     return _channel_from((t.description or "")[:12])
 
+# --- Gate settle gateway (K1) --------------------------------------------------
+# Parser QRFlyer/NXPay menelan SEMUA baris; status pembayaran hanya tersimpan di
+# raw ("Payment Status"/"Status"). QR UNPAID/FAILED = uang BELUM masuk: bukan
+# pasangan sah pass 0/0b, bukan kandidat fuzzy, bukan gross. Fail-open: status
+# kosong / di luar kamus dianggap settle — QHoki/RPay/COR sudah menyaring saat
+# parse dan bisa membawa kolom "Status" bermakna lain; jangan merusak join yang
+# hari ini benar. Hanya token BELUM-settle yang dikenal yang menggerbang.
+UNSETTLED_STATUS = {
+    "UNPAID", "FAILED", "EXPIRED", "PENDING", "CANCELLED", "CANCELED",
+    "REFUND", "REFUNDED", "GAGAL", "BATAL", "KADALUARSA",
+}
+
+
+def _gw_status(raw):
+    return ((raw or {}).get("Payment Status") or (raw or {}).get("Status") or "").strip().upper()
+
+
+def _gw_unsettled(t):
+    """Baris gateway BELUM settle (uang belum masuk)? Panggil hanya utk gateway."""
+    return _gw_status(t.raw) in UNSETTLED_STATUS
+
+
 # Detail baku hasil no_money — juga dipakai untuk MENGEMBALIKAN hasil yang
 # di-flip late settlement, jadi string ini harus tetap satu sumber kebenaran.
 NO_MONEY_DETAIL = "Tak ada padanan nominal+tanggal di Mutasi Bank"
@@ -626,8 +648,18 @@ class _MoneyMatcher:
         gw_ticket = defaultdict(list)
         gw_ref = defaultdict(list)
         gw_acct = defaultdict(list)
+        gw_unpaid_key = {}  # ticket/reference -> baris gateway BELUM settle
         owners = {}
         for b in right:
+            if b.source_type.key == "gateway" and _gw_unsettled(b):
+                # Gate settle (K1): QR belum dibayar = BUKAN uang. Tak masuk pool
+                # mana pun; kuncinya diingat agar panel ber-tiket sama jadi
+                # gateway_unpaid (terminal), bukan cocok/no_money.
+                if b.ticket_no:
+                    gw_unpaid_key.setdefault(b.ticket_no, b)
+                if b.reference:
+                    gw_unpaid_key.setdefault(b.reference, b)
+                continue
             bidx[(int(abs(b.money_delta)), b.money_delta > 0)].append(b)
             if b.source_type.key == "gateway" and b.ticket_no:
                 gw_ticket[b.ticket_no].append(b)
@@ -720,6 +752,22 @@ class _MoneyMatcher:
             if p.id in matched or b.id in used:
                 continue
             emit(p, b, MatchResult.Bucket.COCOK, 100, "account")
+        # --- pass 0d: tiket/reference DIKENAL gateway tapi tak ada yang settle ---
+        # Uang belum masuk itu FAKTA -> terminal tidak_cocok (bukan no_money yang
+        # carried menunggu settlement, bukan jatuh ke fuzzy bank uang orang lain).
+        # Dijalankan SETELAH pass 0c: bukti positif uang SETTLE (join rekening
+        # UNO) menang atas jejak unpaid — hanya baris yang tetap tak berpasangan
+        # yang divonis gateway_unpaid.
+        for p in left:
+            if p.id in matched:
+                continue
+            key = (p.ticket_no if p.ticket_no in gw_unpaid_key else "") or \
+                  (p.reference if p.reference in gw_unpaid_key else "")
+            if key:
+                g = gw_unpaid_key[key]
+                emit(p, None, MatchResult.Bucket.TIDAK, 0, "gateway_unpaid",
+                     f"QR {key} belum settle di gateway "
+                     f"(status: {_gw_status(g.raw) or '?'}) — uang belum masuk")
         # Gateway ber-ticket/ber-reference yang TAK dikenal panel bukan kandidat
         # fuzzy siapa pun (cermin semantik: uang yang identitas TRANSAKSInya
         # asing bagi panel tampil sebagai uang tanpa pasangan, bukan dicuri
@@ -1346,6 +1394,8 @@ def _add_retro_gross(batch, rows):
             flow = "dp" if t.jenis == "depo" else "wd"
             s[flow]["panel"] += float(t.amount)
         elif key in MONEY_SOURCES and t.jenis != "admin":
+            if key == "gateway" and _gw_unsettled(t):
+                continue  # QR belum settle bukan uang masuk (gate K1)
             md = float(t.money_delta)
             if md > 0:
                 s["dp"]["money_gross"] += md
@@ -1490,7 +1540,10 @@ def classify_unmatched_money(t, recon_date, window, panel_tickets, operator_name
     """Kategori uang tanpa pasangan (satu sumber kebenaran — dipakai engine & web):
     a = histori (di luar jangkauan window pasangan), b = gateway ber-ticket yang
     tak dikenal panel, c = pindah dana internal (lawan = rekening operator),
-    d = dalam periode tanpa penjelasan → layak diperiksa manusia."""
+    d = dalam periode tanpa penjelasan → layak diperiksa manusia,
+    e = gateway belum settle (UNPAID/FAILED — bukan uang masuk)."""
+    if t.source_type.key == "gateway" and _gw_unsettled(t):
+        return "e"
     d = t.occurred_at.date() if t.occurred_at else None
     if d is None or d < recon_date - timedelta(days=window):
         return "a"
@@ -1612,6 +1665,14 @@ def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None, excl
     # Baris fee BCA ('admin') dikecualikan dari uang WD (bukan WD nyata).
     # Hanya sumber uang yang dicentang ikut total gross.
     money = tx.filter(source_type__key__in=_included_money_sources(include)).exclude(jenis="admin")
+    # Gate settle (K1): QR belum settle bukan uang masuk -> keluar dari gross
+    # supaya tak menggelembungkan angka & selisih DP.
+    unsettled = [
+        t.id for t in money.filter(source_type__key="gateway").only("id", "raw")
+        if _gw_unsettled(t)
+    ]
+    if unsettled:
+        money = money.exclude(id__in=unsettled)
     dp_panel = total(panel.filter(jenis="depo"), "amount")
     dp_gross = total(money.filter(money_delta__gt=0), "money_delta")
     wd_panel = total(panel.filter(jenis="wd"), "amount")
@@ -1856,7 +1917,7 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
                 .exclude(ticket_no="").values_list("ticket_no", flat=True)
             )
             ops = _operator_names(toko)
-            stats = {k: {"n": 0, "dp": 0.0, "wd": 0.0} for k in "abcd"}
+            stats = {k: {"n": 0, "dp": 0.0, "wd": 0.0} for k in "abcde"}
             new_results = []
             um_qs = (
                 Transaction.objects.filter(
@@ -1994,9 +2055,13 @@ def verify_panel_anchor(toko, date_from, date_to, include, window):
         rows = (
             base.filter(source_type__key__in=money_keys)
             .exclude(jenis="admin")
-            .values_list("occurred_at", "money_delta")
+            .values_list("occurred_at", "money_delta", "source_type__key", "raw")
         )
-        for dt, md in rows:
+        for dt, md, skey, raw in rows:
+            # QR belum settle bukan uang: tanggal berisi HANYA baris begitu
+            # tak butuh panel penutup (jangan memblokir seluruh run auto).
+            if skey == "gateway" and _gw_status(raw) in UNSETTLED_STATUS:
+                continue
             if dt:
                 a = agg[dt.date()]
                 a[0] += abs(float(md or 0))
