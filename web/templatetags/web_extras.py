@@ -30,6 +30,7 @@ REASON_LABELS = {
     "no_bracket":       ("Tak ada di bracket",       "bad"),
     "no_panel":         ("Tak ada di panel",         "bad"),
     "no_money":         ("Belum ada uang masuk",     "bad"),
+    "gateway_unpaid":   ("QR belum settle",          "bad"),
 }
 
 

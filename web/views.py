@@ -864,6 +864,7 @@ KATEGORI_UANG = {
     "b": ("Ticket asing", "ticket gateway tak dikenal panel"),
     "c": ("Internal", "pindah dana antar rekening operator"),
     "d": ("Periksa", "dalam periode tanpa catatan panel"),
+    "e": ("Belum settle", "QR belum dibayar — bukan uang masuk"),
 }
 
 
