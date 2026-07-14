@@ -167,6 +167,27 @@ NO_MONEY_DETAIL = "Tak ada padanan nominal+tanggal di Mutasi Bank"
 # (skor < NAME_REVIEW_FLOOR) → biarkan menunggu settlement tanggal berikutnya.
 NO_MONEY_WAIT_DETAIL = "Ada kandidat nominal+tanggal tapi identitas beda — menunggu settlement"
 
+# Channel deposit pulsa di Panel: Bank Title = provider seluler '(AUTO)'.
+# Uangnya TIDAK lewat bank/gateway (dikonversi terpisah) → jangan difuzzy-kan
+# ke mutasi bank & jangan carried menunggu settlement yang tak akan datang;
+# auditor memverifikasi konversinya manual (perlu_tinjau `pulsa_manual`).
+_PULSA_PROVIDERS = frozenset(
+    {"TELKOMSEL", "AXIS", "XL", "INDOSAT", "IM3", "TRI", "THREE", "SMARTFREN", "BY.U", "PULSA"}
+)
+
+
+def _pulsa_channel(t):
+    """Nama channel pulsa baris kredit ('TELKOMSEL (AUTO)') atau '' bila bukan.
+    Sumber: field bank_title (persisted); fallback raw['Bank Title'] utk baris lama."""
+    bt = (getattr(t, "bank_title", "") or "").strip()
+    if not bt:
+        bt = ((t.raw or {}).get("Bank Title") or "").split("|")[0].strip()
+    if not bt:
+        return ""
+    first = bt.split()[0].upper()
+    return bt if (first in _PULSA_PROVIDERS or "PULSA" in bt.upper()) else ""
+
+
 # Anchor UTAMA (identitas unik) yang menentukan pasangan; nominal+tanggal hanya
 # PENDUKUNG. Nama mirip pada pita ini → perlu_tinjau ('nama mirip'); di bawahnya
 # TIDAK dipasangkan (menunggu settlement). Kalibrasi via `validate_brands`;
@@ -410,9 +431,18 @@ class _MoneyMatcher:
             out.append(MatchResult(run=run, bucket=bucket, left=p, right=b,
                                    score=score, reason_code=reason, reason_detail=detail))
 
+        # --- pass 0a: DP pulsa — uang tak lewat bank/gateway → tinjau manual ---
+        for p in left:
+            if p.money_delta <= 0:
+                continue
+            pulsa = _pulsa_channel(p)
+            if pulsa:
+                emit(p, None, MatchResult.Bucket.TINJAU, 0, "pulsa_manual",
+                     f"Deposit pulsa {pulsa} — uangnya tidak lewat bank/gateway; "
+                     "cocokkan dengan laporan konversi pulsa")
         # --- pass 0: ticket-join gateway (seperti Panel↔Bracket) ---
         for p in left:
-            if not p.ticket_no:
+            if p.id in matched or not p.ticket_no:
                 continue
             for b in gw_ticket.get(p.ticket_no, []):
                 if b.id in used or (p.money_delta > 0) != (b.money_delta > 0):
