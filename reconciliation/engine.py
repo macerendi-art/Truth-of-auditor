@@ -498,25 +498,33 @@ class _MoneyMatcher:
                 if s >= tol.fuzzy_threshold:
                     route = _route_ok(expected, owners.get(b.upload_id), b.source_type.key)
                     pairs.append((s, route is True, -delta, p, b))
-        pairs.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+        # Ekor -id: seri total (skor+rute+tanggal) tetap deterministik di Postgres
+        # (tanpa ORDER BY urutan pool arbitrary) — id terkecil menang.
+        pairs.sort(key=lambda x: (x[0], x[1], x[2], -x[3].id, -x[4].id), reverse=True)
         for s, _, _, p, b in pairs:
             if p.id in matched or b.id in used:
                 continue
             emit(p, b, MatchResult.Bucket.COCOK, s, "amount+date+name")
 
         # --- pass 2: near-miss identitas kuat (fee kecil & uang H-1) ---
+        # Seleksi seri DETERMINISTIK: urutan pool arbitrary di Postgres, jadi
+        # kandidat dipilih dengan kunci eksplisit — skor tertinggi, lalu selisih
+        # nominal terkecil, lalu tanggal terdekat ke panel, lalu id terkecil.
         for p in left:
             if p.id in matched:
                 continue
             amt = int(abs(p.money_delta))
-            best = None
+            best = None  # (kunci, b, diff); kunci terbesar menang
             for b, delta in kandidat(p, tol_amt=max(FEE_TOL_MIN, amt // 100)):
                 s = self._identity(p, b)
-                if s >= tol.fuzzy_threshold and (best is None or s > best[0]):
-                    best = (s, b)
-            if best:
-                s, b = best
+                if s < tol.fuzzy_threshold:
+                    continue
                 diff = abs(int(abs(b.money_delta)) - amt)
+                key = (s, -diff, -delta, -b.id)
+                if best is None or key > best[0]:
+                    best = (key, b, diff)
+            if best:
+                (s, _, _, _), b, diff = best
                 # Identitas PERSIS (nomor HP/username/nama identik = 100) + selisih
                 # kecil khas biaya transfer → cocok; identitas fuzzy tetap ditinjau.
                 bucket = (MatchResult.Bucket.COCOK if s >= 100
@@ -524,12 +532,15 @@ class _MoneyMatcher:
                 emit(p, b, bucket, s, "amount_fee",
                      f"identitas cocok, selisih nominal {diff:,} (indikasi fee)")
                 continue
+            h1 = None  # H-1: skor tertinggi menang, lalu id terkecil
             for b, delta in kandidat(p, lo=-1, hi=-1):
                 s = self._identity(p, b)
-                if s >= tol.fuzzy_threshold:
-                    emit(p, b, MatchResult.Bucket.TINJAU, s, "date_before",
-                         "uang tiba sehari SEBELUM tanggal panel")
-                    break
+                if s >= tol.fuzzy_threshold and (h1 is None or (s, -b.id) > h1[0]):
+                    h1 = ((s, -b.id), b)
+            if h1:
+                (s, _), b = h1
+                emit(p, b, MatchResult.Bucket.TINJAU, s, "date_before",
+                     "uang tiba sehari SEBELUM tanggal panel")
 
         # --- pass 3: sisa berbasis IDENTITAS — nominal+tanggal cuma pendukung ---
         # Nama mirip pada pita [NAME_REVIEW_FLOOR..threshold) → perlu_tinjau,
@@ -550,7 +561,7 @@ class _MoneyMatcher:
                     route = _route_ok(expected, owners.get(b.upload_id), b.source_type.key)
                     band_pairs.append((s, route is True, -delta, p, b))
             has_candidate[p.id] = any_cand
-        band_pairs.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+        band_pairs.sort(key=lambda x: (x[0], x[1], x[2], -x[3].id, -x[4].id), reverse=True)
         for s, _, _, p, b in band_pairs:
             if p.id in matched or b.id in used:
                 continue
