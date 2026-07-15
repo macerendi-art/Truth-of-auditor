@@ -193,3 +193,23 @@ payout Somad lewat rail lain atau kebetulan nominal sama.
 - Pencocokan **referensi echannel** (`O0217...`) — korup watermark, tak
   diandalkan.
 - Otomasi dedup/reconciliation lintas-toko untuk rekening bersama.
+
+## Hasil kalibrasi (2026-07-15, data nyata 13 Juli, DB scratch)
+
+Ingest `panel` (7 WD SUH) + `bni_pdf` (17 baris: 10 wd, 1 depo/Cr topup,
+6 admin/fee) → `match panel_bank 2026-07-13`:
+
+| Hasil | Jumlah | Detail |
+|---|---|---|
+| `cocok` | **6/7** | Semua skor 100 via anchor identitas: W1459533/695/697 + W1460187 (rekening SEABANK), W1460189 (rekening BRI), W1460158 (HP DANA via `raw["hp"]`). |
+| `tidak_cocok` | 1 | W1460045 (372k, Somad/SEABANK) → `no_money` — **benar**: baris BNI 372k = rail LANDMARK/kartu tanpa rekening cocok (nominal sama saja tidak cukup, sesuai aturan anchor). |
+| Idempotensi | ✓ | Re-ingest file sama: 0 baris baru, 17 duplikat. |
+| Deteksi | ✓ | Kedua PDF nyata → `bni_pdf` 0.9 (tunggal). |
+
+**Temuan kalibrasi → perbaikan parser (commit `a0ae4eb`):** VA e-wallet BNI
+menempelkan prefiks 4-digit ke HP tujuan (ESPAY/DANA `8810`+HP, AIRPAY/ShopeePay
+`8807`+HP = 16 digit) — deret 16-digit lolos dari scan HP engine
+(`_DIGIT_RUN_RE` 9–15 digit), kelas masalah yang sama dengan BRIVA di BRI.
+Sesuai konvensi (identitas diisolasi di parser, engine tak berubah), parser
+memisahkan HP dari prefiks VA ke `raw["hp"]` → `_money_phones` menemukannya
+generik. Tanpa fix ini DANA jatuh ke `perlu_tinjau` (nama tersamar, skor 61).
