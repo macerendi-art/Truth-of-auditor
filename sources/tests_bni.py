@@ -1,5 +1,6 @@
+from decimal import Decimal
 from django.test import SimpleTestCase
-from sources.parsers.bni_pdf import extract_bni_name
+from sources.parsers.bni_pdf import extract_bni_name, is_bni_fee, parse_bni_lines
 
 
 class ExtractBNINameTests(SimpleTestCase):
@@ -31,3 +32,79 @@ class ExtractBNINameTests(SimpleTestCase):
 
     def test_kosong_tetap_kosong(self):
         self.assertEqual(extract_bni_name(""), "")
+
+
+# Baris nyata (disederhanakan) dari 13_07_2026_WD_BNI_MARULLOH.pdf.
+SAMPLE_LINES = [
+    "HISTORI TRANSAKSI",                 # header -> diabaikan (sebelum transaksi)
+    "Rekening: TAPLUS DIGITAL",
+    "Tanggal Uraian Transaksi Tipe Nominal Saldo Akhir",
+    "2026-07-13 TRANSFER KE Bpk KELPIN BORNEO Db. 800.000,00 2.065.363,00",
+    "2026-07-13 BY TRX BIFAST lDb. 2.500,00 3.622.863,00",   # fee + huruf nyasar 'l'
+    "g",                                                     # watermark 1-karakter
+    "2026-07-13 TRF/PAY/TOP-UP Db. 900.000,00 3.882.363,00",  # echannel (main line)
+    "ECHANNEL KARTU",                                        # lanjutan
+    "0000000000000000 BIZID",                                # lanjutan
+    "20260713BNINIDJA010",                                   # lanjutan
+    "O0217812687 901113275828",                              # lanjutan: no rek tujuan
+    "2026-07-13 TRF/PAY/TOP-UP ECHANNEL KARTU 0000000000000000 BIZID 20260713 Cr. 2.000.000,00 4.431.363,00",
+    "Printed on 13/7/2026 6:27:15 Waktu",                    # footer -> diabaikan
+    "Page 1 of 3",
+]
+
+
+class ParseBNILinesTests(SimpleTestCase):
+    def setUp(self):
+        self.rows = parse_bni_lines(SAMPLE_LINES)
+
+    def test_jumlah_baris_transaksi(self):
+        # 4 transaksi (KELPIN, fee, echannel 900k, Cr topup); watermark & footer diabaikan
+        self.assertEqual(len(self.rows), 4)
+
+    def test_arah_db_negatif_cr_positif(self):
+        by_amt = {r["amount"]: r for r in self.rows}
+        self.assertEqual(by_amt[Decimal("800000")]["money_delta"], Decimal("-800000"))
+        self.assertEqual(by_amt[Decimal("2000000")]["money_delta"], Decimal("2000000"))
+
+    def test_jenis_wd_depo_admin(self):
+        by_amt = {r["amount"]: r["jenis"] for r in self.rows}
+        self.assertEqual(by_amt[Decimal("800000")], "wd")
+        self.assertEqual(by_amt[Decimal("2500")], "admin")     # BY TRX BIFAST
+        self.assertEqual(by_amt[Decimal("2000000")], "depo")   # Cr topup
+
+    def test_fee_terdeteksi(self):
+        self.assertTrue(is_bni_fee("BY TRX BIFAST"))
+        self.assertTrue(is_bni_fee("TRANSFER KE BIAYA ADMIN (GOPAY) NO :000724750525"))
+        self.assertFalse(is_bni_fee("TRANSFER KE Bpk KELPIN BORNEO"))
+
+    def test_saldo_dan_nominal_format_id(self):
+        r = next(r for r in self.rows if r["amount"] == Decimal("800000"))
+        self.assertEqual(r["balance_after"], Decimal("2065363"))
+        self.assertEqual(r["credit_delta"], Decimal("0"))
+        self.assertEqual(r["source_type"], "bank")
+
+    def test_nomor_rekening_tujuan_terpelihara_di_raw(self):
+        # anchor identitas: 901113275828 harus ada di raw echannel 900k
+        r = next(r for r in self.rows if r["amount"] == Decimal("900000"))
+        joined = " ".join(str(v) for v in r["raw"].values())
+        self.assertIn("901113275828", joined)
+
+    def test_counterparty_nama_transfer_bank(self):
+        r = next(r for r in self.rows if r["amount"] == Decimal("800000"))
+        self.assertEqual(r["counterparty"], "KELPIN BORNEO")
+
+    def test_counterparty_echannel_kosong(self):
+        r = next(r for r in self.rows if r["amount"] == Decimal("900000"))
+        self.assertEqual(r["counterparty"], "")
+
+    def test_tanggal_tanpa_jam(self):
+        r = self.rows[0]
+        self.assertEqual(r["occurred_at"].year, 2026)
+        self.assertEqual(r["occurred_at"].hour, 0)
+
+    def test_row_hash_stabil_dan_unik(self):
+        hashes = [r["row_hash"] for r in self.rows]
+        self.assertEqual(len(hashes), len(set(hashes)))
+        # deterministik: parse ulang -> hash sama
+        again = [r["row_hash"] for r in parse_bni_lines(SAMPLE_LINES)]
+        self.assertEqual(hashes, again)
