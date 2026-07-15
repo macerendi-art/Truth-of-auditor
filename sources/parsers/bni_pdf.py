@@ -9,7 +9,9 @@ ekor deskripsi (disimpan utuh di raw untuk _money_phones).
 import re
 from decimal import Decimal
 
-from .base import parse_decimal, parse_dt, row_hash
+import pdfplumber
+
+from .base import BaseParser, parse_decimal, parse_dt, row_hash
 
 # Gelar di depan nama transfer bank.
 BNI_HONORIFIC_RE = re.compile(r"\b(?:Bpk|Bapak|Bp|Ibu|Sdr|Sdri)\.?\s+", re.IGNORECASE)
@@ -108,3 +110,14 @@ def parse_bni_lines(lines):
         row["row_hash"] = row_hash("bni", [t["date"], amount, tipe, saldo_val, idx])
         out.append(row)
     return out
+
+
+class BNIPDFParser(BaseParser):
+    source_key = "bank"
+
+    def parse(self, path, flow=""):
+        lines = []
+        with pdfplumber.open(path) as pdf:
+            for pg in pdf.pages:
+                lines += (pg.extract_text() or "").split("\n")
+        return parse_bni_lines(lines)

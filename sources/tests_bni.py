@@ -1,3 +1,4 @@
+import os
 from decimal import Decimal
 from django.test import SimpleTestCase
 from sources.parsers.bni_pdf import extract_bni_name, is_bni_fee, parse_bni_lines
@@ -108,3 +109,28 @@ class ParseBNILinesTests(SimpleTestCase):
         # deterministik: parse ulang -> hash sama
         again = [r["row_hash"] for r in parse_bni_lines(SAMPLE_LINES)]
         self.assertEqual(hashes, again)
+
+
+class BNIPDFParserSampleTests(SimpleTestCase):
+    SAMPLE = "samples/bni/13_07_2026_WD_BNI_MARULLOH.pdf"
+
+    def test_parse_file_nyata(self):
+        if not os.path.exists(self.SAMPLE):
+            self.skipTest("file kanonik BNI WD PDF tidak tersedia")
+        from sources.parsers.bni_pdf import BNIPDFParser
+        rows = BNIPDFParser().parse(self.SAMPLE)
+        # semua baris bersumber bank & punya money_delta != 0
+        self.assertTrue(rows)
+        self.assertTrue(all(r["source_type"] == "bank" for r in rows))
+        # nomor rekening tujuan wahyudi (SEABANK) harus muncul di salah satu raw
+        joined_all = " ".join(
+            str(v) for r in rows for v in r["raw"].values()
+        )
+        self.assertIn("901113275828", joined_all)
+
+
+class ParsersRegistryTests(SimpleTestCase):
+    def test_bni_pdf_terdaftar(self):
+        from sources.services import PARSERS
+        from sources.parsers.bni_pdf import BNIPDFParser
+        self.assertIs(PARSERS["bni_pdf"], BNIPDFParser)

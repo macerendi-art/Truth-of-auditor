@@ -10,6 +10,7 @@ from transactions.models import Transaction, owner_from_filename
 from .models import SourceType, Upload
 from .parsers.banks import BCACSVParser, BRIParser, MandiriParser
 from .parsers.bca_pdf import BCAPDFParser
+from .parsers.bni_pdf import BNIPDFParser
 from .parsers.bracket import BracketParser
 from .parsers.cor import (
     CORPanelBankParser,
@@ -33,6 +34,7 @@ PARSERS = {
     "bri": BRIParser,
     "bca_csv": BCACSVParser,
     "bca_pdf": BCAPDFParser,
+    "bni_pdf": BNIPDFParser,
     "mandiri": MandiriParser,
     "nxpay": NXPayParser,
     "qrflyer": QRFlyerParser,
