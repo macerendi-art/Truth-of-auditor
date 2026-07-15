@@ -134,3 +134,31 @@ class ParsersRegistryTests(SimpleTestCase):
         from sources.services import PARSERS
         from sources.parsers.bni_pdf import BNIPDFParser
         self.assertIs(PARSERS["bni_pdf"], BNIPDFParser)
+
+
+class VAHpExtractionTests(SimpleTestCase):
+    def test_espay_dana_hp_terisolasi(self):
+        lines = [
+            "2026-07-13 TRANSFER KE ESPAY DEBIT INDONESIA KOE 8810085849792965 "
+            "Dana-DNID FICXX Db. 60.000,00 1.000.000,00",
+        ]
+        rows = parse_bni_lines(lines)
+        self.assertEqual(rows[0]["raw"]["hp"], "085849792965")
+
+    def test_airpay_shopeepay_hp_terisolasi(self):
+        lines = [
+            "2026-07-12 TRANSFER KE AIRPAY INTERNATIONAL INDONESIA 8807085893088002 "
+            "IRSXX Db. 150.000,00 2.855.863,00",
+        ]
+        rows = parse_bni_lines(lines)
+        self.assertEqual(rows[0]["raw"]["hp"], "085893088002")
+
+    def test_echannel_non_wallet_tanpa_hp(self):
+        lines = [
+            "2026-07-13 TRF/PAY/TOP-UP Db. 900.000,00 3.882.363,00",
+            "ECHANNEL KARTU",
+            "0000000000000000 BIZID",
+            "O0217812687 901113275828",
+        ]
+        rows = parse_bni_lines(lines)
+        self.assertNotIn("hp", rows[0]["raw"])

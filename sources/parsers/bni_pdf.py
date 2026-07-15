@@ -37,6 +37,13 @@ def extract_bni_name(text):
     return re.sub(r"\s+", " ", " ".join(toks)).strip(" -.,:/)(")
 
 
+# VA e-wallet BNI menempelkan prefiks 4-digit ke nomor HP tujuan
+# (ESPAY/DANA '8810' + 08xx..., AIRPAY/ShopeePay '8807' + 08xx... = 16 digit).
+# Scan deret digit engine (9-15) tak bisa melihat HP di dalam deret 16 digit,
+# jadi parser memisahkannya agar anchor identitas HP tetap hidup di raw.
+BNI_VA_HP_RE = re.compile(r"\b88\d{2}(0\d{11})\b")
+BNI_WALLET_TOKEN_RE = re.compile(r"ESPAY|AIRPAY", re.IGNORECASE)
+
 # --- Fee (dikecualikan dari total WD & matching) ---
 BNI_FEE_RE = re.compile(r"BY\s+TRX|BIAYA\s+ADMIN", re.IGNORECASE)
 
@@ -107,6 +114,10 @@ def parse_bni_lines(lines):
             "raw": {"tanggal": t["date"], "uraian": full_desc, "tipe": tipe,
                     "nominal": str(amount), "saldo": str(saldo_val)},
         }
+        if BNI_WALLET_TOKEN_RE.search(full_desc):
+            hp_m = BNI_VA_HP_RE.search(full_desc)
+            if hp_m:
+                row["raw"]["hp"] = hp_m.group(1)
         row["row_hash"] = row_hash("bni", [t["date"], amount, tipe, saldo_val, idx])
         out.append(row)
     return out
