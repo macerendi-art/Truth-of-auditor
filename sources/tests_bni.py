@@ -34,6 +34,16 @@ class ExtractBNINameTests(SimpleTestCase):
     def test_kosong_tetap_kosong(self):
         self.assertEqual(extract_bni_name(""), "")
 
+    def test_transfer_ke_abadi_nama_asli_tak_termakan(self):
+        # 'aba' hanya prefiks VA LinkAja kalau diikuti angka (aba<digit>...);
+        # nama asli berawalan ABA (mis. ABADI) tidak boleh ikut terpotong.
+        self.assertEqual(extract_bni_name("TRANSFER KE ABADI SANTOSO"), "ABADI SANTOSO")
+
+    def test_landmark_ib_tidak_dikira_nama(self):
+        # LANDMARK + IB = token struktural/junk echannel, bukan nama orang.
+        s = "TRF/PAY/TOP-UP ECHANNEL KARTU 5264221819810591 46.46.46.46 LANDMARK IB"
+        self.assertEqual(extract_bni_name(s), "")
+
 
 # Baris nyata (disederhanakan) dari 13_07_2026_WD_BNI_MARULLOH.pdf.
 SAMPLE_LINES = [
@@ -162,3 +172,47 @@ class VAHpExtractionTests(SimpleTestCase):
         ]
         rows = parse_bni_lines(lines)
         self.assertNotIn("hp", rows[0]["raw"])
+
+    def test_espay_hp_13_digit_terisolasi(self):
+        # HP 13 digit (0 + 12) menempel di belakang VA '8810' -> deret 17 digit,
+        # tetap harus terisolasi utuh (bukan cuma 12 digit pertama/terpotong).
+        lines = [
+            "2026-07-13 TRANSFER KE ESPAY DEBIT INDONESIA KOE 88100895322037456 "
+            "Dana-DNID BUDXX Db. 75.000,00 500.000,00",
+        ]
+        rows = parse_bni_lines(lines)
+        self.assertEqual(rows[0]["raw"]["hp"], "0895322037456")
+
+
+class RowHashOverlapTests(SimpleTestCase):
+    """row_hash BNI harus dedup multiset per kunci (tanggal, nominal, tipe,
+    saldo) -- bukan indeks posisi global -- agar transaksi yang sama tetap
+    berhash sama di dua export tumpang-tindih (rolling export), sambil tetap
+    membedakan baris kembar (osilasi Db/Cr/Db) via urutan kemunculannya."""
+
+    def test_row_hash_stabil_lintas_export_tumpang_tindih(self):
+        base_hashes = {r["row_hash"] for r in parse_bni_lines(SAMPLE_LINES)}
+        # sisipkan satu transaksi lain tepat setelah baris header -> semua
+        # transaksi asli bergeser posisi globalnya, hash TIDAK boleh berubah.
+        shifted = (
+            SAMPLE_LINES[:1]
+            + ["2026-07-13 TRANSFER KE BUDI Db. 10.000,00 9.999.999,00"]
+            + SAMPLE_LINES[1:]
+        )
+        shifted_hashes = {r["row_hash"] for r in parse_bni_lines(shifted)}
+        self.assertTrue(base_hashes.issubset(shifted_hashes))
+
+    def test_row_hash_unik_saat_transaksi_identik_berulang(self):
+        # dua baris dengan tanggal/nominal/tipe/saldo persis sama (osilasi
+        # Db X -> Cr X -> Db X yang kembali ke saldo sama juga masuk kasus ini)
+        # tetap harus dapat hash berbeda, dan deterministik lintas re-parse.
+        lines = [
+            "2026-07-13 TRANSFER KE ANI Db. 50.000,00 1.000.000,00",
+            "2026-07-13 TRANSFER KE ANI Db. 50.000,00 1.000.000,00",
+        ]
+        rows = parse_bni_lines(lines)
+        self.assertEqual(len(rows), 2)
+        h0, h1 = rows[0]["row_hash"], rows[1]["row_hash"]
+        self.assertNotEqual(h0, h1)
+        again = [r["row_hash"] for r in parse_bni_lines(lines)]
+        self.assertEqual([h0, h1], again)

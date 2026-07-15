@@ -16,11 +16,14 @@ from .base import BaseParser, parse_decimal, parse_dt, row_hash
 # Gelar di depan nama transfer bank.
 BNI_HONORIFIC_RE = re.compile(r"\b(?:Bpk|Bapak|Bp|Ibu|Sdr|Sdri)\.?\s+", re.IGNORECASE)
 # Token struktural (bukan nama). Frasa panjang dulu.
+# 'aba' butuh angka langsung setelahnya (target: prefiks VA LinkAja
+# 'aba<digit...>', mis. aba8513014490053) -- kalau tidak, nama asli
+# berawalan ABA (ABADI, ABAS, dst.) ikut terpotong.
 BNI_STRUCT_RE = re.compile(
     r"TRANSFER\s+KE|TRF/PAY/TOP-UP|ECHANNEL\s+KARTU|BIZID|"
     r"ESPAY\s+DEBIT\s+INDONESIA|AIRPAY\s+INTERNATIONAL\s+INDONESIA|"
     r"Dana-DNID|LINKAJA|GOPAY|BY\s+TRX|BI-?FAST|BIAYA\s+ADMIN|ATM\s+BERSAMA|"
-    r"LANDMARK|\bKOE\b|\bNO\b|\baba\w*",
+    r"LANDMARK|\bIB\b|\bKOE\b|\bNO\b|\baba\d\w*",
     re.IGNORECASE,
 )
 
@@ -38,10 +41,13 @@ def extract_bni_name(text):
 
 
 # VA e-wallet BNI menempelkan prefiks 4-digit ke nomor HP tujuan
-# (ESPAY/DANA '8810' + 08xx..., AIRPAY/ShopeePay '8807' + 08xx... = 16 digit).
-# Scan deret digit engine (9-15) tak bisa melihat HP di dalam deret 16 digit,
-# jadi parser memisahkannya agar anchor identitas HP tetap hidup di raw.
-BNI_VA_HP_RE = re.compile(r"\b88\d{2}(0\d{11})\b")
+# (ESPAY/DANA '8810' + 08xx..., AIRPAY/ShopeePay '8807' + 08xx...).
+# HP Indonesia 12-13 digit (0 + 11-12 digit) menyatu jadi deret 16-17 digit,
+# di luar jangkauan scan digit generik engine (9-15) -- jadi parser
+# memisahkannya agar anchor identitas HP tetap hidup di raw. HP 10-11 digit
+# (0 + 9-10) hanya menghasilkan deret 14-15 digit yang sudah tertangkap
+# native oleh scan engine, jadi tak perlu ditangani khusus di sini.
+BNI_VA_HP_RE = re.compile(r"\b88\d{2}(0\d{11,12})\b")
 BNI_WALLET_TOKEN_RE = re.compile(r"ESPAY|AIRPAY", re.IGNORECASE)
 
 # --- Fee (dikecualikan dari total WD & matching) ---
@@ -83,7 +89,8 @@ def parse_bni_lines(lines):
             cur["cont"].append(s)
 
     out = []
-    for idx, t in enumerate(txns):
+    occ_counter = {}   # (tanggal, nominal, tipe, saldo) -> jumlah kemunculan sejauh ini
+    for t in txns:
         rm = _ROW_RE.match(t["rest"])
         if not rm:
             continue
@@ -118,7 +125,18 @@ def parse_bni_lines(lines):
             hp_m = BNI_VA_HP_RE.search(full_desc)
             if hp_m:
                 row["raw"]["hp"] = hp_m.group(1)
-        row["row_hash"] = row_hash("bni", [t["date"], amount, tipe, saldo_val, idx])
+        # Indeks kemunculan ke-N dari tuple (tanggal, nominal, tipe, saldo) yang
+        # identik, dihitung urut dalam FILE INI (bukan posisi baris global).
+        # Ini stabil lintas export tumpang-tindih (rolling export BNI adalah
+        # norma): transaksi yang sama pasti jadi kemunculan ke-N yang sama di
+        # export manapun ia muncul, walau baris lain disisipkan/dihapus di
+        # sekitarnya. Baris kembar (mis. osilasi Db X -> Cr X -> Db X pada
+        # hari yang sama) memang tak terbedakan secara identitas -- dedup
+        # multiset ini hanya menjamin HITUNGANNYA benar, bukan urutannya.
+        key = (t["date"], str(amount), tipe, str(saldo_val))
+        occ = occ_counter.get(key, 0)
+        occ_counter[key] = occ + 1
+        row["row_hash"] = row_hash("bni", [t["date"], amount, tipe, saldo_val, occ])
         out.append(row)
     return out
 
