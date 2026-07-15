@@ -46,6 +46,24 @@ def _csv_text(path, n=6):
         return ""
 
 
+def _pdf_text(path, max_chars=1500):
+    """Teks halaman-1 PDF (lower-case) untuk sniff tanda-tangan. '' bila gagal."""
+    try:
+        import pdfplumber
+        with pdfplumber.open(path) as pdf:
+            return (pdf.pages[0].extract_text() or "")[:max_chars].lower()
+    except Exception:
+        return ""
+
+
+def _pdf_key(text):
+    """Rute PDF: mutasi BNI 'HISTORI TRANSAKSI' -> bni_pdf; selain itu bca_pdf."""
+    t = (text or "").lower()
+    if "histori transaksi" in t and ("uraian transaksi" in t or "saldo akhir" in t):
+        return "bni_pdf"
+    return "bca_pdf"
+
+
 def _has(toks, needle):
     return any(needle in t for t in toks)
 
@@ -97,7 +115,8 @@ def detect_source(path, filename=""):
         if "whitelabel transaction id" in c:
             add("qhoki", 0.95)  # sebagian brand ekspor laporan QRIS-HOKI sbg CSV
     elif ext == ".pdf":
-        add("bca_pdf", 0.75)
+        key = _pdf_key(_pdf_text(path))
+        add(key, 0.9 if key == "bni_pdf" else 0.75)
 
     ranked = sorted(scored.items(), key=lambda kv: kv[1], reverse=True)
     return [{"parser_key": k, "confidence": c} for k, c in ranked]

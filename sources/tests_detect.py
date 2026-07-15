@@ -4,7 +4,7 @@ import tempfile
 import openpyxl
 from django.test import SimpleTestCase
 
-from sources.detect import detect_source
+from sources.detect import detect_source, _pdf_key
 
 
 def _xlsx(rows):
@@ -146,3 +146,17 @@ class DetectTests(SimpleTestCase):
     def test_unknown_returns_empty(self):
         p = _xlsx([["Foo", "Bar"]])
         self.assertEqual(detect_source(p, "x.xlsx"), [])
+
+
+class PDFKeyRoutingTests(SimpleTestCase):
+    def test_bni_dari_teks(self):
+        txt = ("HISTORI TRANSAKSI\nRekening: TAPLUS DIGITAL\n"
+               "Tanggal Uraian Transaksi Tipe Nominal Saldo Akhir")
+        self.assertEqual(_pdf_key(txt), "bni_pdf")
+
+    def test_bca_default(self):
+        txt = "MUTASI REKENING\nNO. REKENING : 712-6201-591\nNAMA : HENDI"
+        self.assertEqual(_pdf_key(txt), "bca_pdf")
+
+    def test_teks_kosong_default_bca(self):
+        self.assertEqual(_pdf_key(""), "bca_pdf")
