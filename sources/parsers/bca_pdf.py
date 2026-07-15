@@ -27,6 +27,51 @@ def _is_skip(s):
 
 OWNER_RE = re.compile(r"^NAMA\s*:\s*(.+?)\s*$")
 
+# Transfer antar-bank (bi-fast/online) di BCA = kanal SWITCHING, dipecah jadi
+# baris 'TRF <nama> <kode> MYBCA' bernilai NET (bruto - fee) + baris fee
+# 'BIAYA TXN ... MYBCA' Rp6.500. Panel mencatat BRUTO -> dua baris digabung.
+# Nama bisa menempel ke kode 3-digit ('...ON535'), jadi non-greedy s/d kode.
+SWITCHING_TRF_RE = re.compile(r"\bTRF\s+(.+?)\s*\d{3}\s+MYBCA\b")
+SWITCHING_FEE = Decimal("6500")
+
+
+def _merge_switching(rows):
+    """Gabung pasangan SWITCHING BCA jadi satu WD bruto.
+
+    Baris fee 'BIAYA TXN ... MYBCA' (admin, -6.500) selalu tepat SEBELUM baris
+    'TRF <nama> <kode> MYBCA' (wd, NET). Gabungkan: money_delta = -(net+fee),
+    fee dicatat, nama diekstrak dari baris TRF (extract_bca_name gagal di format
+    ini karena nama ada SEBELUM nominal). Hasil cocok pass-1 ke nominal panel
+    (bruto). Baris non-SWITCHING lolos apa adanya."""
+    out, i, n = [], 0, len(rows)
+    while i < n:
+        r = rows[i]
+        nxt = rows[i + 1] if i + 1 < n else None
+        if (
+            r["jenis"] == "admin"
+            and "BIAYA TXN" in r["description"]
+            and "MYBCA" in r["description"]
+            and r["money_delta"] == -SWITCHING_FEE
+            and nxt is not None
+            and nxt["jenis"] == "wd"
+        ):
+            m = SWITCHING_TRF_RE.search(nxt["description"])
+            if m:
+                gross = nxt["amount"] + SWITCHING_FEE
+                name = re.sub(r"\s+", " ", m.group(1)).strip(" -.,:/")
+                out.append({
+                    **nxt,
+                    "amount": gross,
+                    "money_delta": -gross,
+                    "fee": SWITCHING_FEE,
+                    "counterparty": name or nxt["counterparty"],
+                })
+                i += 2
+                continue
+        out.append(r)
+        i += 1
+    return out
+
 
 def extract_pdf_owner(lines):
     """Pemilik rekening dari header statement ('NAMA : HENDI'). '' bila absen.
@@ -102,4 +147,4 @@ class BCAPDFParser(BaseParser):
                 "bca_pdf", [t["date"], amount, am.group(2), desc[:40], idx]
             )
             out.append(row)
-        return out
+        return _merge_switching(out)
