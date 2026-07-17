@@ -46,8 +46,11 @@ Header **dua tingkat** (baris 1 grup, baris 2 sub-kolom), data mulai baris 3, 16
 - `Ticket` = tiket panel `W…`. `Beneficiary Bank` bisa bank ATAU e-wallet
   (SEABANK/DANA/BCA/BRI/GOPAY/BSI/BNI/MANDIRI pada sampel).
 - `Fee` flat 5000/trx. Sampel: 17 baris, semua `Status=approved`+`Transfer=success`.
-- Catatan teknis: `read_xlsx_rows` (reader tahan-styles) menghasilkan grid rusak untuk
-  file ini; **openpyxl langsung bekerja normal** → parser WD pakai openpyxl.
+- Catatan teknis: `read_xlsx_rows` mengembalikan dict per baris dengan SATU baris
+  header — tidak bisa mewakili header dua-tingkat ini (sub-kolom berlabel kosong di
+  baris 1 ikut terbuang). Parser WD membaca grid mentah (helper baru
+  `read_xlsx_grid` di `sources/parsers/base.py`, openpyxl + fallback reader mentah)
+  lalu flatten baris 1+2 sendiri.
 
 ## Desain
 
