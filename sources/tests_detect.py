@@ -160,3 +160,47 @@ class PDFKeyRoutingTests(SimpleTestCase):
 
     def test_teks_kosong_default_bca(self):
         self.assertEqual(_pdf_key(""), "bca_pdf")
+
+
+class DetectRPayXlsxTests(SimpleTestCase):
+    """RafflesPay varian XLSX (BBS) — dulu nyasar ke nxpay/qrflyer (bug nyata 16-07)."""
+
+    DP_HEADER = ["Website", "Date", "Ticket Number", "Player", "Payment Type",
+                 "Account Title", "Status", "Payment Gateway", "RRN",
+                 "Amount (IDR)", "Amount (Chip)", "Player Fee", "Agent Fee",
+                 "Admin Fee", "Player Nett Amount", "Agent Nett Amount",
+                 "Ticket Status", "Promotion"]
+    WD_TOP = ["ID", "Website", "Date", "Ticket", "Player", "Source of Funds",
+              "Beneficiary", "", "", "Amount", "", "", "Status", "", "", ""]
+    WD_SUB = ["", "", "", "", "", "", "Bank", "Name", "Number", "Amount",
+              "Disbursed Amount", "Fee", "Status", "Approve", "Reject", "Transfer"]
+
+    def test_dp_rpay_xlsx_menang_atas_nxpay(self):
+        # Nama file mengandung QRIS -> dulu qrflyer 0.85 & header mirip nxpay 0.90.
+        path = _xlsx([self.DP_HEADER, ["x"] * len(self.DP_HEADER)])
+        try:
+            hasil = detect_source(path, "16_07_2026_BBS_DP_QRIS_RPAY_CSV.xlsx")
+        finally:
+            os.remove(path)
+        self.assertEqual(hasil[0]["parser_key"], "rpay_xlsx")
+        self.assertGreaterEqual(hasil[0]["confidence"], 0.95)
+        self.assertNotIn("nxpay", [d["parser_key"] for d in hasil])
+
+    def test_wd_rpay_xlsx_menang_atas_qrflyer(self):
+        path = _xlsx([self.WD_TOP, self.WD_SUB, ["x"] * len(self.WD_TOP)])
+        try:
+            hasil = detect_source(path, "16_07_2026_BBS_WD_QRIS_RPAY.xlsx")
+        finally:
+            os.remove(path)
+        self.assertEqual(hasil[0]["parser_key"], "rpay_wd_xlsx")
+        self.assertGreaterEqual(hasil[0]["confidence"], 0.95)
+
+    def test_nxpay_asli_tetap_terdeteksi(self):
+        # Non-regresi: header NXPay (tanpa 'Payment Gateway') tetap nxpay.
+        path = _xlsx([["judul report"], ["Ticket Number", "Username", "Amount",
+                      "Date", "Admin Fee", "Account Title"], ["t", "u", 1, "d", 0, "a"]])
+        try:
+            hasil = detect_source(path, "nxpay.xlsx")
+        finally:
+            os.remove(path)
+        self.assertEqual(hasil[0]["parser_key"], "nxpay")

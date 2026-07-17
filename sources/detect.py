@@ -81,8 +81,13 @@ def detect_source(path, filename=""):
         t = _xlsx_tokens(path)
         if _has(t, "ticket number") and _has(t, "user name") and (_has(t, "deposit amount") or _has(t, "withdrawal amount")):
             add("panel", 0.95)
-        if _has(t, "ticket number") and (_has(t, "admin fee") or _has(t, "account title")) and not _has(t, "deposit amount"):
+        if _has(t, "ticket number") and (_has(t, "admin fee") or _has(t, "account title")) \
+                and not _has(t, "deposit amount") and not _has(t, "payment gateway"):
             add("nxpay", 0.90)
+        if _has(t, "payment gateway") and _has(t, "rrn") and _has(t, "amount (chip)"):
+            add("rpay_xlsx", 0.95)  # RafflesPay DP varian XLSX (BBS)
+        if _has(t, "source of funds") and _has(t, "disbursed amount") and _has(t, "beneficiary"):
+            add("rpay_wd_xlsx", 0.95)  # RafflesPay WD XLSX dua-tingkat (BBS)
         if _has(t, "kategori") and (_has(t, "credit awal") or _has(t, "credit akhir")):
             add("bracket", 0.95)
         if _has(t, "client reference") and (_has(t, "settlement time") or _has(t, "txn id")):
