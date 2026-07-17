@@ -239,3 +239,53 @@ class RPayWDGatewayParser(BaseParser):
                 "rpay_wd", [str(r.get("UUID", "") or "").strip(), ticket])
             out.append(row)
         return out
+
+
+class RPayDPXlsxParser(BaseParser):
+    """Gateway RafflesPay sisi DP, varian XLSX (brand panel-Nexus mis. BBS).
+
+    Beda dari `rpay` (CSV ber-`Customer Username`/`UUID`): varian ini laporan
+    "Deposit QRIS" panel ber-gateway RafflesPay yang membawa `Ticket Number`
+    (D...) == panel DP -> pass 0 ticket-join engine. `RRN` DISIMPAN di raw
+    saja, TIDAK di `reference`: ada duplikat nyata (9 dari 1.233, sampel BBS
+    16-07-2026) dan aturan blocked engine mengasingkan reference asing.
+    `Amount (IDR)` sudah rupiah penuh (`Amount (Chip)` = ribuan versi panel —
+    JANGAN dipakai). Baris `Status=Success` diambil TERMASUK yang
+    `Ticket Status=failed`: uang masuk tanpa kredit panel harus muncul sebagai
+    "Tidak Ada di Panel", bukan hilang di parser. Selalu DP: `flow` diabaikan.
+    """
+
+    source_key = "gateway"
+
+    def parse(self, path, flow=""):
+        _, rows = read_xlsx_rows(path)
+        out = []
+        for r in rows:
+            ticket = str(r.get("Ticket Number", "") or "").strip()
+            status = str(r.get("Status", "") or "").strip().lower()
+            if not ticket or status != "success":
+                continue
+            amt = abs(parse_decimal(r.get("Amount (IDR)")))
+            occurred = parse_dt(r.get("Date"), dayfirst=True)
+            rrn = str(r.get("RRN", "") or "").strip()
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date() if occurred else None,
+                "jenis": "depo",
+                "amount": amt,
+                "credit_delta": Decimal("0"),
+                "money_delta": amt,
+                "fee": parse_decimal(r.get("Admin Fee")),
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": ticket,
+                "username": str(r.get("Player", "") or "").strip(),
+                "reference": "",
+                "counterparty": "",
+                "description": f"RPAY QR {rrn}".strip(),
+                "raw": {k: ("" if v is None else str(v)) for k, v in r.items() if k},
+            }
+            row["row_hash"] = row_hash("rpay_xlsx", [ticket, rrn])
+            out.append(row)
+        return out

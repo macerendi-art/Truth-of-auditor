@@ -24,6 +24,7 @@ from .parsers.gateways import (
     QHokiParser,
     RPayGatewayParser,
     RPayWDGatewayParser,
+    RPayDPXlsxParser,
 )
 from .parsers.panel import PanelParser
 
@@ -44,6 +45,7 @@ PARSERS = {
     "cor_qris_wd_gateway": CORQRISWDGatewayParser,
     "rpay": RPayGatewayParser,
     "rpay_wd": RPayWDGatewayParser,
+    "rpay_xlsx": RPayDPXlsxParser,
     "qhoki": QHokiParser,
 }
 
