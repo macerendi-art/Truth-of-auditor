@@ -133,6 +133,23 @@ def read_xlsx_rows(path, header_row=1, sheet=None):
     return headers, (out or [])
 
 
+def read_xlsx_grid(path):
+    """Baca xlsx -> list-of-list mentah (SEMUA baris, tanpa interpretasi header).
+    Untuk format ber-header dua-tingkat yang tak bisa diwakili `read_xlsx_rows`.
+    Fallback ke reader mentah bila openpyxl gagal / kebaca kosong."""
+    grid = None
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        ws = wb[wb.sheetnames[0]]
+        grid = [list(r) for r in ws.iter_rows(values_only=True)]
+        wb.close()
+    except Exception:
+        grid = None
+    if not grid:
+        grid = _raw_xlsx_rows(path)
+    return grid or []
+
+
 def parse_decimal(value, number_format="intl"):
     """Parse angka (str/float/int) -> Decimal. Mendukung format intl & ID."""
     if value is None or value == "":
