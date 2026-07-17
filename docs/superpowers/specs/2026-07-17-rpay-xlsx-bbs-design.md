@@ -125,3 +125,52 @@ Konvensi repo: satu class per format. Parser CSV lama (`rpay`, `rpay_wd`) TIDAK 
   nama pada header ter-flatten, bukan posisi tetap; kolom hilang → baris dilewati
   (bukan crash), konsisten parser lain.
 - **File WD kecil (17 baris)** — kalibrasi tetap bermakna karena anchor exact ticket.
+
+## Hasil kalibrasi (16.zip)
+
+Dijalankan 2026-07-17 di DB scratch (`DATABASE_URL=sqlite:////tmp/bbs-rpay-cal.sqlite3`),
+`validate_brands --dir <16.zip extracted> --toko bbs --flow-from-name`, folder nyata berisi
+14 file (16-07-2026, brand BBS).
+
+**Deteksi** — kedua file RPAY XLSX terdeteksi benar sebagai kandidat #1, mengalahkan sinyal
+lama yang dulu salah tangkap (lihat "Masalah" di atas):
+- `16_07_2026_BBS_DP_QRIS_RPAY_CSV.xlsx` → `rpay_xlsx` 0.95 (vs `qrflyer` 0.85)
+- `16_07_2026_BBS_WD_QRIS_RPAY.xlsx` → `rpay_wd_xlsx` 0.95 (vs `qrflyer` 0.85)
+
+**DP (`rpay_xlsx`)** — file berisi 1.233 baris data, semua `Status=Success`; 1.230 baris
+`Ticket Status=approved` PUNYA `Ticket Number`, 3 baris `Ticket Status=failed` di sampel ini
+ternyata TIDAK punya `Ticket Number` sama sekali di sumbernya (field kosong, dikonfirmasi baca
+mentah) — parser mensyaratkan ticket non-kosong (satu-satunya anchor DP), jadi 3 baris itu
+dilewati (bukan bug: tanpa ticket, baris itu tak punya anchor apa pun untuk dimunculkan sebagai
+"Tidak Ada di Panel" secara berarti). Hasil:
+- Ter-ingest: **1.230 / 1.233** baris (99.8% dari file; 3 baris tanpa ticket dilewati).
+- Match terhadap panel DP: **1.190 cocok** (`ticket`, exact) + **38 perlu_tinjau**
+  (`ticket_amount` — ticket sama, selisih nominal kecil, mis. 50.100 vs 50.000; nominal gateway
+  tampaknya kadang menyertakan komponen fee) + **2 tidak_cocok** (`no_panel` — ticket
+  `D2555421`/`D2555422`, dua transaksi terakhir hari itu 23:58–23:59, genuinely tak ada jejak di
+  panel; dicek: tak ada baris lain dengan ticket sama di DB).
+  **Match-rate: 1.190/1.230 (96,7%) exact, 1.228/1.230 (99,8%) teridentifikasi via ticket
+  (cocok+tinjau).**
+
+**WD (`rpay_wd_xlsx`)** — file berisi 17 baris, semua `Status=approved` + `Transfer=success`.
+- Ter-ingest: **17 / 17** baris (100%).
+- Match terhadap panel WD: **17 cocok** (`ticket`, exact) — **17/17 (100%)**.
+
+**Idempotensi** — `validate_brands` dijalankan ulang persis sama pada DB scratch yang sama:
+kedua file RPAY (dan seluruh file lain di folder) melaporkan **0 baris baru**; `Upload` run
+kedua mencatat `rows_parsed=0, rows_duplicate=1230` (DP) dan `rows_parsed=0, rows_duplicate=17`
+(WD) — persis sama dengan jumlah run pertama. Dedup `row_hash` bekerja seperti didesain.
+
+**File lain di folder (informasional, di luar lingkup paket ini)**:
+- Panel DP 1.536, Panel WD 295, Bracket FR 1.974, NXPay DP 302, NXPay WD 20, BRI (DP) 21,
+  BRI (PG) 161, BCA PDF (T3) 3, BCA PDF (WD) 153 + 170 baris — semua terdeteksi & ter-ingest
+  normal.
+- Kedua file Mandiri terenkripsi (`..._MANDIRI_MUHAMAD_MIPTAH_02111999.xlsx`,
+  `..._MANDIRI_ARDIANTO_07032003.xlsx`) GAGAL ingest via harness — `validate_brands` tidak
+  mengirim password, jadi keduanya dilewati dengan pesan "File terenkripsi — butuh password";
+  harness tidak berhenti (exception ditangkap per-file). Ini di luar lingkup paket G.
+
+**Kesimpulan:** tidak ada regresi/defek nyata — nominal, arah uang, dan anchor ticket semua
+sesuai desain; satu-satunya penyimpangan dari asumsi desain awal (3 baris DP diharapkan ikut
+meski `Ticket Status=failed`) ternyata tak berlaku karena baris itu memang tak punya
+`Ticket Number` di sumber data, bukan soal filter parser.
