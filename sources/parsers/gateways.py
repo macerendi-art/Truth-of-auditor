@@ -2,7 +2,7 @@
 import csv
 from decimal import Decimal
 
-from .base import BaseParser, parse_decimal, parse_dt, read_xlsx_rows, row_hash
+from .base import BaseParser, parse_decimal, parse_dt, read_xlsx_grid, read_xlsx_rows, row_hash
 
 
 def _money(amount, flow):
@@ -287,5 +287,67 @@ class RPayDPXlsxParser(BaseParser):
                 "raw": {k: ("" if v is None else str(v)) for k, v in r.items() if k},
             }
             row["row_hash"] = row_hash("rpay_xlsx", [ticket, rrn])
+            out.append(row)
+        return out
+
+
+class RPayWDXlsxParser(BaseParser):
+    """Gateway RafflesPay sisi WD, varian XLSX header dua-tingkat (brand BBS).
+
+    Beda dari `rpay_wd` (CSV ber-`External ID`/`Transfer Status`): header grup
+    di baris 1 (Beneficiary / Amount / Status) + sub-kolom di baris 2 (Bank,
+    Name, Number / Amount, Disbursed Amount, Fee / Status, Approve, Reject,
+    Transfer), data mulai baris 3 -> di-flatten manual (sub-kolom menang bila
+    terisi). Kunci pasti = `Ticket` (W...) == `Ticket Number` panel WD -> pass
+    0. Hanya baris `Transfer=success` (uang benar-benar keluar). `Disbursed
+    Amount` = uang riil keluar. `Beneficiary Number` (nomor rekening/e-wallet
+    tujuan) tersimpan di raw. Selalu WD: `flow` diabaikan.
+    """
+
+    source_key = "gateway"
+
+    def parse(self, path, flow=""):
+        grid = read_xlsx_grid(path)
+        if len(grid) < 3:
+            return []
+        top, sub = grid[0], grid[1]
+        width = max(len(top), len(sub))
+
+        def _cell(row, i):
+            v = row[i] if i < len(row) else None
+            return str(v).strip() if v is not None else ""
+
+        headers = [(_cell(sub, i) or _cell(top, i)) for i in range(width)]
+        out = []
+        for raw_row in grid[2:]:
+            r = {h: c for h, c in zip(headers, raw_row) if h}
+            ticket = str(r.get("Ticket", "") or "").strip()
+            transfer = str(r.get("Transfer", "") or "").strip().lower()
+            if not ticket or transfer != "success":
+                continue
+            amt = abs(parse_decimal(r.get("Disbursed Amount")))
+            occurred = parse_dt(r.get("Date"), dayfirst=True)
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date() if occurred else None,
+                "jenis": "wd",
+                "amount": amt,
+                "credit_delta": Decimal("0"),
+                "money_delta": -amt,
+                "fee": parse_decimal(r.get("Fee")),
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": ticket,
+                "username": str(r.get("Player", "") or "").strip(),
+                "reference": "",
+                "counterparty": str(r.get("Name", "") or "").strip(),
+                "description": f"RPAY WD {r.get('Bank', '')}".strip(),
+                "raw": {k: ("" if v is None else str(v)) for k, v in r.items() if k},
+            }
+            # ID RafflesPay unik per baris; + ticket cadangan. TANPA nominal
+            # supaya idempotensi tak goyah oleh variasi format angka.
+            row["row_hash"] = row_hash(
+                "rpay_wd_xlsx", [str(r.get("ID", "") or "").strip(), ticket])
             out.append(row)
         return out

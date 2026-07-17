@@ -25,6 +25,7 @@ from .parsers.gateways import (
     RPayGatewayParser,
     RPayWDGatewayParser,
     RPayDPXlsxParser,
+    RPayWDXlsxParser,
 )
 from .parsers.panel import PanelParser
 
@@ -46,6 +47,7 @@ PARSERS = {
     "rpay": RPayGatewayParser,
     "rpay_wd": RPayWDGatewayParser,
     "rpay_xlsx": RPayDPXlsxParser,
+    "rpay_wd_xlsx": RPayWDXlsxParser,
     "qhoki": QHokiParser,
 }
 

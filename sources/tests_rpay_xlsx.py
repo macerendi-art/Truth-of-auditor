@@ -90,3 +90,60 @@ class RPayDPXlsxTests(SimpleTestCase):
         c = self._parse([_dp_row(ticket="D2553374")])[0]["row_hash"]
         self.assertEqual(a, b)
         self.assertNotEqual(a, c)
+
+
+WD_TOP = ["ID", "Website", "Date", "Ticket", "Player", "Source of Funds",
+          "Beneficiary", "", "", "Amount", "", "", "Status", "", "", ""]
+WD_SUB = ["", "", "", "", "", "", "Bank", "Name", "Number", "Amount",
+          "Disbursed Amount", "Fee", "Status", "Approve", "Reject", "Transfer"]
+
+
+def _wd_row(ticket="W2553796", transfer="success", bank="DANA",
+            number="81311189314", amount=1950000.0, disbursed=1950000.0):
+    return [6001917, "BOBASLOT77", "2026-07-16 04:45:16", ticket, "Rio171",
+            "[BOBASLOT77] [RafflesPay] [577068433908]", bank, "AJRIAN ALANSYAH",
+            number, amount, disbursed, 5000.0, "approved", "success", "", transfer]
+
+
+class RPayWDXlsxTests(SimpleTestCase):
+    def _parse(self, rows, flow=""):
+        from sources.parsers.gateways import RPayWDXlsxParser
+        path = _xlsx([WD_TOP, WD_SUB] + rows)
+        try:
+            return RPayWDXlsxParser().parse(path, flow=flow)
+        finally:
+            os.remove(path)
+
+    def test_wd_sukses_field_lengkap(self):
+        rows = self._parse([_wd_row()])
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["jenis"], "wd")
+        self.assertEqual(str(r["amount"]), "1950000")       # Disbursed, rupiah penuh
+        self.assertEqual(str(r["money_delta"]), "-1950000")  # WD = uang keluar
+        self.assertEqual(str(r["credit_delta"]), "0")
+        self.assertEqual(r["ticket_no"], "W2553796")         # anchor pass-0
+        self.assertEqual(r["username"], "Rio171")
+        self.assertEqual(r["counterparty"], "AJRIAN ALANSYAH")
+        self.assertEqual(str(r["fee"]), "5000")
+        self.assertEqual(r["reference"], "")
+        self.assertEqual(r["raw"]["Number"], "81311189314")  # nomor tujuan utk paket B
+        self.assertEqual(r["occurred_at"].hour, 4)
+
+    def test_disbursed_dipakai_bukan_amount(self):
+        rows = self._parse([_wd_row(amount=2000000.0, disbursed=1950000.0)])
+        self.assertEqual(str(rows[0]["amount"]), "1950000")
+
+    def test_transfer_bukan_success_dilewati(self):
+        rows = self._parse([_wd_row(transfer="")])
+        self.assertEqual(rows, [])
+
+    def test_flow_dp_diabaikan_tetap_wd(self):
+        rows = self._parse([_wd_row()], flow="dp")
+        self.assertEqual(rows[0]["jenis"], "wd")
+        self.assertEqual(str(rows[0]["money_delta"]), "-1950000")
+
+    def test_row_hash_dari_id_dan_ticket_tanpa_nominal(self):
+        a = self._parse([_wd_row(amount=1950000.0)])[0]["row_hash"]
+        b = self._parse([_wd_row(amount=1950000.49)])[0]["row_hash"]  # nominal beda
+        self.assertEqual(a, b)  # idempoten thd variasi format angka
