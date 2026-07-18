@@ -1378,7 +1378,10 @@ def fr_koreksi_simpan(request):
             nilai = Decimal(mentah.replace(".", "").replace(",", "."))
         except InvalidOperation:
             return HttpResponseBadRequest("nilai tidak valid")
-        if not nilai.is_finite() or abs(nilai) >= Decimal("1e16"):
+        if not nilai.is_finite():
+            return HttpResponseBadRequest("nilai tidak valid")
+        nilai = nilai.quantize(Decimal("0.01"))
+        if abs(nilai) > Decimal("9999999999999999.99"):
             return HttpResponseBadRequest("nilai tidak valid")
         alasan = request.POST.get("alasan") or ""
         if alasan and alasan not in dict(FRKoreksi.ALASAN_KOREKSI):
@@ -1397,6 +1400,10 @@ def fr_koreksi_simpan(request):
     html = render_to_string("web/_fr_control_table.html",
                             {"data": data, "tanggal": tanggal}, request=request)
     html += '<div id="koreksiPop" hx-swap-oob="innerHTML"></div>'
+    gerak = render_to_string("web/_fr_gerak_table.html",
+                             {"data": data, "tanggal": tanggal}, request=request)
+    gerak = gerak.replace('id="fr-gerak"', 'id="fr-gerak" hx-swap-oob="outerHTML"', 1)
+    html += gerak
     return HttpResponse(html)
 
 

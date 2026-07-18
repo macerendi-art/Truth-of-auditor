@@ -188,7 +188,7 @@ class KoreksiViewTests(_BracketKoreksiData):
         self.assertEqual(k.dibuat_oleh, self.user)
         log = AuditLog.objects.filter(aksi="fr_koreksi").latest("id")
         self.assertEqual(log.detail["kolom"], "deposit")
-        self.assertEqual(log.detail["nilai_baru"], "450000")
+        self.assertEqual(log.detail["nilai_baru"], "450000.00")
         self.assertIn("fr-control", r.content.decode())   # tabel dirender ulang
         self.assertIn("450.000", r.content.decode())      # nilai koreksi tampil
 
@@ -219,7 +219,8 @@ class KoreksiViewTests(_BracketKoreksiData):
         self.assertEqual(r.status_code, 302)
 
     def test_nilai_nan_dan_infinity_ditolak(self):
-        for buruk in ("NaN", "Infinity", "-Infinity", "99999999999999999999"):
+        for buruk in ("NaN", "Infinity", "-Infinity", "99999999999999999999",
+                      "9999999999999999,999"):
             r = self._post(nilai=buruk)
             self.assertEqual(r.status_code, 400, buruk)
         from web.models import FRKoreksi
@@ -235,3 +236,9 @@ class KoreksiViewTests(_BracketKoreksiData):
         from django.urls import reverse
         r = self.client.get(reverse("fr_koreksi_form"), {"date": "2026-07-01"})
         self.assertEqual(r.status_code, 400)
+
+    def test_simpan_ikut_refresh_kartu_pergerakan(self):
+        r = self._post()
+        isi = r.content.decode()
+        self.assertIn('id="fr-gerak" hx-swap-oob="outerHTML"', isi)
+        self.assertIn("Pergerakan per Bank", isi)

@@ -61,23 +61,7 @@
       "Bash(DATABASE_URL=sqlite:////tmp/bbs-rpay-cal.sqlite3 /Users/macads/Truth-of-auditor/.venv/bin/python manage.py validate_brands --dir /private/tmp/claude-501/-Users-macads-Truth-of-auditor--claude-worktrees-loving-joliot-2aa399/9dbea579-50f9-462c-ba4b-77d2bd34e9b0/scratchpad/16/16 --toko bbs --flow-from-name)",
       "Bash(DATABASE_URL=sqlite:////tmp/bbs-rpay-cal.sqlite3 /Users/macads/Truth-of-auditor/.venv/bin/python manage.py shell -c ' *)",
       "Bash(rm -f /tmp/bbs-rpay-cal.sqlite3 *)",
-      "Bash(/Users/macads/Truth-of-auditor/.venv/bin/python manage.py test sources.tests_rpay_xlsx sources.tests_detect -v 1)",
-      "Bash(railway up *)",
-      "Bash(git commit -m 'docs\\(spec\\): desain koreksi sel FR + halaman hutang/piutang — paket A *)",
-      "Bash(git commit -m 'docs\\(plan\\): rencana implementasi koreksi sel FR + hutang/piutang \\(5 task TDD\\) *)",
-      "Bash(railway ssh -p f09bfcd9-d09a-4bda-8b3d-8bad0924c45e -e production -s web '/opt/venv/bin/python -c \" *)",
-      "Bash(curl -s -o /dev/null -w \"login HTTP %{http_code}\\\\n\" https://truth-of-auditor.up.railway.app/login/)",
-      "Bash(/Users/macads/Truth-of-auditor/.venv/bin/python manage.py test web.tests_fr_koreksi -v 2)",
-      "Bash(PYTHONPATH=/Users/macads/Truth-of-auditor/.claude/worktrees/loving-joliot-2aa399 /Users/macads/Truth-of-auditor/.venv/bin/python manage.py test web.tests_fr_koreksi -v 2)",
-      "Bash(/Users/macads/Truth-of-auditor/.venv/bin/python manage.py makemigrations web)",
-      "Bash(/Users/macads/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package a1659d1 *)",
-      "Bash(/Users/macads/Truth-of-auditor/.venv/bin/python manage.py test web.tests_fr_koreksi web.tests_breakdown -v 1)",
-      "Bash(/Users/macads/Truth-of-auditor/.venv/bin/python manage.py test web.tests_fr_koreksi web.tests_breakdown -v 2)",
-      "Bash(/Users/macads/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package 58f1d56 HEAD)",
-      "Bash(/Users/macads/Truth-of-auditor/.venv/bin/python manage.py test web.tests_fr_koreksi.KoreksiViewTests -v 2)",
-      "Bash(/Users/macads/Truth-of-auditor/.venv/bin/python manage.py test web.tests_fr_koreksi -v 1)",
-      "Bash(/Users/macads/Truth-of-auditor/.venv/bin/python manage.py test web.tests_breakdown -v 1)",
-      "Bash(/Users/macads/Truth-of-auditor/.venv/bin/python manage.py check)"
+      "Bash(/Users/macads/Truth-of-auditor/.venv/bin/python manage.py test sources.tests_rpay_xlsx sources.tests_detect -v 1)"
     ]
   }
 }
