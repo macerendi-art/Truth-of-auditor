@@ -92,3 +92,37 @@ hari), 4 kartu stat kanal + tabel per tanggal×sumber, pager. Menu sidebar dekat
   6.500 yang ambigu SENGAJA dilewati.
 - Baris legacy tetap `jenis` lama di DB (laporan menutupnya query-time; noise
   no_panel lama berhenti tumbuh untuk data baru).
+
+## Hasil implementasi
+
+**C1 (fee_rules + parser, commit `407a2eb` + `a7f60d3`):** kalibrasi prod
+18-07 pada 662 baris Mandiri berawalan `"Biaya…"` — **semuanya fee**
+(nominal ≤9rb, nol baris fee di atas 10rb) — aturan `is_admin_fee` untuk
+Mandiri bebas false-positive pada data nyata. BRI ATMSTRPRM/BFST/BRIVA
+diverifikasi lewat probe read-only sebelumnya (lihat tabel "Bukti produksi"
+di atas).
+
+**C2 (laporan Rincian Biaya, modul ini):**
+
+- `web/biaya.py` (`rincian_biaya`) + view `rincian_biaya` (`/biaya-admin/`)
+  + template `biaya_admin.html` + menu sidebar "Rincian Biaya" (setelah
+  "Rincian Rekening") — TDD per brief, 5 test baru di `web/tests_biaya.py`
+  (agregasi kanal+legacy-rule, rentang tanggal, grouping tanggal×sumber,
+  render halaman, empty state).
+- Filter `raw_get` (di `web/templatetags/web_extras.py`) diverifikasi AMAN
+  untuk rantai `dict|raw_get:"X"|raw_get:"Y"` pada kunci absen — implementasi
+  `(d or {}).get(key, "")` membuat hasil `""` dari lookup pertama jatuh balik
+  ke `{}` pada lookup kedua (bukan error), jadi template literal brief
+  dipakai apa adanya tanpa perlu flatten manual di modul agregasi.
+- Baris kanal diklasifikasi dari nominal tetap: 1.000 → E-wallet, 2.500 →
+  BI Fast, 6.500 → Transfer online, lainnya → Lainnya.
+- Efek retroaktif: probe prod 18-07 mencatat **8.937 baris bank keluar
+  bernominal fee tanpa tanda `jenis="admin"`** (1.000×859 · 2.500×6.383 ·
+  6.500×1.695) — baris-baris ini sekarang TERCAKUP laporan Rincian Biaya
+  lewat jalur `is_admin_fee` query-time (tanpa migrasi, tanpa re-ingest;
+  `jenis` di DB tetap seperti semula, hanya laporan yang menutup celahnya).
+
+**Verifikasi:**
+`web.tests_biaya` (5) + `sources.tests_fee_rules` (8) → PASS. Suite penuh:
+814 test, OK (2 skipped, tidak terkait) — naik dari 809 sebelum modul ini
+(+5 test baru `tests_biaya.py`).

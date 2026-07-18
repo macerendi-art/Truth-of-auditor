@@ -1,0 +1,65 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% load web_extras %}
+{% block title %}Rincian Biaya · Truth of Auditor{% endblock %}
+{% block crumb %}Transaksi · Rincian Biaya{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Rincian Biaya</h1>
+    <p>Biaya admin bank <b>{{ active_toko.name }}</b> per kanal — baris fee bertanda maupun legacy (dikenali pola), tarif tetap: E-wallet 1.000 · BI Fast 2.500 · Transfer online 6.500.</p>
+  </div>
+</div>
+
+<div class="card reveal" style="margin-bottom:18px">
+  <form method="get" class="row" style="align-items:flex-end">
+    <div class="field"><label>Dari</label><input type="date" name="dari" value="{{ dari|date:'Y-m-d' }}"></div>
+    <div class="field"><label>Sampai</label><input type="date" name="sampai" value="{{ sampai|date:'Y-m-d' }}"></div>
+    <button class="btn primary" type="submit">Terapkan</button>
+    <span class="spacer"></span>
+    <span class="faint" style="font-size:12px">{{ data.ringkas.n|intcomma }} baris fee</span>
+  </form>
+</div>
+
+<div class="grid cols-4 reveal" style="margin-bottom:18px">
+  <div class="card stat"><div class="k">Total Biaya</div><div class="v mono">{{ data.ringkas.total|floatformat:0|intcomma }}</div></div>
+  {% with k=data.ringkas.kanal %}
+  <div class="card stat"><div class="k">E-wallet (1.000)</div><div class="v mono">{{ k|raw_get:"E-wallet"|raw_get:"total"|default:0|floatformat:0|intcomma }}</div></div>
+  <div class="card stat"><div class="k">BI Fast (2.500)</div><div class="v mono">{{ k|raw_get:"BI Fast"|raw_get:"total"|default:0|floatformat:0|intcomma }}</div></div>
+  <div class="card stat"><div class="k">Transfer online (6.500)</div><div class="v mono">{{ k|raw_get:"Transfer online"|raw_get:"total"|default:0|floatformat:0|intcomma }}</div></div>
+  {% endwith %}
+</div>
+
+{% if not data.rows %}
+<div class="card reveal"><div class="cell-empty" style="padding:34px 12px;text-align:center">
+  Belum ada baris biaya pada rentang ini.
+</div></div>
+{% else %}
+<div class="card pad0 reveal">
+  <div class="table-wrap" style="border:none">
+  <table>
+    <thead><tr>
+      <th>Tanggal</th><th>Sumber</th><th class="num">Baris</th>
+      <th class="num">E-wallet</th><th class="num">BI Fast</th>
+      <th class="num">Transfer online</th><th class="num">Lainnya</th><th class="num">Total</th>
+    </tr></thead>
+    <tbody>
+    {% for r in page %}
+    <tr>
+      <td class="mono">{{ r.tanggal|date:"d/m/Y"|default:"—" }}</td>
+      <td style="font-size:12.5px">{{ r.sumber }}</td>
+      <td class="num mono">{{ r.n|intcomma }}</td>
+      <td class="num mono">{{ r.kanal|raw_get:"E-wallet"|raw_get:"total"|default:""|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ r.kanal|raw_get:"BI Fast"|raw_get:"total"|default:""|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ r.kanal|raw_get:"Transfer online"|raw_get:"total"|default:""|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ r.kanal|raw_get:"Lainnya"|raw_get:"total"|default:""|floatformat:0|intcomma }}</td>
+      <td class="num mono" style="font-weight:600">{{ r.total|floatformat:0|intcomma }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div style="padding:10px 14px">{% pager page %}</div>
+</div>
+{% endif %}
+{% endblock %}

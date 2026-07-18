@@ -38,6 +38,7 @@ from sources.models import SourceType, Upload
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
 from web.access import is_admin, tokos_for
+from web.biaya import rincian_biaya as hitung_rincian_biaya
 from web.breakdown import bracket_breakdown as hitung_bracket_breakdown, KATEGORI_KANONIK
 from web.forms import GantiPasswordForm
 from web.hutang import hutang_piutang as hitung_hutang_piutang
@@ -1429,6 +1430,21 @@ def hutang_piutang(request):
     data = hitung_hutang_piutang(active, dari=dari, sampai=sampai)
     page = Paginator(data["rows"], 40).get_page(request.GET.get("page"))
     return render(request, "web/hutang_piutang.html", {
+        "page": page, "data": data, "dari": dari, "sampai": sampai,
+    })
+
+
+@login_required
+def rincian_biaya(request):
+    """Rekap biaya admin bank per kanal (E-wallet/BI Fast/Transfer online)."""
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    sampai = _parse_date(request.GET.get("sampai", "")) or date_cls.today()
+    dari = _parse_date(request.GET.get("dari", "")) or sampai - timedelta(days=30)
+    data = hitung_rincian_biaya(active, dari=dari, sampai=sampai)
+    page = Paginator(data["rows"], 40).get_page(request.GET.get("page"))
+    return render(request, "web/biaya_admin.html", {
         "page": page, "data": data, "dari": dari, "sampai": sampai,
     })
 

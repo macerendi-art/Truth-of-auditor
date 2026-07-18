@@ -19,6 +19,7 @@ urlpatterns = [
     path("bracket/koreksi/", views.fr_koreksi_form, name="fr_koreksi_form"),
     path("bracket/koreksi/simpan/", views.fr_koreksi_simpan, name="fr_koreksi_simpan"),
     path("hutang-piutang/", views.hutang_piutang, name="hutang_piutang"),
+    path("biaya-admin/", views.rincian_biaya, name="rincian_biaya"),
     path("bulanan/", views.monthly_overview, name="monthly_overview"),
     path("rekening/", views.rekening_breakdown, name="rekening_breakdown"),
     path("settlement/", views.settlement_pending, name="settlement_pending"),
