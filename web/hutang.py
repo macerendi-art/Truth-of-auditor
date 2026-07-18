@@ -3,6 +3,7 @@
 Pola sama `web/breakdown.py`: baca `Transaction.raw` bracket tanpa migrasi,
 berlaku retroaktif untuk data lama. Read-only murni.
 """
+from datetime import date
 from decimal import Decimal
 
 from django.db.models.fields.json import KeyTextTransform
@@ -55,6 +56,6 @@ def hutang_piutang(toko, dari=None, sampai=None):
             total_h += delta
         else:
             total_p += delta
-    rows.sort(key=lambda r: (r["tanggal"], r["jam"], r["id"]), reverse=True)
+    rows.sort(key=lambda r: (r["tanggal"] or date.min, r["jam"], r["id"]), reverse=True)
     return {"rows": rows, "total_hutang": total_h, "total_piutang": total_p,
             "netto": total_h + total_p, "count": len(rows)}

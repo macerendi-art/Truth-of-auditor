@@ -60,6 +60,18 @@ class AgregasiHutangTests(_HutangData):
         self.assertEqual(r["account"], "BANK BCA | SUSI | DEPOSIT")
         self.assertEqual(r["tanggal"], TGL)
 
+    def test_urutan_terbaru_dulu_dan_tahan_tanggal_none(self):
+        self.fr("Hutang", "-100", tanggal=date(2026, 6, 20), jam="09:00")
+        self.fr("Piutang", "300", tanggal=TGL, jam="08:00")
+        self.fr("Hutang", "-200", tanggal=TGL, jam="11:00")
+        # baris tanggal gagal-parse (posted_date=None) tidak boleh membuat sort crash
+        t = self.fr("Hutang", "-50", tanggal=TGL, jam="07:00")
+        t.posted_date = None
+        t.save(update_fields=["posted_date"])
+        data = hutang_piutang(self.toko)
+        nominal = [r["nominal"] for r in data["rows"]]
+        self.assertEqual(nominal, [Decimal("-200"), Decimal("300"), Decimal("-100"), Decimal("-50")])
+
 
 class HutangViewTests(_HutangData):
     def setUp(self):
