@@ -145,3 +145,43 @@ dibangun.
   menjalankannya otomatis); tabel baru murni, tanpa risiko data lama.
 - Overlay menambah 1 query per render halaman breakdown (ringan, ber-index unik).
 - Kolom `hutang`/`piutang` di tabel FR tidak butuh kerja baru (kanonik sudah ada).
+
+## Hasil verifikasi
+
+Task 5 (2026-07-18), setelah Task A-1..A-4 (model, overlay, popup+tanda, halaman
+Hutang/Piutang) selesai dan direview:
+
+- **Suite penuh**: `python manage.py test` → **793 test, OK (2 skipped)**, tanpa
+  kegagalan. `collectstatic` dijalankan lebih dulu (manifest gitignored, wajib
+  di worktree segar).
+- **Verifikasi browser** (preview `auditor-ui` port 8802, DB disalin dari
+  checkout utama + `migrate`, login `rnd`, toko LBS, tanggal 28 Jun 2026 —
+  8.522 baris FR):
+  1. Klik sel **Saldo Awal** (BANK BCA — IRFAN RUKMANA DEPOSIT) → popup HTMX
+     terbuka: judul kolom, label akun+tanggal, "Nilai asli: 170.000", field
+     nilai baru, dropdown 10 alasan, catatan.
+  2. Isi 200000 + alasan "Cutoff Mutation" + catatan → Simpan → tabel refresh:
+     sel jadi **200.000** bertanda segitiga merah pojok kanan-atas
+     (`td.cell-edit.koreksi`, dikonfirmasi lewat DOM — persis 1 sel bertanda),
+     TOTAL Saldo Awal naik 30.000 (1.043.238.097 → 1.043.268.097) konsisten
+     dengan delta koreksi, popup tertutup.
+  3. Klik sel yang sama lagi → popup menampilkan koreksi aktif ("Nilai asli:
+     170.000 · koreksi aktif oleh rnd", nilai/alasan/catatan tersimpan
+     terisi ulang) + tombol "Kembalikan nilai asli". Klik tombol → sel & TOTAL
+     kembali ke nilai asli (170.000 / 1.043.238.097), tanda merah hilang.
+  4. `/kelola/log/` → dua entri tercatat: `fr_koreksi` (nilai_asli=170000.00,
+     nilai_baru=200000, alasan=cutoff_mutation) dan `fr_koreksi_hapus`
+     (nilai_asli=170000.00), pelaku `rnd`, toko LBS, objek
+     "BANK BCA | IRFAN RUKMANA | DEPOSIT [saldo_awal]".
+  5. `/hutang-piutang/` (toko LBS, rentang default 30 hari mencakup 28 Jun) →
+     ringkasan Total Hutang/Piutang/Netto = 0 + empty-state "Belum ada baris
+     hutang/piutang pada rentang ini." — data real yang ada memang tidak
+     punya baris berkategori Hutang/Piutang pada rentang itu; jalur tabel
+     terisi sudah dicakup `web.tests_hutang` (6 test, fixture sintetis).
+  6. Tidak ada error console/server sepanjang sesi (`preview_logs` bersih).
+     Data uji (koreksi Saldo Awal) dikembalikan ke nilai asli sebelum sesi
+     berakhir — DB dev bersih dari sisa percobaan (`FRKoreksi.objects.count()
+     == 0`).
+- **Kesimpulan**: popup, tanda sel, refresh total/selisih, "Kembalikan nilai
+  asli", jejak AuditLog, dan halaman Hutang/Piutang semua berfungsi sesuai
+  desain — tidak ada regresi fungsional ditemukan.

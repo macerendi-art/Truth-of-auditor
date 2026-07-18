@@ -54,9 +54,10 @@ To add a new source format: write a parser subclass, register it in `PARSERS` (`
 
 ### 3. Read-only reporting views (`web/`)
 
-Several pages aggregate existing rows **query-time — no new tables or migrations**, so they apply retroactively to production data and never touch the engine. Each has a pure aggregation module (unit-tested without rendering) called by a thin view:
+Several pages aggregate existing rows **query-time — no new tables or migrations**, so they apply retroactively to production data and never touch the engine. Each has a pure aggregation module (unit-tested without rendering) called by a thin view. The one exception is the Control Bracket breakdown, which now carries a single write table, `web.models.FRKoreksi`: an overlay that corrects one cell (identified by toko/tanggal/account/kolom) without touching the underlying `Transaction` data — totals and Selisih Kontrol are recomputed from the corrected values on render, and every save/delete is logged to `AuditLog` (`fr_koreksi`/`fr_koreksi_hapus`).
 
 - **`web/breakdown.py`** (`/bracket/`, "Control Bracket per FR Account") and **`web/rekening.py`** (`/rekening/`, per bank/gateway account) pivot straight off `Transaction.raw` via `KeyTextTransform`. Both derive per-account opening/closing balance with the **order-independent** `_saldo_batas` (in `breakdown.py`): real FR/bank rows shuffle within the same minute and backdated entries make the `Jam` stamp lie, so a positional first/last balance is wrong — instead it matches the multiset of pre-balances (`balance − delta`) against balances; a broken/non-unique chain falls back to `(Jam, id)` so the inconsistency surfaces in the **"Selisih Kontrol"** column (ideally 0) rather than being hidden.
+- **`web/hutang.py`** (`/hutang-piutang/`) lists bracket rows whose `Kategori` is Hutang/Piutang, across dates, with running totals — same query-time pattern, no overlay.
 - **`web/monthly.py`** (`/bulanan/`) reads `ReconBatch.summary` as-is per day (use `money`/matched, **not** `money_gross` — gross can dwarf panel). **`web/settlement.py`** (`/settlement/`) lists still-waiting credit rows via the engine's `_carried_results`. **`web/exports.py`** builds the Excel workbooks for the Export page and per-run export.
 
 ## Domain model conventions (critical, easy to get wrong)
