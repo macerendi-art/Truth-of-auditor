@@ -37,6 +37,9 @@ class DerivasiLabelSumberTests(TestCase):
             ("27_JUNI_2026_WD_BCA_HENDI.pdf", "BCA"),
             ("MUTASI DP NXPAY OKE25 27-06.xlsx", "NXPAY"),
             ("MUTASI DP QR FLYER OKE25 27-06.xlsx", "QR FLYER"),
+            # varian MUL 17-07: "QRIS FLYER" (bukan "QR FLYER") — dulu jatuh ke
+            # "QRIS" anonim sehingga tampak "tidak terbaca" di Rincian Rekening
+            ("17-07-2026 MUL DP QRIS FLYER.xlsx", "QR FLYER"),
             ("mutasi_random_27-06.xlsx", ""),
         ]
         for name, expected in cases:

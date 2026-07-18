@@ -25,6 +25,9 @@ SPECIFIC_SOURCE_LABELS = {
     "QRIS": "QRIS",
     "NXPAY": "NXPAY",
     "QRFLYER": "QR FLYER",
+    # varian penamaan MUL: "... DP QRIS FLYER.xlsx" — pasangan token QRIS+FLYER
+    # harus menang atas token tunggal "QRIS" agar tidak jadi akun QRIS anonim
+    "QRISFLYER": "QR FLYER",
 }
 
 _MONEY_KEYS = ("bank", "gateway")
