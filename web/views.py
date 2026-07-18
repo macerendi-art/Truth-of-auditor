@@ -1300,14 +1300,24 @@ def _fr_label_kolom(kolom):
 
 
 def _fr_asli(toko, tanggal, account, kolom):
-    """Nilai agregasi MENTAH satu sel (tanpa koreksi) — utk tampilan & audit."""
+    """(nilai asli sel, kolom sah?) dari agregasi MENTAH (tanpa koreksi).
+
+    Kolom sah = saldo_awal/saldo_akhir, slug kanonik, atau kategori yang
+    benar-benar muncul di data hari itu — menolak POST rakitan yang mau
+    menyuntik kolom fiktif ke tabel kontrol.
+    """
     data = hitung_bracket_breakdown(toko, tanggal, dengan_koreksi=False)
+    sah = (kolom in _FR_KOLOM_SALDO or kolom in dict(KATEGORI_KANONIK)
+           or kolom in {s for s, _ in data["kolom"]})
+    asli = None
     for acc in data["accounts"]:
         if acc["account"] == account:
             if kolom in _FR_KOLOM_SALDO:
-                return acc[kolom]
-            return acc["kategori"].get(kolom)
-    return None
+                asli = acc[kolom]
+            else:
+                asli = acc["kategori"].get(kolom)
+            break
+    return asli, sah
 
 
 def _fr_params(request, src):
@@ -1327,12 +1337,15 @@ def fr_koreksi_form(request):
     if active is None or params is None:
         return HttpResponseBadRequest("parameter kurang")
     tanggal, account, kolom = params
+    asli, sah = _fr_asli(active, tanggal, account, kolom)
+    if not sah:
+        return HttpResponseBadRequest("kolom tidak dikenal")
     koreksi = FRKoreksi.objects.filter(
         toko=active, tanggal=tanggal, account=account, kolom=kolom).first()
     return render(request, "web/_fr_koreksi_form.html", {
         "tanggal": tanggal, "account": account, "kolom": kolom,
         "label": _fr_label_kolom(kolom),
-        "asli": _fr_asli(active, tanggal, account, kolom),
+        "asli": asli,
         "koreksi": koreksi, "pilihan_alasan": FRKoreksi.ALASAN_KOREKSI,
     })
 
@@ -1347,7 +1360,9 @@ def fr_koreksi_simpan(request):
     if active is None or params is None:
         return HttpResponseBadRequest("parameter kurang")
     tanggal, account, kolom = params
-    asli = _fr_asli(active, tanggal, account, kolom)
+    asli, sah = _fr_asli(active, tanggal, account, kolom)
+    if not sah:
+        return HttpResponseBadRequest("kolom tidak dikenal")
 
     if request.POST.get("hapus"):
         FRKoreksi.objects.filter(
@@ -1361,6 +1376,8 @@ def fr_koreksi_simpan(request):
             # input polos tanpa pemisah ribuan; koma desimal diterima
             nilai = Decimal(mentah.replace(".", "").replace(",", "."))
         except InvalidOperation:
+            return HttpResponseBadRequest("nilai tidak valid")
+        if not nilai.is_finite() or abs(nilai) >= Decimal("1e16"):
             return HttpResponseBadRequest("nilai tidak valid")
         alasan = request.POST.get("alasan") or ""
         if alasan and alasan not in dict(FRKoreksi.ALASAN_KOREKSI):

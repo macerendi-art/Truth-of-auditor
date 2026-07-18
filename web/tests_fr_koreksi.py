@@ -217,3 +217,21 @@ class KoreksiViewTests(_BracketKoreksiData):
         self.client.logout()
         r = self._post()
         self.assertEqual(r.status_code, 302)
+
+    def test_nilai_nan_dan_infinity_ditolak(self):
+        for buruk in ("NaN", "Infinity", "-Infinity", "99999999999999999999"):
+            r = self._post(nilai=buruk)
+            self.assertEqual(r.status_code, 400, buruk)
+        from web.models import FRKoreksi
+        self.assertEqual(FRKoreksi.objects.count(), 0)
+
+    def test_kolom_asing_ditolak(self):
+        r = self._post(kolom="kolom_palsu")
+        self.assertEqual(r.status_code, 400)
+        from web.models import FRKoreksi
+        self.assertEqual(FRKoreksi.objects.count(), 0)
+
+    def test_form_get_parameter_kurang_400(self):
+        from django.urls import reverse
+        r = self.client.get(reverse("fr_koreksi_form"), {"date": "2026-07-01"})
+        self.assertEqual(r.status_code, 400)
