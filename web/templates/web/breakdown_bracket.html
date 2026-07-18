@@ -72,47 +72,16 @@
   </div>
 </div>
 
-<div class="card pad0 reveal">
-  <div style="padding:16px 18px 4px">
-    <h2 style="margin:0;font-size:15px">Control Bracket Transaction <span class="faint" style="font-weight:500">(Harian)</span></h2>
-    <p class="faint" style="margin:4px 0 10px;font-size:12px">Breakdown per kategori FR, mutasi bertanda. <b>Selisih Kontrol</b> = Saldo Akhir − (Saldo Awal + Total Mutasi) — idealnya 0; nilai lain berarti saldo berjalan FR tidak konsisten dengan mutasinya.</p>
-  </div>
-  <div class="table-wrap" style="border:none">
-  <table>
-    <thead><tr>
-      <th style="width:44px" class="num">No</th><th>FR Account</th>
-      <th class="num">Saldo Awal</th>
-      {% for slug, label in data.kolom %}<th class="num">{{ label }}</th>{% endfor %}
-      <th class="num">Total Mutasi</th><th class="num">Saldo Akhir</th>
-      <th class="num" title="Saldo Akhir − (Saldo Awal + Total Mutasi)">Selisih Kontrol</th>
-    </tr></thead>
-    <tbody>
-    {% for a in data.accounts %}
-    <tr>
-      <td class="num mono faint">{{ forloop.counter }}</td>
-      <td style="font-size:12.5px;white-space:nowrap"><b>{{ a.name }}</b>{% if a.role %} <span class="badge" style="font-size:10px">{{ a.role }}</span>{% endif %}</td>
-      <td class="num mono">{% if a.saldo_awal is not None %}{{ a.saldo_awal|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
-      {% for slug, label in data.kolom %}{% with v=a.kategori|raw_get:slug %}
-      <td class="num mono">{% if v == "" %}<span class="faint">·</span>{% else %}<span {% if v < 0 %}style="color:var(--bad)"{% endif %}>{{ v|floatformat:0|intcomma }}</span>{% endif %}</td>
-      {% endwith %}{% endfor %}
-      <td class="num mono" style="font-weight:600">{{ a.mutasi|floatformat:0|intcomma }}</td>
-      <td class="num mono">{% if a.saldo_akhir is not None %}{{ a.saldo_akhir|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
-      <td class="num">{% if a.selisih is None %}<span class="faint">—</span>{% elif a.selisih == 0 %}<span class="badge ok">0</span>{% else %}<span class="badge bad mono">{{ a.selisih|floatformat:0|intcomma }}</span>{% endif %}</td>
-    </tr>
-    {% endfor %}
-    </tbody>
-    <tfoot><tr style="font-weight:700">
-      <td></td><td>TOTAL</td>
-      <td class="num mono">{% if data.total.saldo_awal is not None %}{{ data.total.saldo_awal|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
-      {% for slug, label in data.kolom %}{% with v=data.total.kategori|raw_get:slug %}
-      <td class="num mono">{% if v == "" %}<span class="faint">·</span>{% else %}{{ v|floatformat:0|intcomma }}{% endif %}</td>
-      {% endwith %}{% endfor %}
-      <td class="num mono">{{ data.total.mutasi|floatformat:0|intcomma }}</td>
-      <td class="num mono">{% if data.total.saldo_akhir is not None %}{{ data.total.saldo_akhir|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
-      <td class="num">{% if data.total.selisih is None %}<span class="faint">—</span>{% elif data.total.selisih == 0 %}<span class="badge ok">0</span>{% else %}<span class="badge bad mono">{{ data.total.selisih|floatformat:0|intcomma }}</span>{% endif %}</td>
-    </tr></tfoot>
-  </table>
-  </div>
-</div>
+{% include "web/_fr_control_table.html" %}
 {% endif %}
+<div id="koreksiPop"></div>
+<style>
+  .cell-edit{cursor:pointer;position:relative}
+  .cell-edit:hover{box-shadow:inset 0 0 0 1px var(--brand, #2563eb)}
+  td.koreksi::after{content:"";position:absolute;top:2px;right:2px;
+    border-left:6px solid transparent;border-top:6px solid var(--bad)}
+  #koreksiPop:not(:empty){position:fixed;inset:0;z-index:80;
+    background:rgba(8,10,17,.45);display:flex;align-items:center;justify-content:center}
+  .pop-mini{width:min(380px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.25)}
+</style>
 {% endblock %}

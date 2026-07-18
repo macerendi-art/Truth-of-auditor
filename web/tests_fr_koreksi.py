@@ -2,9 +2,12 @@
 from datetime import date, datetime
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from django.test import TestCase
+from django.urls import reverse
 
+from core.models import AuditLog
 from sources.models import Toko, SourceType, Upload
 from transactions.models import Transaction
 from web.breakdown import bracket_breakdown, KATEGORI_KANONIK
@@ -147,3 +150,70 @@ class UrutanHeaderTests(TestCase):
         i_cs = slugs.index("beban mistake cs")
         self.assertLess(i_biaya, i_other)
         self.assertLess(i_other, i_cs)
+
+
+class KoreksiViewTests(_BracketKoreksiData):
+    AKUN = "BANK BCA | SUSI | DEPOSIT"
+
+    def setUp(self):
+        super().setUp()
+        self.user = get_user_model().objects.create_user(
+            username="auditor1", password="rahasia123", role="auditor")
+        self.user.allowed_tokos.add(self.toko)
+        self.client.force_login(self.user)
+        s = self.client.session
+        s["active_toko_id"] = self.toko.id
+        s.save()
+        self.fr(self.AKUN, "Deposit", "500000", "1500000", jam="09:00")
+
+    def _post(self, **over):
+        base = dict(date="2026-07-01", account=self.AKUN, kolom="deposit",
+                    nilai="450000", alasan="mistake_cs", catatan="uji")
+        base.update(over)
+        return self.client.post(reverse("fr_koreksi_simpan"), base)
+
+    def test_form_get_berisi_nilai_asli(self):
+        r = self.client.get(reverse("fr_koreksi_form"), {
+            "date": "2026-07-01", "account": self.AKUN, "kolom": "deposit"})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "500.000")       # nilai asli (locale id: titik ribuan)
+        self.assertContains(r, "Mistake CS")    # opsi alasan
+
+    def test_simpan_membuat_koreksi_dan_audit(self):
+        r = self._post()
+        self.assertEqual(r.status_code, 200)
+        from web.models import FRKoreksi
+        k = FRKoreksi.objects.get()
+        self.assertEqual(k.nilai, Decimal("450000"))
+        self.assertEqual(k.dibuat_oleh, self.user)
+        log = AuditLog.objects.filter(aksi="fr_koreksi").latest("id")
+        self.assertEqual(log.detail["kolom"], "deposit")
+        self.assertEqual(log.detail["nilai_baru"], "450000")
+        self.assertIn("fr-control", r.content.decode())   # tabel dirender ulang
+        self.assertIn("450.000", r.content.decode())      # nilai koreksi tampil
+
+    def test_simpan_ulang_memperbarui_baris_sama(self):
+        self._post()
+        self._post(nilai="475000")
+        from web.models import FRKoreksi
+        self.assertEqual(FRKoreksi.objects.count(), 1)
+        self.assertEqual(FRKoreksi.objects.get().nilai, Decimal("475000"))
+
+    def test_hapus_mengembalikan_nilai_asli(self):
+        self._post()
+        r = self._post(hapus="1")
+        from web.models import FRKoreksi
+        self.assertEqual(FRKoreksi.objects.count(), 0)
+        self.assertTrue(AuditLog.objects.filter(aksi="fr_koreksi_hapus").exists())
+        self.assertIn("500.000", r.content.decode())
+
+    def test_nilai_tak_valid_ditolak(self):
+        r = self._post(nilai="abc")
+        self.assertEqual(r.status_code, 400)
+        from web.models import FRKoreksi
+        self.assertEqual(FRKoreksi.objects.count(), 0)
+
+    def test_wajib_login(self):
+        self.client.logout()
+        r = self._post()
+        self.assertEqual(r.status_code, 302)

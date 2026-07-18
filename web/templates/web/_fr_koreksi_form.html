@@ -1,0 +1,32 @@
+{% load humanize %}
+<div class="card pop-mini">
+  <h3 style="margin:0 0 2px;font-size:14px">Koreksi {{ label }}</h3>
+  <p class="faint" style="margin:0 0 10px;font-size:12px">
+    {{ account }} · {{ tanggal|date:"d M Y" }}<br>
+    Nilai asli: <b class="mono">{% if asli is None %}—{% else %}{{ asli|floatformat:0|intcomma }}{% endif %}</b>
+    {% if koreksi %} · koreksi aktif oleh <b>{{ koreksi.dibuat_oleh.username|default:"—" }}</b>{% endif %}
+  </p>
+  <form hx-post="{% url 'fr_koreksi_simpan' %}" hx-target="#fr-control" hx-swap="outerHTML">
+    {% csrf_token %}
+    <input type="hidden" name="date" value="{{ tanggal|date:'Y-m-d' }}">
+    <input type="hidden" name="account" value="{{ account }}">
+    <input type="hidden" name="kolom" value="{{ kolom }}">
+    <div class="field"><label>Nilai baru</label>
+      <input name="nilai" required autocomplete="off" placeholder="tanpa titik ribuan, minus boleh"
+             value="{% if koreksi %}{{ koreksi.nilai|floatformat:0 }}{% endif %}"></div>
+    <div class="field"><label>Alasan</label>
+      <select name="alasan">
+        <option value="">— pilih alasan —</option>
+        {% for kode, nama in pilihan_alasan %}
+        <option value="{{ kode }}" {% if koreksi and koreksi.alasan == kode %}selected{% endif %}>{{ nama }}</option>
+        {% endfor %}
+      </select></div>
+    <div class="field"><label>Catatan</label>
+      <textarea name="catatan" rows="2">{% if koreksi %}{{ koreksi.catatan }}{% endif %}</textarea></div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:6px">
+      {% if koreksi %}<button class="btn danger" name="hapus" value="1">Kembalikan nilai asli</button>{% endif %}
+      <button type="button" class="btn" onclick="document.getElementById('koreksiPop').innerHTML=''">Batal</button>
+      <button class="btn primary" type="submit">Simpan</button>
+    </div>
+  </form>
+</div>

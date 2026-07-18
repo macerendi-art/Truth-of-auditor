@@ -2,6 +2,7 @@ import os
 import re
 import zipfile
 from datetime import date as date_cls, timedelta
+from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
 from django.contrib.auth import logout as auth_logout, update_session_auth_hash
@@ -12,6 +13,7 @@ from django.core.paginator import Paginator
 from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max, Min, OuterRef, Q, Sum
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.html import format_html, format_html_join
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -36,8 +38,9 @@ from sources.models import SourceType, Upload
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
 from web.access import is_admin, tokos_for
-from web.breakdown import bracket_breakdown as hitung_bracket_breakdown
+from web.breakdown import bracket_breakdown as hitung_bracket_breakdown, KATEGORI_KANONIK
 from web.forms import GantiPasswordForm
+from web.models import FRKoreksi
 from web.monthly import monthly_summary
 from web.rekening import rekening_breakdown as hitung_rekening_breakdown
 from web.settlement import pending_settlement_rows
@@ -1285,6 +1288,98 @@ def bracket_breakdown(request):
         "prev_date": tanggal - timedelta(days=1),
         "next_date": tanggal + timedelta(days=1),
     })
+
+
+_FR_KOLOM_SALDO = {"saldo_awal": "Saldo Awal", "saldo_akhir": "Saldo Akhir"}
+
+
+def _fr_label_kolom(kolom):
+    if kolom in _FR_KOLOM_SALDO:
+        return _FR_KOLOM_SALDO[kolom]
+    return dict(KATEGORI_KANONIK).get(kolom, kolom.title())
+
+
+def _fr_asli(toko, tanggal, account, kolom):
+    """Nilai agregasi MENTAH satu sel (tanpa koreksi) — utk tampilan & audit."""
+    data = hitung_bracket_breakdown(toko, tanggal, dengan_koreksi=False)
+    for acc in data["accounts"]:
+        if acc["account"] == account:
+            if kolom in _FR_KOLOM_SALDO:
+                return acc[kolom]
+            return acc["kategori"].get(kolom)
+    return None
+
+
+def _fr_params(request, src):
+    tanggal = _parse_date(src.get("date", ""))
+    account = (src.get("account") or "").strip()[:255]
+    kolom = (src.get("kolom") or "").strip().lower()[:64]
+    if not tanggal or not account or not kolom:
+        return None
+    return tanggal, account, kolom
+
+
+@login_required
+def fr_koreksi_form(request):
+    """Popup kecil koreksi satu sel Control Bracket (GET, HTMX)."""
+    active = _active_toko(request)
+    params = _fr_params(request, request.GET)
+    if active is None or params is None:
+        return HttpResponseBadRequest("parameter kurang")
+    tanggal, account, kolom = params
+    koreksi = FRKoreksi.objects.filter(
+        toko=active, tanggal=tanggal, account=account, kolom=kolom).first()
+    return render(request, "web/_fr_koreksi_form.html", {
+        "tanggal": tanggal, "account": account, "kolom": kolom,
+        "label": _fr_label_kolom(kolom),
+        "asli": _fr_asli(active, tanggal, account, kolom),
+        "koreksi": koreksi, "pilihan_alasan": FRKoreksi.ALASAN_KOREKSI,
+    })
+
+
+@login_required
+def fr_koreksi_simpan(request):
+    """Simpan/hapus koreksi sel FR lalu render ulang tabel kontrol (POST, HTMX)."""
+    if request.method != "POST":
+        return HttpResponseBadRequest("POST saja")
+    active = _active_toko(request)
+    params = _fr_params(request, request.POST)
+    if active is None or params is None:
+        return HttpResponseBadRequest("parameter kurang")
+    tanggal, account, kolom = params
+    asli = _fr_asli(active, tanggal, account, kolom)
+
+    if request.POST.get("hapus"):
+        FRKoreksi.objects.filter(
+            toko=active, tanggal=tanggal, account=account, kolom=kolom).delete()
+        catat(request.user, "fr_koreksi_hapus", f"{account} [{kolom}]", toko=active,
+              tanggal=str(tanggal), account=account, kolom=kolom,
+              nilai_asli=str(asli) if asli is not None else "")
+    else:
+        mentah = (request.POST.get("nilai") or "").strip().replace(" ", "")
+        try:
+            # input polos tanpa pemisah ribuan; koma desimal diterima
+            nilai = Decimal(mentah.replace(".", "").replace(",", "."))
+        except InvalidOperation:
+            return HttpResponseBadRequest("nilai tidak valid")
+        alasan = request.POST.get("alasan") or ""
+        if alasan and alasan not in dict(FRKoreksi.ALASAN_KOREKSI):
+            return HttpResponseBadRequest("alasan tidak dikenal")
+        FRKoreksi.objects.update_or_create(
+            toko=active, tanggal=tanggal, account=account, kolom=kolom,
+            defaults={"nilai": nilai, "alasan": alasan,
+                      "catatan": (request.POST.get("catatan") or "").strip(),
+                      "dibuat_oleh": request.user})
+        catat(request.user, "fr_koreksi", f"{account} [{kolom}]", toko=active,
+              tanggal=str(tanggal), account=account, kolom=kolom,
+              nilai_asli=str(asli) if asli is not None else "",
+              nilai_baru=str(nilai), alasan=alasan)
+
+    data = hitung_bracket_breakdown(active, tanggal)
+    html = render_to_string("web/_fr_control_table.html",
+                            {"data": data, "tanggal": tanggal}, request=request)
+    html += '<div id="koreksiPop" hx-swap-oob="innerHTML"></div>'
+    return HttpResponse(html)
 
 
 @login_required
