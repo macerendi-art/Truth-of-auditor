@@ -18,6 +18,7 @@ from .base import (
     row_hash,
     rows_to_dicts,
 )
+from .fee_rules import is_admin_fee
 
 
 def _jenis_from_money(money):
@@ -160,7 +161,10 @@ class BRIParser(BaseParser):
                 "source_type": "bank",
                 "occurred_at": occurred,
                 "posted_date": occurred.date() if occurred else None,
-                "jenis": "admin" if is_briva_fee(desc, money) else _jenis_from_money(money),
+                "jenis": "admin"
+                if (money < 0 and (is_briva_fee(desc, money)
+                                   or is_admin_fee("bri", desc, abs(money))))
+                else _jenis_from_money(money),
                 "amount": abs(money),
                 "credit_delta": Decimal("0"),
                 "money_delta": money,
@@ -310,7 +314,9 @@ class MandiriParser(BaseParser):
                 "source_type": "bank",
                 "occurred_at": occurred,
                 "posted_date": occurred.date() if occurred else None,
-                "jenis": _jenis_from_money(money),
+                "jenis": "admin"
+                if (money < 0 and is_admin_fee("mandiri", ket, abs(money)))
+                else _jenis_from_money(money),
                 "amount": abs(money),
                 "credit_delta": Decimal("0"),
                 "money_delta": money,
