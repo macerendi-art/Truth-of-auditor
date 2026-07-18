@@ -68,3 +68,42 @@ class BRIFeeParserTests(SimpleTestCase):
             ["123", "3", "2026-07-17 10:02:00", "NBMB SENDER TO RECEIVER ESB", "0", "50000", "147500"],
         ])
         self.assertEqual([r["jenis"] for r in out], ["admin", "admin", "depo"])
+
+
+from openpyxl import Workbook
+
+from sources.parsers.banks import MandiriParser
+
+
+def _mandiri_xlsx(rows):
+    """e-Statement mini: header kolom Mandiri + baris data (tanpa enkripsi)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["No", "Tanggal", "Keterangan", "Dana Masuk (IDR)",
+               "Dana Keluar (IDR)", "Saldo (IDR)"])
+    for r in rows:
+        ws.append(r)
+    fd, p = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    wb.save(p)
+    return p
+
+
+class MandiriFeeParserTests(SimpleTestCase):
+    """Wiring is_admin_fee di MandiriParser — baris 'Biaya …' keluar = admin."""
+
+    def _parse(self, rows):
+        p = _mandiri_xlsx(rows)
+        try:
+            return MandiriParser().parse(p)
+        finally:
+            os.remove(p)
+
+    def test_biaya_jadi_admin_transfer_tetap_wd(self):
+        out = self._parse([
+            ["1", "16 Jul 2026", "Biaya transfer BI Fast", "", "2.500,00", "97.500,00"],
+            ["2", "16 Jul 2026", "Transfer ke BANK MANDIRI ANDI", "", "250.000,00", "", ],
+            ["3", "16 Jul 2026", "Transfer BI Fast Dari OCBC BUDI", "1.000.000,00", "", "1.097.500,00"],
+        ])
+        self.assertEqual([r["jenis"] for r in out], ["admin", "wd", "depo"])
+        self.assertEqual(str(out[0]["amount"]), "2500.00")
