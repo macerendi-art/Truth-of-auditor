@@ -28,7 +28,7 @@ def rincian_biaya(toko, dari=None, sampai=None):
     qs = (
         Transaction.objects.filter(
             toko=toko, source_type__key="bank", money_delta__lt=0)
-        .select_related("upload", "account", "source_type")
+        .select_related("upload", "account", "source_type", "upload__account")
     )
     if dari:
         qs = qs.filter(posted_date__gte=dari)
