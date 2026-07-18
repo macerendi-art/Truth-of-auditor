@@ -34,6 +34,14 @@
         <td class="num mono">{{ t.n_up|intcomma }}</td>
         <td>{% if t.is_active %}<span class="badge ok">aktif</span>{% else %}<span class="badge bad">nonaktif</span>{% endif %}</td>
         <td class="r" style="white-space:nowrap">
+          <form method="post" style="display:inline-flex;gap:4px;align-items:center">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="rename">
+            <input type="hidden" name="toko_id" value="{{ t.id }}">
+            <input name="nama_baru" value="{{ t.name }}" maxlength="100"
+                   style="max-width:140px" aria-label="Nama baru {{ t.name }}">
+            <button class="btn sm" type="submit">Ganti Nama</button>
+          </form>
           <form method="post" style="display:inline">
             {% csrf_token %}
             <input type="hidden" name="action" value="toggle">

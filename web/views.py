@@ -361,10 +361,14 @@ def _uploads_for(toko):
     )
 
 
-def _uploads_page(toko, request):
+def _uploads_page(toko, request, q=""):
     """Halaman riwayat upload (20/halaman, pager seragam) — dulu terpotong 20
-    terakhir sehingga file tanggal lama tak bisa dihapus dari UI."""
-    return Paginator(_uploads_for(toko), 20).get_page(request.GET.get("page"))
+    terakhir sehingga file tanggal lama tak bisa dihapus dari UI.
+    `q` (khusus admin, diisi view) menyaring nama file."""
+    qs = _uploads_for(toko)
+    if q:
+        qs = qs.filter(original_name__icontains=q)
+    return Paginator(qs, 20).get_page(request.GET.get("page"))
 
 
 @login_required
@@ -372,6 +376,7 @@ def upload(request):
     active = _active_toko(request)
     if active is None:
         return render(request, "web/no_toko.html")
+    q = request.GET.get("q", "").strip() if is_admin(request.user) else ""
     if request.method == "POST" and request.POST.get("action") == "commit":
         staged = request.POST.getlist("staged")
         keys = request.POST.getlist("parser_key")
@@ -437,14 +442,15 @@ def upload(request):
         return render(request, "web/upload.html", {
             "preview": preview, "parsers": sorted(PARSERS.keys()),
             "flows": ["", "dp", "wd"], "active_toko": active,
-            "uploads": _uploads_page(active, request),
+            "uploads": _uploads_page(active, request, q=q),
         })
     from reconciliation.engine import check_completeness
 
     return render(request, "web/upload.html", {
         "parsers": sorted(PARSERS.keys()), "active_toko": active,
-        "uploads": _uploads_page(active, request),
+        "uploads": _uploads_page(active, request, q=q),
         "comp": check_completeness(active),
+        "q": q,
     })
 
 

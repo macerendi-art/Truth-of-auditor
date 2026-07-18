@@ -83,6 +83,24 @@ def kelola_toko(request):
               t.name, toko=t)
         messages.success(request, f"Toko {t.name} {'diaktifkan' if t.is_active else 'dinonaktifkan'}.")
         return redirect("kelola_toko")
+    if request.method == "POST" and request.POST.get("action") == "rename":
+        tid = request.POST.get("toko_id", "")
+        nama_baru = (request.POST.get("nama_baru") or "").strip()[:100]
+        if not tid.isdecimal():
+            messages.error(request, "ID toko tidak valid.")
+            return redirect("kelola_toko")
+        if not nama_baru:
+            messages.error(request, "Nama baru wajib diisi.")
+            return redirect("kelola_toko")
+        t = get_object_or_404(Toko, pk=tid)
+        nama_lama = t.name
+        if nama_baru != nama_lama:
+            t.name = nama_baru
+            t.save(update_fields=["name"])
+            catat(request.user, "ubah_nama_toko", f"{nama_lama} → {nama_baru}",
+                  toko=t, nama_lama=nama_lama, nama_baru=nama_baru)
+            messages.success(request, f"Nama toko {nama_lama} diganti menjadi {nama_baru}.")
+        return redirect("kelola_toko")
     # Jumlah per toko WAJIB dua query agregat terpisah — annotate ganda
     # Count(distinct) atas dua relasi meledakkan join Toko×Transaction×Upload
     # (497rb tx × ratusan upload): terukur 29,8 dtk di prod = halaman putih.
@@ -276,18 +294,22 @@ def bulk_delete_uploads(request):
         ups = list(Upload.objects.filter(pk__in=ids, toko=active)) if active else []
         n_file = n_tx = 0
         dilewati = []
+        terhapus = []
         for up in ups:
             if _locking_batches(up):
                 dilewati.append(up.original_name or f"Upload #{up.pk}")
                 continue
+            nama = up.original_name or f"Upload #{up.pk}"
             n_tx += up.transactions.count()
             if up.file:
                 up.file.delete(save=False)
             up.delete()
             n_file += 1
+            terhapus.append(nama)
         if n_file:
             catat(request.user, "hapus_upload_massal", f"{n_file} file",
-                  toko=active, n_file=n_file, n_tx=n_tx)
+                  toko=active, n_file=n_file, n_tx=n_tx,
+                  files=", ".join(terhapus)[:1000])
             messages.success(request, f"{n_file} file dihapus — {n_tx} transaksi ikut terhapus.")
         if dilewati:
             messages.error(

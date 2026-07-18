@@ -70,6 +70,7 @@ AKSI_LABELS = {
     "ganti_password":      ("Ganti password sendiri", "src"),
     # kelola toko
     "buat_toko":           ("Buat toko",             "ok"),
+    "ubah_nama_toko":      ("Ubah nama toko",        "src"),
     "aktifkan_toko":       ("Aktifkan toko",         "ok"),
     "nonaktifkan_toko":    ("Nonaktifkan toko",      "warn"),
     "hapus_toko":          ("Hapus toko",            "bad"),
