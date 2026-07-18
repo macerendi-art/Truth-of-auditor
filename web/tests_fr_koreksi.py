@@ -220,7 +220,7 @@ class KoreksiViewTests(_BracketKoreksiData):
 
     def test_nilai_nan_dan_infinity_ditolak(self):
         for buruk in ("NaN", "Infinity", "-Infinity", "99999999999999999999",
-                      "9999999999999999,999"):
+                      "9999999999999999,999", "1e30", "1E+28"):
             r = self._post(nilai=buruk)
             self.assertEqual(r.status_code, 400, buruk)
         from web.models import FRKoreksi

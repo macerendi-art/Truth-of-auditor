@@ -1380,7 +1380,12 @@ def fr_koreksi_simpan(request):
             return HttpResponseBadRequest("nilai tidak valid")
         if not nilai.is_finite():
             return HttpResponseBadRequest("nilai tidak valid")
-        nilai = nilai.quantize(Decimal("0.01"))
+        try:
+            # bentuk eksponen raksasa (1e30) lolos is_finite tapi meledak di
+            # quantize (melebihi presisi konteks) — tolak, jangan 500
+            nilai = nilai.quantize(Decimal("0.01"))
+        except InvalidOperation:
+            return HttpResponseBadRequest("nilai tidak valid")
         if abs(nilai) > Decimal("9999999999999999.99"):
             return HttpResponseBadRequest("nilai tidak valid")
         alasan = request.POST.get("alasan") or ""
