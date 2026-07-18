@@ -34,8 +34,8 @@ KATEGORI_KANONIK = [
     ("beban admin bank", "Beban Admin Bank"),
     ("beban admin qris", "Beban Admin QRIS"),
     ("biaya transaksi", "Biaya Transaksi"),
-    ("beban mistake cs", "Beban Mistake CS"),
     ("beban other expense", "Beban Other Expense"),
+    ("beban mistake cs", "Beban Mistake CS"),
     ("expense", "Expense"),
     ("hutang", "Hutang"),
     ("piutang", "Piutang"),
@@ -96,7 +96,55 @@ def _pecah_akun(account):
     return account, ""
 
 
-def bracket_breakdown(toko, tanggal):
+def _apply_koreksi(toko, tanggal, accounts, slugs_muncul):
+    """Timpa nilai sel dengan `FRKoreksi` lalu hitung ulang turunannya.
+
+    Data mentah tak disentuh — hanya dict tampilan. Mutasi = Σ kategori
+    (setara Σ delta mentah karena tiap baris FR masuk tepat satu kategori),
+    jadi setelah sel kategori diganti, mutasi/deposit/withdraw/net/selisih
+    dihitung ulang dari nilai terkoreksi. Koreksi pada akun yang tak hadir
+    pada tanggal itu diabaikan (sel tampilan tidak ada).
+    """
+    from web.models import FRKoreksi  # impor lokal: hindari siklus saat startup
+
+    per_acc = {}
+    for k in FRKoreksi.objects.filter(
+        toko=toko, tanggal=tanggal
+    ).select_related("dibuat_oleh"):
+        per_acc.setdefault(k.account, []).append(k)
+    if not per_acc:
+        return
+    for acc in accounts:
+        daftar = per_acc.get(acc["account"])
+        if not daftar:
+            continue
+        info = {}
+        for k in daftar:
+            if k.kolom in ("saldo_awal", "saldo_akhir"):
+                asli = acc[k.kolom]
+                acc[k.kolom] = k.nilai
+            else:
+                asli = acc["kategori"].get(k.kolom)
+                acc["kategori"][k.kolom] = k.nilai
+                slugs_muncul.add(k.kolom)
+            info[k.kolom] = {
+                "asli": asli, "nilai": k.nilai,
+                "alasan": k.get_alasan_display() if k.alasan else "",
+                "catatan": k.catatan,
+                "oleh": getattr(k.dibuat_oleh, "username", "") or "",
+                "waktu": k.updated_at,
+            }
+        acc["koreksi"] = info
+        acc["mutasi"] = sum(acc["kategori"].values(), NOL)
+        acc["deposit"] = acc["kategori"].get("deposit", NOL)
+        acc["withdraw"] = abs(acc["kategori"].get("withdrawal", NOL))
+        acc["net"] = acc["deposit"] - acc["withdraw"]
+        acc["selisih"] = None
+        if acc["saldo_awal"] is not None and acc["saldo_akhir"] is not None:
+            acc["selisih"] = acc["saldo_akhir"] - (acc["saldo_awal"] + acc["mutasi"])
+
+
+def bracket_breakdown(toko, tanggal, dengan_koreksi=True):
     """Agregasi bracket `toko` pada `posted_date == tanggal` → dict untuk view.
 
     {"accounts": [per akun], "kolom": [(slug, label) yang muncul],
@@ -148,7 +196,11 @@ def bracket_breakdown(toko, tanggal):
             "mutasi": mutasi, "selisih": selisih, "kategori": kategori_sum,
             "deposit": deposit, "withdraw": withdraw,
             "net": deposit - withdraw, "trx": trx,
+            "koreksi": {},
         })
+
+    if dengan_koreksi:
+        _apply_koreksi(toko, tanggal, accounts, slugs_muncul)
 
     accounts.sort(key=lambda a: (_URUT_PERAN.get(a["role"], 3), a["name"], a["account"]))
 
