@@ -69,11 +69,8 @@ Konvensi repo: satu class per format. Parser CSV lama (`rpay`, `rpay_wd`) TIDAK 
 - `username = Player`, `fee = Admin Fee`, `occurred_at/posted_date = Date`.
 - `reference = ""` — RRN hanya di `raw`: ada duplikat, dan aturan blocked engine
   mengasingkan reference asing (pelajaran RPay CSV, verifikasi M77 09-07).
-- **Keputusan:** baris `Ticket Status=failed` (uang QR masuk, tiket panel gagal)
-  TETAP di-ingest → muncul sebagai "Tidak Ada di Panel". Itu selisih nyata yang
-  auditor harus lihat, bukan disembunyikan parser.
-- `row_hash = row_hash("rpay_xlsx", [ticket, rrn])` — occurrence-index di base
-  menangani duplikat kembar.
+- **Keputusan:** baris `Ticket Status=failed` TETAP di-ingest SELAMA punya `Ticket Number` (uang masuk tanpa kredit panel harus tampak sebagai selisih). Baris TANPA ticket dilewati — tak ada anchor dan row_hash ("", RRN) rawan tabrakan (RRN punya duplikat nyata); lihat "Hasil kalibrasi" untuk kejadian nyatanya (3 baris failed di sampel ternyata tanpa ticket).
+- `row_hash = row_hash("rpay_xlsx", [ticket, rrn])` — ticket unik per deposit menjamin keunikan (row_hash base TANPA indeks-kemunculan).
 - `flow` diabaikan (selalu DP) — salah pilih di UI tak bisa membalik tanda.
 
 **`RPayWDXlsxParser`** — key `rpay_wd_xlsx`, `source_key="gateway"`:
@@ -174,3 +171,7 @@ kedua mencatat `rows_parsed=0, rows_duplicate=1230` (DP) dan `rows_parsed=0, row
 sesuai desain; satu-satunya penyimpangan dari asumsi desain awal (3 baris DP diharapkan ikut
 meski `Ticket Status=failed`) ternyata tak berlaku karena baris itu memang tak punya
 `Ticket Number` di sumber data, bukan soal filter parser.
+
+**Spot-check lintas-brand pengetatan nxpay (2026-07-18):** 6 file NXPay nyata brand OKE25
+(samples/SAMPLING TO RND, 27–29 Jun, DP+WD) tetap terdeteksi `nxpay` 0.90 peringkat 1
+setelah syarat `not "payment gateway"` — pengetatan tidak meregresi brand non-BBS.

@@ -343,7 +343,7 @@ class RPayWDXlsxParser(BaseParser):
                 "reference": "",
                 "counterparty": str(r.get("Name", "") or "").strip(),
                 "description": f"RPAY WD {r.get('Bank', '')}".strip(),
-                "raw": {k: ("" if v is None else str(v)) for k, v in r.items() if k},
+                "raw": {k: ("" if v is None else str(v)) for k, v in r.items() if k},  # Nomor tujuan (rekening/e-wallet) ada di raw["Number"] — kunci hasil flatten, BUKAN "Beneficiary Number".
             }
             # ID RafflesPay unik per baris; + ticket cadangan. TANPA nominal
             # supaya idempotensi tak goyah oleh variasi format angka.
