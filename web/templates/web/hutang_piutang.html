@@ -1,0 +1,60 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% load web_extras %}
+{% block title %}Hutang/Piutang · Truth of Auditor{% endblock %}
+{% block crumb %}Transaksi · Hutang/Piutang{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Hutang/Piutang</h1>
+    <p>Baris FR berkategori Hutang &amp; Piutang untuk <b>{{ active_toko.name }}</b> — otomatis dari data bracket, lintas tanggal.</p>
+  </div>
+</div>
+
+<div class="card reveal" style="margin-bottom:18px">
+  <form method="get" class="row" style="align-items:flex-end">
+    <div class="field"><label>Dari</label><input type="date" name="dari" value="{{ dari|date:'Y-m-d' }}"></div>
+    <div class="field"><label>Sampai</label><input type="date" name="sampai" value="{{ sampai|date:'Y-m-d' }}"></div>
+    <button class="btn primary" type="submit">Terapkan</button>
+    <span class="spacer"></span>
+    <span class="faint" style="font-size:12px">{{ data.count|intcomma }} baris</span>
+  </form>
+</div>
+
+<div class="grid cols-3 reveal" style="margin-bottom:18px">
+  <div class="card stat"><div class="k">Total Hutang</div><div class="v mono">{{ data.total_hutang|floatformat:0|intcomma }}</div></div>
+  <div class="card stat"><div class="k">Total Piutang</div><div class="v mono">{{ data.total_piutang|floatformat:0|intcomma }}</div></div>
+  <div class="card stat"><div class="k">Netto</div><div class="v mono">{{ data.netto|floatformat:0|intcomma }}</div></div>
+</div>
+
+{% if not data.rows %}
+<div class="card reveal"><div class="cell-empty" style="padding:34px 12px;text-align:center">
+  Belum ada baris hutang/piutang pada rentang ini.
+</div></div>
+{% else %}
+<div class="card pad0 reveal">
+  <div class="table-wrap" style="border:none">
+  <table>
+    <thead><tr>
+      <th>Tanggal</th><th>Jam</th><th>FR Account</th><th>Kategori</th>
+      <th>Member</th><th>Keterangan</th><th class="num">Nominal</th>
+    </tr></thead>
+    <tbody>
+    {% for r in page %}
+    <tr>
+      <td class="mono">{{ r.tanggal|date:"d/m/Y" }}</td>
+      <td class="mono faint">{{ r.jam }}</td>
+      <td style="font-size:12.5px">{{ r.account }}</td>
+      <td>{% if r.kategori == "hutang" %}<span class="badge bad">Hutang</span>{% else %}<span class="badge ok">Piutang</span>{% endif %}</td>
+      <td>{{ r.member|default:"—" }}</td>
+      <td class="faint">{{ r.keterangan|default:"—" }}</td>
+      <td class="num mono" {% if r.nominal < 0 %}style="color:var(--bad)"{% endif %}>{{ r.nominal|floatformat:0|intcomma }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div style="padding:10px 14px">{% pager page %}</div>
+</div>
+{% endif %}
+{% endblock %}

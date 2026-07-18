@@ -40,6 +40,7 @@ from transactions.models import Transaction, specific_source_label
 from web.access import is_admin, tokos_for
 from web.breakdown import bracket_breakdown as hitung_bracket_breakdown, KATEGORI_KANONIK
 from web.forms import GantiPasswordForm
+from web.hutang import hutang_piutang as hitung_hutang_piutang
 from web.models import FRKoreksi
 from web.monthly import monthly_summary
 from web.rekening import rekening_breakdown as hitung_rekening_breakdown
@@ -1397,6 +1398,21 @@ def fr_koreksi_simpan(request):
                             {"data": data, "tanggal": tanggal}, request=request)
     html += '<div id="koreksiPop" hx-swap-oob="innerHTML"></div>'
     return HttpResponse(html)
+
+
+@login_required
+def hutang_piutang(request):
+    """Daftar hutang/piutang FR lintas tanggal (otomatis dari data bracket)."""
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    sampai = _parse_date(request.GET.get("sampai", "")) or date_cls.today()
+    dari = _parse_date(request.GET.get("dari", "")) or sampai - timedelta(days=30)
+    data = hitung_hutang_piutang(active, dari=dari, sampai=sampai)
+    page = Paginator(data["rows"], 40).get_page(request.GET.get("page"))
+    return render(request, "web/hutang_piutang.html", {
+        "page": page, "data": data, "dari": dari, "sampai": sampai,
+    })
 
 
 @login_required

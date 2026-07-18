@@ -425,13 +425,14 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
     <a class="link sub {% if '/mutasi-bank' in p %}active{% endif %}" href="{% url 'bank_mutations' %}">Mutasi Bank</a>
     <a class="link sub {% if '/tinjau' in p %}active{% endif %}" href="{% url 'review_queue' %}">Area Pengecekan{% if pending_review_count %} <span class="cnt {% if pending_review_count > 200 %}hot{% endif %}">{{ pending_review_count }}</span>{% endif %}</a>
   </details>
-  <details class="grp{% if '/bracket' in p %} on{% endif %}"{% if '/bracket' in p %} open{% endif %}>
+  <details class="grp{% if '/bracket' in p or '/hutang-piutang' in p %} on{% endif %}"{% if '/bracket' in p or '/hutang-piutang' in p %} open{% endif %}>
     <summary>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
       <span class="lbl">FR/Bracket</span>
       <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
     </summary>
     <a class="link sub {% if '/bracket' in p %}active{% endif %}" href="{% url 'bracket_breakdown' %}">Breakdown FR/Bracket</a>
+    <a class="link sub {% if '/hutang-piutang' in p %}active{% endif %}" href="{% url 'hutang_piutang' %}">Hutang/Piutang</a>
   </details>
   <a class="link {% if '/bulanan' in p %}active{% endif %}" href="{% url 'monthly_overview' %}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Ringkasan Bulanan</a>
