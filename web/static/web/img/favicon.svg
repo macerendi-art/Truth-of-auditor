@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Truth of Auditor">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="11" fill="url(#g)"/>
+  <path d="M13 25 l7 7 l15 -18" fill="none" stroke="#fff" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
