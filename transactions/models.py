@@ -102,7 +102,8 @@ def specific_source_label(source_key, account=None, upload=None):
     """
     key = (source_key or "").lower()
     if key not in _MONEY_KEYS:
-        return key.capitalize()
+        # Key ber-underscore (panel_bonus/bracket_bonus) jangan tampil mentah.
+        return key.replace("_", " ").title()
     candidates = []
     if account is not None:
         candidates.append(account.provider)

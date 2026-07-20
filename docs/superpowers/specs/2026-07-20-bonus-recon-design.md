@@ -96,3 +96,31 @@ ada rekonsiliasi bonus apa pun** di mesin (bonus rows ter-exclude dari semua mat
 - Panel Promotion Claim >> bracket → ember Hanya Panel besar; per-kategori breakdown
   membuatnya legible, bukan bug.
 - Bonus lintas-hari dekat tengah malam tak cocok (kunci tanggal eksak) — diterima v1.
+
+## Hasil implementasi (2026-07-20)
+
+Eksekusi workflow multi-agent (14 agen: implementer+reviewer+fixer per task,
+2 agen kalibrasi paralel, 3 lensa review final, 1 agen suite). Commit
+`c5ba072` (E1 SourceType+seed) → `ff9d127` (E2 parser+deteksi) → `4ac2385`
+(E3 web/bonus.py + `/bonus/` + menu) → `946eef9` (E4 bulk Area Pengecekan);
+tiap task lolos review spec+kualitas tanpa temuan blocking.
+
+**Kalibrasi data nyata (MUL 15-07, scratch DB):** deteksi 3/3 file 0.95;
+panel_bonus **606** baris (Promotion 474 · Redemption 122 · Lucky Draw 6 ·
+Adjustment 4; nol kebocoran Deposit/Withdraw/Offset; nol username berprefix
+M77); bracket_bonus **134** (128+6). Rekonsiliasi 15-07: cocok 132
+(Rp3.185.000) · panel_only 474 · bracket_only 2; identitas terjaga
+cocok+panel_only=606, cocok+bracket_only=134. **Lucky Draw 6/6 cocok,
+bracket_only 0** (K-BLD↔panel presisi); Redemption Coupon 122/122 cocok
+(100%); Promotion Claim 472/474 hanya-panel (bracket memang hanya mencakup
+sebagian kategori — temuan yang ingin dilihat klien, bukan bug).
+
+**Review final 3 lensa (domain/keamanan/regresi):** 0 blocking; 2 minor —
+(1) badge sumber "Panel_bonus" → diperbaiki (label `Panel Bonus`/`Bracket
+Bonus` via `replace("_"," ").title()`); (2) atribusi toko AuditLog
+`bulk_review_queue` memakai toko baris pertama bila POST buatan mencampur
+banyak toko yang sama-sama boleh — imprecision jejak, bukan bypass; dicatat
+sebagai deferred di ledger.
+
+**Verifikasi:** suite penuh **845 test OK** (2 skipped) — naik dari 814
+(+31: seed 2, parser 11, deteksi 5, bonus web 9, bulk queue 4).
