@@ -44,9 +44,13 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .side::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;border-radius:inherit;
   background:url("{% static 'web/img/bg-sidebar.jpg' %}") bottom center/cover no-repeat;opacity:.6}
 .side .brand{display:flex;align-items:center;gap:11px;padding:6px 10px 18px;font-family:'Sora';font-weight:700;font-size:15.5px}
-.side .brand .logo{width:33px;height:33px;border-radius:9px;background:var(--grad);display:grid;place-items:center;
-  box-shadow:0 6px 18px -6px rgba(37,99,235,.7);flex-shrink:0}
-.side .brand .logo svg{width:18px;height:18px;color:#fff}
+.side .brand .logo{width:34px;height:34px;flex-shrink:0;filter:drop-shadow(0 5px 14px rgba(37,99,235,.5))}
+.side .brand .logo svg{width:100%;height:100%;display:block}
+/* mark "konstelasi kotak": grid = buku besar tersusun, kotak terbang = transaksi menuju tempatnya */
+.side .brand .logo .fly{transform-box:fill-box;transform-origin:center;rotate:45deg;animation:lgFly 6s ease-in-out infinite}
+.side .brand .logo .fly.f2{animation-duration:7.5s;animation-delay:-2.8s}
+@keyframes lgFly{0%,100%{translate:0 0}50%{translate:0 -1.7px}}
+@media (prefers-reduced-motion:reduce){.side .brand .logo .fly{animation:none}}
 .side .brand small{display:block;font-family:'Inter';font-weight:500;font-size:10.5px;color:var(--side-muted);letter-spacing:.02em}
 .side .sec{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--side-muted);padding:12px 12px 6px;font-weight:600}
 .side a.link{position:relative;display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:10px;
@@ -167,14 +171,16 @@ a.card.stat.click{display:flex;flex-direction:column;gap:8px}
   display:inline-grid;place-items:center;font-weight:700;font-size:12px;flex-shrink:0}
 
 /* ---- BUTTON ---- */
-.btn{display:inline-flex;align-items:center;gap:8px;padding:9px 15px;border-radius:10px;font-family:inherit;
+/* Tinggi kontrol seragam: input/select natural 39px — tombol WAJIB sama supaya
+   baris filter simetris di semua halaman (audit tombol, paket G). */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:8px 15px;min-height:39px;border-radius:10px;font-family:inherit;
   font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid var(--line-2);background:var(--panel);color:var(--ink);
   box-shadow:var(--shadow);transition:background .14s,box-shadow .14s}
 .btn svg{width:15px;height:15px}
 .btn:hover{background:var(--panel-2)}
-.btn.primary{border:none;background:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(15,23,42,.2)}
+.btn.primary{border:1px solid transparent;background:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(15,23,42,.2)}
 .btn.primary:hover{background:#1d4fd7}
-.btn.sm{padding:5px 11px;font-size:12.5px;border-radius:10px}
+.btn.sm{padding:4px 11px;font-size:12.5px;border-radius:9px;min-height:32px}
 .btn.ghost{background:transparent;box-shadow:none;border-color:transparent}
 .btn.ghost:hover{background:var(--panel-2)}
 .btn.danger{color:var(--bad)}
@@ -185,7 +191,18 @@ a.card.stat.click{display:flex;flex-direction:column;gap:8px}
 .btn.is-busy{opacity:.65;pointer-events:none}
 .btn.is-busy:after{content:"";width:13px;height:13px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
 .btn.htmx-request{opacity:.55;pointer-events:none}
+.btn:disabled{opacity:.55;cursor:not-allowed}
 @keyframes spin{to{transform:rotate(1turn)}}
+
+/* ---- TOOLBAR CARD-HEAD (baris aksi rapi: chip jumlah, search-group, aksi) ---- */
+.card-head .toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.chip-n{font-size:12px;color:var(--muted);background:var(--panel-2);border:1px solid var(--line);border-radius:99px;padding:3px 10px;font-weight:600;white-space:nowrap}
+.searchbox{display:flex;align-items:stretch}
+.searchbox input{border-radius:9px 0 0 9px;border-right:none;min-width:168px}
+.searchbox input:focus{position:relative;z-index:1}
+.searchbox .btn{border-radius:0 9px 9px 0;box-shadow:none}
+.toolbar .vr{width:1px;align-self:stretch;background:var(--line);margin:3px 3px}
+.btn .cnt{font-size:11px;font-weight:800;background:var(--bad-bg);color:var(--bad);border-radius:99px;padding:1px 7px;font-variant-numeric:tabular-nums}
 
 /* ---- FORM ---- */
 label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:500}
@@ -194,6 +211,8 @@ input,select,.f{width:100%;padding:9px 12px;border:1px solid var(--line-2);borde
   font-size:14px;background:var(--panel);color:var(--ink);transition:border-color .14s,box-shadow .14s}
 input:focus,select.f:focus,.f:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.14)}
 input[type=checkbox],input[type=radio]{width:auto;accent-color:var(--brand)}
+/* input kompak utk toolbar card-head (serasi .btn.sm 32px) */
+input.ctl-sm{width:auto;min-height:32px;padding:4px 11px;font-size:13px;border-radius:9px}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}.row>*{flex:1;min-width:150px}
 .row>.btn{flex:0 0 auto;margin-bottom:14px}
 
@@ -229,7 +248,7 @@ tbody tr:hover{background:var(--panel-2)}
 tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
 table.flush{border:none} table.flush thead th{background:none;position:static}
 .r{text-align:right}
-th.num,td.num{text-align:right}
+th.num,td.num{text-align:right} th.num{white-space:nowrap}
 .th-sort{color:inherit;display:inline-flex;align-items:center;gap:3px}
 .th-sort:hover{color:var(--ink)}
 .twrap.tall,.table-wrap.tall{max-height:72vh;overflow:auto}
@@ -394,7 +413,18 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
 <div class="shell">
 <aside class="side" id="sidebar">
   <div class="brand">
-    <span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 12.5l3.5 3.5 7.5-9"/></svg></span>
+    <span class="logo" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none">
+      <defs>
+        <linearGradient id="lgA" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#2563eb"/></linearGradient>
+        <linearGradient id="lgB" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#2563eb"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
+      </defs>
+      <rect x="5" y="22" width="11" height="11" rx="3" fill="url(#lgA)"/>
+      <rect x="18" y="22" width="11" height="11" rx="3" fill="url(#lgA)" opacity=".82"/>
+      <rect x="5" y="35" width="11" height="11" rx="3" fill="url(#lgA)" opacity=".62"/>
+      <rect x="18" y="35" width="11" height="11" rx="3" fill="url(#lgB)"/>
+      <rect class="fly f1" x="31" y="6" width="11" height="11" rx="3" fill="url(#lgB)"/>
+      <rect class="fly f2" x="36" y="24" width="8" height="8" rx="2.2" fill="#22d3ee" opacity=".9"/>
+    </svg></span>
     <span>Truth of Auditor<small>rekonsiliasi keuangan</small></span>
   </div>
   <div class="sec">Menu</div>
@@ -405,7 +435,7 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
   <a class="link {% if '/tokos' in p %}active{% endif %}" href="{% url 'toko_overview' %}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Ringkasan Toko</a>
   {% endif %}
-  <div class="sec">Ikhtisar</div>
+  <div class="sec">Laporan</div>
   <a class="link {% if '/bulanan' in p %}active{% endif %}" href="{% url 'monthly_overview' %}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Ringkasan Bulanan</a>
   <a class="link {% if '/rekening' in p %}active{% endif %}" href="{% url 'rekening_breakdown' %}">

@@ -40,12 +40,14 @@
   </div>
   <div class="table-wrap" style="border:none">
   <table>
+    {% comment %}lebar kolom numerik DIKUNCI: kolom Rekening yang menyerap sisa ruang —
+       angka selalu duduk rapat di bawah header-nya, tidak "melayang" di layar lebar{% endcomment %}
     <thead><tr>
       <th style="width:44px" class="num">No</th><th>Rekening</th>
-      <th class="num">Deposit</th><th class="num">Withdraw</th><th class="num">Biaya Admin</th>
-      <th class="num">Net</th><th class="num" style="width:66px">Trx</th>
-      <th class="num">Saldo Awal</th><th class="num">Saldo Akhir</th>
-      <th class="num" title="Saldo Akhir − (Saldo Awal + Total Mutasi)">Selisih Kontrol</th>
+      <th class="num" style="width:122px">Deposit</th><th class="num" style="width:122px">Withdraw</th><th class="num" style="width:106px">Biaya Admin</th>
+      <th class="num" style="width:122px">Net</th><th class="num" style="width:62px">Trx</th>
+      <th class="num" style="width:122px">Saldo Awal</th><th class="num" style="width:122px">Saldo Akhir</th>
+      <th class="num" style="width:132px" title="Saldo Akhir − (Saldo Awal + Total Mutasi)">Selisih Kontrol</th>
     </tr></thead>
     <tbody>
     {% for a in data.accounts %}
