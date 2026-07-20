@@ -204,3 +204,65 @@ class DetectRPayXlsxTests(SimpleTestCase):
         finally:
             os.remove(path)
         self.assertEqual(hasil[0]["parser_key"], "nxpay")
+
+
+class DetectBonusTests(SimpleTestCase):
+    """Deteksi panel_bonus (Credit Balance) & bracket_bonus (Credit/Non-Credit Bonus)."""
+
+    def test_deteksi_panel_bonus(self):
+        path = _xlsx([["Credit Balance Report"],
+                      ["No.", "Brand", "Date & Time", "Description", "Remarks",
+                       "Payment Type", "Payment Details", "Amt.",
+                       "Current Credit Balance"],
+                      [1, "M77", "15-Jul-2026 00:00:09.927", "Adjustment: M77Fff",
+                       "", "", "", -5, 9965]])
+        try:
+            hasil = detect_source(path, "CREDIT_BALANCE_M77.xlsx")
+        finally:
+            os.remove(path)
+        self.assertEqual(hasil[0]["parser_key"], "panel_bonus")
+        self.assertGreaterEqual(hasil[0]["confidence"], 0.95)
+
+    def test_deteksi_bracket_bonus_dengan_category(self):
+        path = _xlsx([["Transaction ID", "Date", "Category", "Description",
+                       "Nominal", "Deleted", "Created By"],
+                      ["TID1", "15-Jul-2026 06:00:00", "BONUS LOYALTY MURAH (BL1)",
+                       "Player: hhh", 25000, "No", "adminx"]])
+        try:
+            hasil = detect_source(path, "CREDIT_BONUS.xlsx")
+        finally:
+            os.remove(path)
+        self.assertEqual(hasil[0]["parser_key"], "bracket_bonus")
+        self.assertGreaterEqual(hasil[0]["confidence"], 0.95)
+
+    def test_deteksi_bracket_bonus_tanpa_category(self):
+        path = _xlsx([["Transaction ID", "Date", "Description", "Nominal",
+                       "Deleted", "Created By"],
+                      ["TID2", "15-Jul-2026 05:05:00", "K-BLD\nPlayer: Ggg",
+                       30000, "No", "adminx"]])
+        try:
+            hasil = detect_source(path, "NON_CREDIT_BONUS.xlsx")
+        finally:
+            os.remove(path)
+        self.assertEqual(hasil[0]["parser_key"], "bracket_bonus")
+        self.assertGreaterEqual(hasil[0]["confidence"], 0.95)
+
+    def test_layout_panel_lama_tidak_ikut_terdeteksi_bonus(self):
+        # Non-regresi: header panel DP/WD lama TIDAK boleh ikut kena panel_bonus.
+        p = _xlsx([["HISTORI DP PANEL"], ["Ticket Number", "User Name",
+                   "Deposit Amount"]])
+        try:
+            keys = [d["parser_key"] for d in detect_source(p, "hist.xlsx")]
+        finally:
+            os.remove(p)
+        self.assertNotIn("panel_bonus", keys)
+
+    def test_layout_bracket_lama_tidak_ikut_terdeteksi_bonus(self):
+        # Non-regresi: header FR bracket lama (Kategori/Credit Awal/Credit Akhir,
+        # tanpa Deleted/Nominal) TIDAK boleh ikut kena bracket_bonus.
+        p = _xlsx([["Kategori", "Credit Awal", "Credit Akhir", "Transaction ID"]])
+        try:
+            keys = [d["parser_key"] for d in detect_source(p, "fr.xlsx")]
+        finally:
+            os.remove(p)
+        self.assertNotIn("bracket_bonus", keys)

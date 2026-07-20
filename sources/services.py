@@ -11,6 +11,7 @@ from .models import SourceType, Upload
 from .parsers.banks import BCACSVParser, BRIParser, MandiriParser
 from .parsers.bca_pdf import BCAPDFParser
 from .parsers.bni_pdf import BNIPDFParser
+from .parsers.bonus import BracketBonusParser, PanelBonusParser
 from .parsers.bracket import BracketParser
 from .parsers.cor import (
     CORPanelBankParser,
@@ -49,6 +50,8 @@ PARSERS = {
     "rpay_xlsx": RPayDPXlsxParser,
     "rpay_wd_xlsx": RPayWDXlsxParser,
     "qhoki": QHokiParser,
+    "panel_bonus": PanelBonusParser,
+    "bracket_bonus": BracketBonusParser,
 }
 
 # Magic bytes: OLE2/CDFV2 compound-file header (e-statement terenkripsi "agile encryption").

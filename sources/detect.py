@@ -88,6 +88,10 @@ def detect_source(path, filename=""):
             add("rpay_xlsx", 0.95)  # RafflesPay DP varian XLSX (BBS)
         if _has(t, "source of funds") and _has(t, "disbursed amount") and _has(t, "beneficiary"):
             add("rpay_wd_xlsx", 0.95)  # RafflesPay WD XLSX dua-tingkat (BBS)
+        if _has(t, "date & time") and _has(t, "payment details") and _has(t, "current credit balance"):
+            add("panel_bonus", 0.95)  # Panel Credit Balance (ledger kredit; bonus)
+        if _has(t, "transaction id") and _has(t, "nominal") and _has(t, "deleted") and _has(t, "created by"):
+            add("bracket_bonus", 0.95)  # Bracket Credit/Non-Credit Bonus
         if _has(t, "kategori") and (_has(t, "credit awal") or _has(t, "credit akhir")):
             add("bracket", 0.95)
         if _has(t, "client reference") and (_has(t, "settlement time") or _has(t, "txn id")):
