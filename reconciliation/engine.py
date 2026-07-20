@@ -150,6 +150,11 @@ NO_MONEY_WAIT_DETAIL = "Ada kandidat nominal+tanggal tapi identitas beda — men
 # TIDAK dipasangkan (menunggu settlement). Kalibrasi via `validate_brands`;
 # dinaikkan ke ToleranceProfile bila per-toko perlu beda (YAGNI sekarang).
 NAME_REVIEW_FLOOR = 60
+# Lantai toleransi selisih nominal pass 2 (fee transfer MENEMPEL di debit bank):
+# BI-Fast 2.500, online/switching antarbank 6.500 — kasus nyata LBS: panel WD
+# 400.000 didebit 406.500 satu baris. Identitas tetap gerbang; ini hanya
+# memperlebar kandidat yang BOLEH dinilai.
+FEE_TOL_MIN = 6500
 
 
 def _included_money_sources(include):
@@ -460,7 +465,7 @@ class _MoneyMatcher:
                 continue
             amt = int(abs(p.money_delta))
             best = None
-            for b, delta in kandidat(p, tol_amt=max(2500, amt // 100)):
+            for b, delta in kandidat(p, tol_amt=max(FEE_TOL_MIN, amt // 100)):
                 s = self._identity(p, b)
                 if s >= tol.fuzzy_threshold and (best is None or s > best[0]):
                     best = (s, b)

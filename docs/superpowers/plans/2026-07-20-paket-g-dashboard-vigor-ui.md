@@ -29,4 +29,18 @@
 - **G4**: sec sidebar "Ikhtisar" → **"Laporan"**.
 - **G5**: diagnosa Range-API membuktikan header↔angka sudah rata (d=0) — akar keluhan = kolom melar di layar lebar; fix: lebar kolom numerik dikunci (Rekening menyerap sisa), `th.num` nowrap. Bug ikutan `{# #}` multi-baris ter-render → `{% comment %}`.
 - **G6**: toolbar Riwayat Upload → chip jumlah + search-group menyatu (`.searchbox`, input `.ctl-sm` 32px + tombol ikon) + tombol Hapus terpilih danger ber-badge `.cnt`; separator `.vr`.
+## Lampiran — Paket H (fee-glued WD, insiden LBS 19/07)
+
+Klien: "WD BCA kenapa tidak cocok padahal ada di mutasi?" Diagnosa prod run #520 (LBS):
+(a) **fee antarbank menempel di debit** — panel WD 400.000, mutasi 406.500 satu baris
+("UMAR MANAP NASUTIO… SWITCHING DB"; ≥4 baris 406.500 hari itu); pass 2 lama
+`tol_amt=max(2500, amt//100)`=4.000 utk 400rb → kandidat tak terlihat → `no_money` palsu.
+(b) **WD 23:4x → uang H+1** — mutasi 20/07 belum diupload; biarkan late settlement
+(JANGAN tandai manual — nanti uangnya jadi no_panel).
+Fix H: konstanta `FEE_TOL_MIN=6500` sebagai lantai tol pass 2 (BI-Fast 2.500 & online
+antarbank 6.500). Identitas tetap gerbang (persis/prefix-terpotong=100 → cocok `amount_fee`;
+fuzzy (mis. typo "MANAF" 94) → perlu_tinjau; nama beda → tetap no_money). TDD 5 test
+`web/tests_fee_glued.py` (merah→hijau); `_name_score` prefix-truncation=100 adalah by-design
+(docstring) — kasus nama terpotong memang COCOK.
+
 - **G7 akar tombol tak simetris (terukur)**: input/select 39px vs `.btn.primary` 34px (border:none) vs `.btn` 36px → fix global `min-height:39px` + `.primary` border transparan + `.btn.sm` 32px + `:disabled`. Sesudah: select/input/Filter/Reset SEMUA top 269 bottom 308 h 39 (identik) di Mutasi Bank; Area Pengecekan & Bonus & Rekening ikut beres dari satu sumber CSS.
