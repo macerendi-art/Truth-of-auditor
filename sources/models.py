@@ -7,11 +7,14 @@ class SourceType(models.Model):
     """Jenis sumber data: panel / bracket / bank / gateway (extensible)."""
 
     PANEL, BRACKET, BANK, GATEWAY = "panel", "bracket", "bank", "gateway"
+    PANEL_BONUS, BRACKET_BONUS = "panel_bonus", "bracket_bonus"
     KIND_CHOICES = [
         (PANEL, "Panel"),
         (BRACKET, "Bracket"),
         (BANK, "Bank"),
         (GATEWAY, "Gateway"),
+        (PANEL_BONUS, "Panel Bonus"),
+        (BRACKET_BONUS, "Bracket Bonus"),
     ]
 
     key = models.CharField(max_length=20, unique=True, choices=KIND_CHOICES)
