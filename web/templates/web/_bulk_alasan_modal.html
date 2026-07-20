@@ -1,0 +1,42 @@
+{# Modal alasan untuk aksi bulk Setujui/Tinjau terpilih — satu alasan utk semua baris.
+   Konfirmasi menyalin alasan+catatan ke #bulk-form lalu submit (ganti confirm() lama). #}
+<div id="bulkPop" style="display:none;position:fixed;inset:0;z-index:80;background:rgba(8,10,17,.45);align-items:center;justify-content:center">
+  <div class="card pop-mini">
+    <h3 id="bulkPopJudul" style="margin:0 0 2px;font-size:14px">Setujui terpilih</h3>
+    <p class="faint" id="bulkPopInfo" style="margin:0 0 10px;font-size:12px"></p>
+    <form id="bulk-alasan-form">
+      <div class="field"><label>Alasan</label>
+        <select name="alasan" required
+                onchange="var w=this.closest('form').querySelector('.alasan-catatan');var on=this.value==='lainnya';w.style.display=on?'':'none';w.querySelector('textarea').required=on">
+          <option value="">— pilih alasan —</option>
+          {% for kode, nama in pilihan_alasan %}
+          <option value="{{ kode }}">{{ nama }}</option>
+          {% endfor %}
+        </select></div>
+      <div class="field alasan-catatan" style="display:none"><label>Catatan</label>
+        <textarea name="catatan" rows="2" placeholder="jelaskan alasan lainnya"></textarea></div>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:6px">
+        <button type="button" class="btn" onclick="document.getElementById('bulkPop').style.display='none'">Batal</button>
+        <button class="btn primary" type="submit">Konfirmasi</button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+function bukaBulkAlasan(action){
+  var n = document.querySelectorAll('input[name="result_ids"]:checked').length;
+  document.getElementById('bulk-aksi').value = action;
+  document.getElementById('bulkPopJudul').textContent =
+    action === 'mark_matched' ? 'Setujui terpilih' : 'Tinjau terpilih';
+  document.getElementById('bulkPopInfo').textContent =
+    n + ' hasil terpilih akan ditandai ' +
+    (action === 'mark_matched' ? 'COCOK' : 'PERLU DITINJAU') + '.';
+  document.getElementById('bulkPop').style.display = 'flex';
+}
+document.getElementById('bulk-alasan-form').addEventListener('submit', function(e){
+  e.preventDefault();
+  document.getElementById('bulk-alasan').value = this.alasan.value;
+  document.getElementById('bulk-catatan').value = this.catatan.value;
+  document.getElementById('bulk-form').submit();
+});
+</script>

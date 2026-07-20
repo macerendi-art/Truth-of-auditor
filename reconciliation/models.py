@@ -118,6 +118,10 @@ class ReviewAction(TimeStampedModel):
     )
     action = models.CharField(max_length=30)
     reason = models.TextField(blank=True)
+    # Kode alasan terstruktur. Daftar pilihan REUSE milik
+    # web.models.FRKoreksi.ALASAN_KOREKSI — sengaja TANPA choices= di sini
+    # (layering repo: web → reconciliation, jangan dibalik); validasi di view.
+    alasan = models.CharField(max_length=32, blank=True, default="")
     reviewer = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True
     )

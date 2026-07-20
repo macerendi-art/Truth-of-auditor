@@ -1,0 +1,28 @@
+<div class="card pop-mini">
+  <h3 style="margin:0 0 2px;font-size:14px">{{ judul }}</h3>
+  <p class="faint" style="margin:0 0 10px;font-size:12px">
+    {% if r.left %}<span class="mono">{{ r.left.ticket_no|default:"—" }}</span>{% if r.left.occurred_at %} · {{ r.left.occurred_at|date:"d M Y H:i" }}{% endif %}{% if r.left.username %} · {{ r.left.username }}{% endif %}
+    {% elif r.right %}{{ r.right.source_label_full }}{% if r.right.occurred_at %} · {{ r.right.occurred_at|date:"d M Y H:i" }}{% endif %}
+    {% else %}Hasil #{{ r.pk }}{% endif %}
+  </p>
+  <form hx-post="{% url 'review' r.pk %}" hx-target="#res-{{ r.pk }}" hx-swap="outerHTML">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="{{ action }}">
+    <input type="hidden" name="show_run_col" value="{% if show_run_col %}1{% else %}0{% endif %}">
+    <input type="hidden" name="hide_left" value="{% if hide_left %}1{% else %}0{% endif %}">
+    <div class="field"><label>Alasan</label>
+      <select name="alasan" required
+              onchange="var w=this.closest('form').querySelector('.alasan-catatan');var on=this.value==='lainnya';w.style.display=on?'':'none';w.querySelector('textarea').required=on">
+        <option value="">— pilih alasan —</option>
+        {% for kode, nama in pilihan_alasan %}
+        <option value="{{ kode }}">{{ nama }}</option>
+        {% endfor %}
+      </select></div>
+    <div class="field alasan-catatan" style="display:none"><label>Catatan</label>
+      <textarea name="catatan" rows="2" placeholder="jelaskan alasan lainnya"></textarea></div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:6px">
+      <button type="button" class="btn" onclick="document.getElementById('reviewPop').innerHTML=''">Batal</button>
+      <button class="btn primary" type="submit">Konfirmasi</button>
+    </div>
+  </form>
+</div>

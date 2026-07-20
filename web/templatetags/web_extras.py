@@ -1,5 +1,7 @@
 from django import template
 
+from web.models import FRKoreksi
+
 register = template.Library()
 
 
@@ -47,6 +49,18 @@ def reason_tone(code):
     if not code:
         return "muted"
     return REASON_LABELS.get(code, (code, "muted"))[1]
+
+
+# Label alasan review manual — REUSE daftar milik FRKoreksi (satu sumber kebenaran).
+ALASAN_REVIEW_LABELS = dict(FRKoreksi.ALASAN_KOREKSI)
+
+
+@register.filter
+def alasan_review_label(code):
+    """Kode alasan review (Setujui/Tinjau) → label rapih. Fallback: kode apa adanya."""
+    if not code:
+        return ""
+    return ALASAN_REVIEW_LABELS.get(code, code)
 
 
 # Peta kode aksi AuditLog → (label rapih, nada badge). Kode lama tetap di sini

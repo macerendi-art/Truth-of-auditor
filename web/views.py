@@ -10,7 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
-from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max, Min, OuterRef, Q, Sum
+from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max, Min, OuterRef, Q, Subquery, Sum
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -1043,7 +1043,7 @@ def run_detail(request, pk):
         allowed={"amount": "left__amount", "skor": "score", "waktu": "left__occurred_at"},
         default_order=["bucket", "-score", "id"],
     )
-    page = Paginator(qs, 40).get_page(request.GET.get("page"))
+    page = Paginator(_annot_alasan_review(qs), 40).get_page(request.GET.get("page"))
     left_label, right_label = REL_LABELS.get(run.relation, ("Kiri", "Kanan"))
     left_amt_label, right_amt_label = REL_AMOUNT_LABELS.get(
         run.relation, ("Kredit/Koin", "Saldo Bank")
@@ -1072,6 +1072,7 @@ def run_detail(request, pk):
         "banks": banks, "bank": bank, "btitles": btitles, "btitle": btitle,
         "totals": totals,
         "sort": sort, "dir": sort_dir, "is_hollow": is_hollow,
+        "pilihan_alasan": FRKoreksi.ALASAN_KOREKSI,
     }
     return render(request, "web/run_detail.html", ctx)
 
@@ -1161,7 +1162,7 @@ def review_queue(request):
         kredit=Sum("left__amount"), saldo=Sum("right__amount"), n=Count("id")
     )
 
-    page = Paginator(qs, 40).get_page(request.GET.get("page"))
+    page = Paginator(_annot_alasan_review(qs), 40).get_page(request.GET.get("page"))
     # nomor batch per-toko untuk tiap hasil di halaman ini
     for r in page.object_list:
         b = r.run.batch
@@ -1176,6 +1177,7 @@ def review_queue(request):
         "banks": banks, "btitles": btitles,
         "date_from": request.GET.get("from", "") if date_from else "",
         "date_to": request.GET.get("to", "") if date_to else "",
+        "pilihan_alasan": FRKoreksi.ALASAN_KOREKSI,
     })
 
 
@@ -1650,6 +1652,25 @@ def toko_overview(request):
     })
 
 
+def _baca_alasan(request):
+    """Kode alasan OPSIONAL aksi review — daftar sah REUSE FRKoreksi.ALASAN_KOREKSI
+    (satu sumber kebenaran; tanpa duplikasi list). Return (alasan, valid)."""
+    alasan = request.POST.get("alasan") or ""
+    if alasan and alasan not in dict(FRKoreksi.ALASAN_KOREKSI):
+        return "", False
+    return alasan, True
+
+
+def _annot_alasan_review(qs):
+    """Tempelkan alasan+catatan ReviewAction terakhir per hasil (untuk chip
+    di baris manual_override) — satu subquery, tanpa N+1."""
+    terakhir = ReviewAction.objects.filter(result=OuterRef("pk")).order_by("-id")
+    return qs.annotate(
+        alasan_manual=Subquery(terakhir.values("alasan")[:1]),
+        catatan_manual=Subquery(terakhir.values("reason")[:1]),
+    )
+
+
 @login_required
 @require_POST
 def bulk_review(request, pk):
@@ -1661,6 +1682,10 @@ def bulk_review(request, pk):
                "mark_review": MatchResult.Bucket.TINJAU}
     if action not in buckets:
         return HttpResponseBadRequest("Aksi tidak dikenal.")
+    alasan, sah = _baca_alasan(request)
+    if not sah:
+        return HttpResponseBadRequest("alasan tidak dikenal")
+    catatan = (request.POST.get("catatan") or "").strip()
     ids = [i for i in request.POST.getlist("result_ids") if i.isdigit()]
     rows = list(MatchResult.objects.filter(run=run, id__in=ids))
     for r in rows:
@@ -1668,12 +1693,13 @@ def bulk_review(request, pk):
         r.reason_code = "manual_override"
         r.save(update_fields=["bucket", "reason_code"])
         ReviewAction.objects.create(
-            result=r, action=action, reason="bulk", reviewer=request.user
+            result=r, action=action, reason=catatan or "bulk",
+            alasan=alasan, reviewer=request.user
         )
     if rows:
         catat(request.user, "review_massal", f"{len(rows)} hasil",
               toko=run.batch.toko if run.batch else None,
-              run_pk=run.pk, n=len(rows), action=action)
+              run_pk=run.pk, n=len(rows), action=action, alasan=alasan)
         if run.batch:  # kartu Cocok/Tinjau run & batch jangan basi terhadap chip live
             refresh_batch_summary(run.batch)
     messages.success(request, f"{len(rows)} hasil diperbarui.")
@@ -1696,6 +1722,10 @@ def bulk_review_queue(request):
                "mark_review": MatchResult.Bucket.TINJAU}
     if action not in buckets:
         return HttpResponseBadRequest("Aksi tidak dikenal.")
+    alasan, sah = _baca_alasan(request)
+    if not sah:
+        return HttpResponseBadRequest("alasan tidak dikenal")
+    catatan = (request.POST.get("catatan") or "").strip()
     ids = [i for i in request.POST.getlist("result_ids") if i.isdigit()]
     rows = list(MatchResult.objects.filter(
         id__in=ids, run__batch__toko__in=tokos_for(request.user)
@@ -1706,13 +1736,14 @@ def bulk_review_queue(request):
         r.reason_code = "manual_override"
         r.save(update_fields=["bucket", "reason_code"])
         ReviewAction.objects.create(
-            result=r, action=action, reason="bulk", reviewer=request.user)
+            result=r, action=action, reason=catatan or "bulk",
+            alasan=alasan, reviewer=request.user)
         if r.run.batch_id:
             batches[r.run.batch_id] = r.run.batch
     if rows:
         catat(request.user, "review_massal", f"{len(rows)} hasil (Area Pengecekan)",
               toko=rows[0].run.batch.toko if rows[0].run.batch else None,
-              n=len(rows), action=action)
+              n=len(rows), action=action, alasan=alasan)
         for b in batches.values():  # kartu run & batch jangan basi
             refresh_batch_summary(b)
     messages.success(request, f"{len(rows)} hasil diperbarui.")
@@ -1725,11 +1756,27 @@ def bulk_review_queue(request):
 
 
 @login_required
+def review_alasan_form(request, pk):
+    """Popup kecil pilih alasan sebelum Setujui/Tinjau satu hasil (GET, HTMX) —
+    cetakan sama dgn modal Koreksi FR."""
+    r = get_object_or_404(MatchResult, pk=pk, run__batch__toko__in=tokos_for(request.user))
+    action = request.GET.get("action", "")
+    judul = {"mark_matched": "Setujui hasil", "mark_review": "Tandai perlu ditinjau"}
+    if action not in judul:
+        return HttpResponseBadRequest("Aksi tidak dikenal.")
+    return render(request, "web/_review_alasan_form.html", {
+        "r": r, "action": action, "judul": judul[action],
+        "show_run_col": request.GET.get("show_run_col") == "1",
+        "hide_left": request.GET.get("hide_left") == "1",
+        "pilihan_alasan": FRKoreksi.ALASAN_KOREKSI,
+    })
+
+
+@login_required
 @require_POST
 def review(request, pk):
     r = get_object_or_404(MatchResult, pk=pk, run__batch__toko__in=tokos_for(request.user))
     action = request.POST.get("action", "")
-    reason = request.POST.get("reason", "")
     buckets = {
         "mark_matched": MatchResult.Bucket.COCOK,
         "mark_review": MatchResult.Bucket.TINJAU,
@@ -1737,6 +1784,11 @@ def review(request, pk):
     }
     if action not in buckets:
         return HttpResponseBadRequest("Aksi tidak dikenal.")
+    alasan, sah = _baca_alasan(request)
+    if not sah:
+        return HttpResponseBadRequest("alasan tidak dikenal")
+    # catatan bebas: param baru `catatan` (modal alasan) ATAU param lama `reason`
+    reason = (request.POST.get("catatan") or "").strip() or request.POST.get("reason", "")
     # Catatan: override pada hasil no_money yang barisnya masih AKTIF (menunggu
     # settlement) mengeluarkannya dari carry-over — baris itu akan diperlakukan
     # sebagai baris baru di run berikutnya. Follow-up kecil bila jadi masalah:
@@ -1744,9 +1796,12 @@ def review(request, pk):
     r.bucket = buckets[action]
     r.reason_code = "manual_override"
     r.save(update_fields=["bucket", "reason_code"])
-    ReviewAction.objects.create(result=r, action=action, reason=reason, reviewer=request.user)
+    ReviewAction.objects.create(
+        result=r, action=action, reason=reason, alasan=alasan, reviewer=request.user
+    )
     catat(request.user, "review", f"Result #{r.pk}",
-          toko=r.run.batch.toko if r.run.batch else None, result_pk=r.pk, action=action)
+          toko=r.run.batch.toko if r.run.batch else None, result_pk=r.pk, action=action,
+          alasan=alasan)
     if r.run.batch:  # kartu Cocok/Tinjau run & batch jangan basi terhadap chip live
         refresh_batch_summary(r.run.batch)
     show_run_col = request.POST.get("show_run_col") == "1"
@@ -1754,10 +1809,16 @@ def review(request, pk):
         r.home_no = ReconBatch.objects.filter(
             toko=r.run.batch.toko, id__lte=r.run.batch_id
         ).count()
-    return render(request, "web/_result_row.html", {
+    # chip alasan harus langsung tampil di baris hasil swap (tanpa annotate queryset)
+    r.alasan_manual = alasan
+    r.catatan_manual = reason
+    html = render_to_string("web/_result_row.html", {
         "r": r, "bucket_meta": BUCKET_META, "show_run_col": show_run_col,
         "hide_left": request.POST.get("hide_left") == "1",
-    })
+    }, request=request)
+    # tutup modal alasan (bila aksi datang dari popup) — pola fr_koreksi_simpan
+    html += '<div id="reviewPop" hx-swap-oob="innerHTML"></div>'
+    return HttpResponse(html)
 
 
 @login_required
