@@ -15,6 +15,9 @@
   <form method="get" class="row" style="align-items:flex-end">
     <div class="field"><label>Dari</label><input type="date" name="dari" value="{{ dari|date:'Y-m-d' }}"></div>
     <div class="field"><label>Sampai</label><input type="date" name="sampai" value="{{ sampai|date:'Y-m-d' }}"></div>
+    <div class="field" style="flex:2"><label>Kategori</label>
+      <select name="kategori"><option value="">Semua kategori</option>
+      {% for k in data.kategori_opsi %}<option value="{{ k }}"{% if k == kategori %} selected{% endif %}>{{ k }}</option>{% endfor %}</select></div>
     <input type="hidden" name="tab" value="{{ tab }}">
     <button class="btn primary" type="submit">Terapkan</button>
   </form>
@@ -43,32 +46,47 @@
   <div class="table-wrap" style="border:none">
   <table>
     <thead><tr>
-      <th>Kategori</th><th class="num">Cocok</th><th class="num">Hanya Panel</th><th class="num">Hanya Bracket</th>
+      <th>Kategori</th>
+      <th class="num">Cocok</th><th class="num">Nilai (Rp)</th>
+      <th class="num">Hanya Panel</th><th class="num">Nilai (Rp)</th>
+      <th class="num">Hanya Bracket</th><th class="num">Nilai (Rp)</th>
     </tr></thead>
     <tbody>
     {% for kat, n in data.ringkas.kategori.items %}
     <tr>
       <td>{{ kat }}</td>
       <td class="num mono">{{ n.cocok|intcomma }}</td>
+      <td class="num mono">{{ n.cocok_total|floatformat:0|intcomma }}</td>
       <td class="num mono">{{ n.panel_only|intcomma }}</td>
+      <td class="num mono">{{ n.panel_only_total|floatformat:0|intcomma }}</td>
       <td class="num mono">{{ n.bracket_only|intcomma }}</td>
+      <td class="num mono">{{ n.bracket_only_total|floatformat:0|intcomma }}</td>
     </tr>
     {% endfor %}
     </tbody>
+    <tfoot><tr style="font-weight:700">
+      <td>TOTAL</td>
+      <td class="num mono">{{ data.ringkas.cocok.n|intcomma }}</td>
+      <td class="num mono">{{ data.ringkas.cocok.total|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.ringkas.panel_only.n|intcomma }}</td>
+      <td class="num mono">{{ data.ringkas.panel_only.total|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.ringkas.bracket_only.n|intcomma }}</td>
+      <td class="num mono">{{ data.ringkas.bracket_only.total|floatformat:0|intcomma }}</td>
+    </tr></tfoot>
   </table>
   </div>
 </div>
 {% endif %}
 
 <div class="tabs reveal" style="margin-bottom:0">
-  <a href="?dari={{ dari|date:'Y-m-d' }}&sampai={{ sampai|date:'Y-m-d' }}&tab=panel" class="{% if tab == 'panel' %}active{% endif %}">Hanya Panel<span class="n">{{ data.ringkas.panel_only.n|intcomma }}</span></a>
-  <a href="?dari={{ dari|date:'Y-m-d' }}&sampai={{ sampai|date:'Y-m-d' }}&tab=bracket" class="{% if tab == 'bracket' %}active{% endif %}">Hanya Bracket<span class="n">{{ data.ringkas.bracket_only.n|intcomma }}</span></a>
-  <a href="?dari={{ dari|date:'Y-m-d' }}&sampai={{ sampai|date:'Y-m-d' }}&tab=cocok" class="{% if tab == 'cocok' %}active{% endif %}">Cocok<span class="n">{{ data.ringkas.cocok.n|intcomma }}</span></a>
+  <a href="?dari={{ dari|date:'Y-m-d' }}&sampai={{ sampai|date:'Y-m-d' }}&kategori={{ kategori|urlencode }}&tab=panel" class="{% if tab == 'panel' %}active{% endif %}">Hanya Panel<span class="n">{{ data.ringkas.panel_only.n|intcomma }}</span></a>
+  <a href="?dari={{ dari|date:'Y-m-d' }}&sampai={{ sampai|date:'Y-m-d' }}&kategori={{ kategori|urlencode }}&tab=bracket" class="{% if tab == 'bracket' %}active{% endif %}">Hanya Bracket<span class="n">{{ data.ringkas.bracket_only.n|intcomma }}</span></a>
+  <a href="?dari={{ dari|date:'Y-m-d' }}&sampai={{ sampai|date:'Y-m-d' }}&kategori={{ kategori|urlencode }}&tab=cocok" class="{% if tab == 'cocok' %}active{% endif %}">Cocok<span class="n">{{ data.ringkas.cocok.n|intcomma }}</span></a>
 </div>
 
 {% if not page.object_list %}
 <div class="card reveal"><div class="cell-empty" style="padding:34px 12px;text-align:center">
-  Belum ada baris bonus pada rentang/tab ini.
+  Belum ada baris bonus pada rentang/kategori/tab ini.
 </div></div>
 {% else %}
 <div class="card pad0 reveal">
@@ -84,7 +102,7 @@
     <tr>
       <td class="mono">{{ r.panel.tanggal|date:"d/m/Y"|default:"—" }}</td>
       <td>{{ r.panel.username }}</td>
-      <td><span class="badge src">{{ r.panel.kategori }}</span></td>
+      <td><span class="badge src">{{ r.panel.kategori_detail }}</span></td>
       <td class="num mono">{{ r.panel.nominal|floatformat:0|intcomma }}</td>
       <td class="faint">{{ r.panel.deskripsi|default:"—" }}</td>
       <td class="faint">{{ r.bracket.deskripsi|default:"—" }}</td>
@@ -100,7 +118,7 @@
     <tr>
       <td class="mono">{{ r.tanggal|date:"d/m/Y"|default:"—" }}</td>
       <td>{{ r.username }}</td>
-      <td><span class="badge src">{{ r.kategori }}</span></td>
+      <td><span class="badge src">{{ r.kategori_detail }}</span></td>
       <td class="num mono">{{ r.nominal|floatformat:0|intcomma }}</td>
       <td class="faint">{{ r.deskripsi|default:"—" }}</td>
     </tr>

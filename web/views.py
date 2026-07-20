@@ -1490,7 +1490,9 @@ def bonus_recon(request):
         return render(request, "web/no_toko.html")
     sampai = _parse_date(request.GET.get("sampai", "")) or date_cls.today()
     dari = _parse_date(request.GET.get("dari", "")) or sampai - timedelta(days=30)
-    data = hitung_rekonsiliasi_bonus(active, dari=dari, sampai=sampai)
+    kategori = (request.GET.get("kategori") or "").strip()
+    data = hitung_rekonsiliasi_bonus(active, dari=dari, sampai=sampai,
+                                     kategori=kategori or None)
     tab = request.GET.get("tab") or "panel"
     rows_by_tab = {
         "panel": data["panel_only"],
@@ -1502,6 +1504,7 @@ def bonus_recon(request):
     page = Paginator(rows_by_tab[tab], 40).get_page(request.GET.get("page"))
     return render(request, "web/bonus_recon.html", {
         "page": page, "data": data, "dari": dari, "sampai": sampai, "tab": tab,
+        "kategori": kategori,
     })
 
 
