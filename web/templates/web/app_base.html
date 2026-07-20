@@ -413,7 +413,7 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
     <a class="link sub {% if '/upload' in p %}active{% endif %}" href="{% url 'upload' %}">Impor Data</a>
     <a class="link sub {% if p == '/export/' %}active{% endif %}" href="{% url 'export_center' %}">Ekspor Data</a>
   </details>
-  <details class="grp{% if '/transactions' in p or '/reconcile' in p or '/batch' in p or '/run' in p or '/mutasi-bank' in p or '/tinjau' in p %} on{% endif %}"{% if '/transactions' in p or '/reconcile' in p or '/batch' in p or '/run' in p or '/mutasi-bank' in p or '/tinjau' in p %} open{% endif %}>
+  <details class="grp{% if '/transactions' in p or '/reconcile' in p or '/batch' in p or '/run' in p or '/mutasi-bank' in p or '/tinjau' in p or '/bonus' in p %} on{% endif %}"{% if '/transactions' in p or '/reconcile' in p or '/batch' in p or '/run' in p or '/mutasi-bank' in p or '/tinjau' in p or '/bonus' in p %} open{% endif %}>
     <summary>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v16a2 2 0 0 0 2 2h12"/><path d="M18 8l-4-4 4-4"/><path d="M2 12h13a4 4 0 0 1 4 4v4"/></svg>
       <span class="lbl">Rekonsiliasi</span>
@@ -424,6 +424,7 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
     <a class="link sub {% if '/reconcile' in p or '/batch' in p or '/run' in p %}active{% endif %}" href="{% url 'reconcile' %}">Jalankan Rekonsiliasi</a>
     <a class="link sub {% if '/mutasi-bank' in p %}active{% endif %}" href="{% url 'bank_mutations' %}">Mutasi Bank</a>
     <a class="link sub {% if '/tinjau' in p %}active{% endif %}" href="{% url 'review_queue' %}">Area Pengecekan{% if pending_review_count %} <span class="cnt {% if pending_review_count > 200 %}hot{% endif %}">{{ pending_review_count }}</span>{% endif %}</a>
+    <a class="link sub {% if '/bonus' in p %}active{% endif %}" href="{% url 'bonus_recon' %}">Rekonsiliasi Bonus</a>
   </details>
   <details class="grp{% if '/bracket' in p or '/hutang-piutang' in p %} on{% endif %}"{% if '/bracket' in p or '/hutang-piutang' in p %} open{% endif %}>
     <summary>

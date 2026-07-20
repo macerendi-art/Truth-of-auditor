@@ -39,6 +39,7 @@ from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
 from web.access import is_admin, tokos_for
 from web.biaya import rincian_biaya as hitung_rincian_biaya
+from web.bonus import rekonsiliasi_bonus as hitung_rekonsiliasi_bonus
 from web.breakdown import bracket_breakdown as hitung_bracket_breakdown, KATEGORI_KANONIK
 from web.forms import GantiPasswordForm
 from web.hutang import hutang_piutang as hitung_hutang_piutang
@@ -1446,6 +1447,29 @@ def rincian_biaya(request):
     page = Paginator(data["rows"], 40).get_page(request.GET.get("page"))
     return render(request, "web/biaya_admin.html", {
         "page": page, "data": data, "dari": dari, "sampai": sampai,
+    })
+
+
+@login_required
+def bonus_recon(request):
+    """Rekonsiliasi Bonus panel<->bracket — tab panel_only (default)/bracket_only/cocok."""
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    sampai = _parse_date(request.GET.get("sampai", "")) or date_cls.today()
+    dari = _parse_date(request.GET.get("dari", "")) or sampai - timedelta(days=30)
+    data = hitung_rekonsiliasi_bonus(active, dari=dari, sampai=sampai)
+    tab = request.GET.get("tab") or "panel"
+    rows_by_tab = {
+        "panel": data["panel_only"],
+        "bracket": data["bracket_only"],
+        "cocok": data["cocok"],
+    }
+    if tab not in rows_by_tab:
+        tab = "panel"
+    page = Paginator(rows_by_tab[tab], 40).get_page(request.GET.get("page"))
+    return render(request, "web/bonus_recon.html", {
+        "page": page, "data": data, "dari": dari, "sampai": sampai, "tab": tab,
     })
 
 

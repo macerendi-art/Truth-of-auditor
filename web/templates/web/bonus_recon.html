@@ -1,0 +1,115 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% load web_extras %}
+{% block title %}Rekonsiliasi Bonus · Truth of Auditor{% endblock %}
+{% block crumb %}Rekonsiliasi · Bonus{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Rekonsiliasi Bonus</h1>
+    <p>Pencocokan baris bonus panel &amp; bracket <b>{{ active_toko.name }}</b> — kunci username + nominal + tanggal, bukan uang (tidak ikut matcher/completeness harian).</p>
+  </div>
+</div>
+
+<div class="card reveal" style="margin-bottom:18px">
+  <form method="get" class="row" style="align-items:flex-end">
+    <div class="field"><label>Dari</label><input type="date" name="dari" value="{{ dari|date:'Y-m-d' }}"></div>
+    <div class="field"><label>Sampai</label><input type="date" name="sampai" value="{{ sampai|date:'Y-m-d' }}"></div>
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <button class="btn primary" type="submit">Terapkan</button>
+  </form>
+</div>
+
+<div class="grid cols-3 reveal" style="margin-bottom:18px">
+  <div class="card stat">
+    <div class="k">Cocok</div>
+    <div class="v g">{{ data.ringkas.cocok.n|intcomma }}</div>
+    <div class="sub mono">Rp {{ data.ringkas.cocok.total|floatformat:0|intcomma }}</div>
+  </div>
+  <div class="card stat">
+    <div class="k">Hanya Panel</div>
+    <div class="v r">{{ data.ringkas.panel_only.n|intcomma }}</div>
+    <div class="sub mono">Rp {{ data.ringkas.panel_only.total|floatformat:0|intcomma }}</div>
+  </div>
+  <div class="card stat">
+    <div class="k">Hanya Bracket</div>
+    <div class="v" style="color:var(--info)">{{ data.ringkas.bracket_only.n|intcomma }}</div>
+    <div class="sub mono">Rp {{ data.ringkas.bracket_only.total|floatformat:0|intcomma }}</div>
+  </div>
+</div>
+
+{% if data.ringkas.kategori %}
+<div class="card pad0 reveal" style="margin-bottom:18px">
+  <div class="table-wrap" style="border:none">
+  <table>
+    <thead><tr>
+      <th>Kategori</th><th class="num">Cocok</th><th class="num">Hanya Panel</th><th class="num">Hanya Bracket</th>
+    </tr></thead>
+    <tbody>
+    {% for kat, n in data.ringkas.kategori.items %}
+    <tr>
+      <td>{{ kat }}</td>
+      <td class="num mono">{{ n.cocok|intcomma }}</td>
+      <td class="num mono">{{ n.panel_only|intcomma }}</td>
+      <td class="num mono">{{ n.bracket_only|intcomma }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="tabs reveal" style="margin-bottom:0">
+  <a href="?dari={{ dari|date:'Y-m-d' }}&sampai={{ sampai|date:'Y-m-d' }}&tab=panel" class="{% if tab == 'panel' %}active{% endif %}">Hanya Panel<span class="n">{{ data.ringkas.panel_only.n|intcomma }}</span></a>
+  <a href="?dari={{ dari|date:'Y-m-d' }}&sampai={{ sampai|date:'Y-m-d' }}&tab=bracket" class="{% if tab == 'bracket' %}active{% endif %}">Hanya Bracket<span class="n">{{ data.ringkas.bracket_only.n|intcomma }}</span></a>
+  <a href="?dari={{ dari|date:'Y-m-d' }}&sampai={{ sampai|date:'Y-m-d' }}&tab=cocok" class="{% if tab == 'cocok' %}active{% endif %}">Cocok<span class="n">{{ data.ringkas.cocok.n|intcomma }}</span></a>
+</div>
+
+{% if not page.object_list %}
+<div class="card reveal"><div class="cell-empty" style="padding:34px 12px;text-align:center">
+  Belum ada baris bonus pada rentang/tab ini.
+</div></div>
+{% else %}
+<div class="card pad0 reveal">
+  <div class="table-wrap" style="border:none">
+  <table>
+    {% if tab == 'cocok' %}
+    <thead><tr>
+      <th>Tanggal</th><th>Username</th><th>Kategori</th><th class="num">Nominal</th>
+      <th>Deskripsi Panel</th><th>Deskripsi Bracket</th>
+    </tr></thead>
+    <tbody>
+    {% for r in page %}
+    <tr>
+      <td class="mono">{{ r.panel.tanggal|date:"d/m/Y"|default:"—" }}</td>
+      <td>{{ r.panel.username }}</td>
+      <td><span class="badge src">{{ r.panel.kategori }}</span></td>
+      <td class="num mono">{{ r.panel.nominal|floatformat:0|intcomma }}</td>
+      <td class="faint">{{ r.panel.deskripsi|default:"—" }}</td>
+      <td class="faint">{{ r.bracket.deskripsi|default:"—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+    {% else %}
+    <thead><tr>
+      <th>Tanggal</th><th>Username</th><th>Kategori</th><th class="num">Nominal</th><th>Deskripsi</th>
+    </tr></thead>
+    <tbody>
+    {% for r in page %}
+    <tr>
+      <td class="mono">{{ r.tanggal|date:"d/m/Y"|default:"—" }}</td>
+      <td>{{ r.username }}</td>
+      <td><span class="badge src">{{ r.kategori }}</span></td>
+      <td class="num mono">{{ r.nominal|floatformat:0|intcomma }}</td>
+      <td class="faint">{{ r.deskripsi|default:"—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+    {% endif %}
+  </table>
+  </div>
+  <div style="padding:10px 14px">{% pager page %}</div>
+</div>
+{% endif %}
+{% endblock %}
