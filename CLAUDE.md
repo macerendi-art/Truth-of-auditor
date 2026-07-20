@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The virtualenv is at `.venv`. Activate it first: `source .venv/bin/activate`.
 
 ```bash
-python manage.py test                         # run all tests (~800)
+python manage.py test                         # run all tests (~850)
 python manage.py test web.tests_reconcile     # one module
 python manage.py test web.tests_reconcile.SomeTestCase.test_x   # one test
 python manage.py runserver                     # dev server (sqlite, DEBUG=True)
@@ -59,6 +59,7 @@ Several pages aggregate existing rows **query-time — no new tables or migratio
 - **`web/breakdown.py`** (`/bracket/`, "Control Bracket per FR Account") and **`web/rekening.py`** (`/rekening/`, per bank/gateway account) pivot straight off `Transaction.raw` via `KeyTextTransform`. Both derive per-account opening/closing balance with the **order-independent** `_saldo_batas` (in `breakdown.py`): real FR/bank rows shuffle within the same minute and backdated entries make the `Jam` stamp lie, so a positional first/last balance is wrong — instead it matches the multiset of pre-balances (`balance − delta`) against balances; a broken/non-unique chain falls back to `(Jam, id)` so the inconsistency surfaces in the **"Selisih Kontrol"** column (ideally 0) rather than being hidden.
 - **`web/hutang.py`** (`/hutang-piutang/`) lists bracket rows whose `Kategori` is Hutang/Piutang, across dates, with running totals — same query-time pattern, no overlay.
 - **`web/biaya.py`** (`/biaya-admin/`, "Rincian Biaya") rolls up bank fee rows per channel (E-wallet/BI Fast/Transfer online) — rows tagged `jenis="admin"` plus legacy rows matched query-time via `is_admin_fee`, grouped by date + `source_label_full`.
+- **`web/bonus.py`** (`/bonus/`, "Rekonsiliasi Bonus") matches panel bonus rows against bracket bonus rows query-time — key = username (lowercase, brand prefix stripped) + rounded amount + date, greedy 1:1 per key → buckets cocok/panel_only/bracket_only + per-kategori summary. Feeds off two dedicated SourceTypes `panel_bonus`/`bracket_bonus` (parsers in `sources/parsers/bonus.py`; panel "Credit Balance" export takes ONLY bonus-prefixed Description rows and skips the net-zero `Offset` twins; bracket "Non Credit Bonus" maps code **K-BLD → "Lucky Draw"**; panel `Amt.` is ×1000, bracket `Nominal` is full rupiah). These keys are invisible to `check_completeness`/matchers/consume — the bonus path can never disturb the daily DP/WD pipeline.
 - **`web/monthly.py`** (`/bulanan/`) reads `ReconBatch.summary` as-is per day (use `money`/matched, **not** `money_gross` — gross can dwarf panel). **`web/settlement.py`** (`/settlement/`) lists still-waiting credit rows via the engine's `_carried_results`. **`web/exports.py`** builds the Excel workbooks for the Export page and per-run export.
 
 > Note: despite its name, the `reports/` Django app is a dormant scaffold (empty models/views, no migrations, not URL-wired). All real reporting lives in `web/`. Don't add report code to `reports/`.
