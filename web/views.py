@@ -1652,6 +1652,45 @@ def bulk_review(request, pk):
 
 @login_required
 @require_POST
+def bulk_review_queue(request):
+    """Setujui / tandai-tinjau massal LINTAS-run dari Area Pengecekan.
+    Mutasi per baris identik bulk_review; ringkasan tiap batch tersentuh
+    disegarkan sekali."""
+    action = request.POST.get("action", "")
+    buckets = {"mark_matched": MatchResult.Bucket.COCOK,
+               "mark_review": MatchResult.Bucket.TINJAU}
+    if action not in buckets:
+        return HttpResponseBadRequest("Aksi tidak dikenal.")
+    ids = [i for i in request.POST.getlist("result_ids") if i.isdigit()]
+    rows = list(MatchResult.objects.filter(
+        id__in=ids, run__batch__toko__in=tokos_for(request.user)
+    ).select_related("run__batch"))
+    batches = {}
+    for r in rows:
+        r.bucket = buckets[action]
+        r.reason_code = "manual_override"
+        r.save(update_fields=["bucket", "reason_code"])
+        ReviewAction.objects.create(
+            result=r, action=action, reason="bulk", reviewer=request.user)
+        if r.run.batch_id:
+            batches[r.run.batch_id] = r.run.batch
+    if rows:
+        catat(request.user, "review_massal", f"{len(rows)} hasil (Area Pengecekan)",
+              toko=rows[0].run.batch.toko if rows[0].run.batch else None,
+              n=len(rows), action=action)
+        for b in batches.values():  # kartu run & batch jangan basi
+            refresh_batch_summary(b)
+    messages.success(request, f"{len(rows)} hasil diperbarui.")
+    nxt = request.POST.get("next") or reverse("review_queue")
+    if not url_has_allowed_host_and_scheme(
+        nxt, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        nxt = reverse("review_queue")
+    return redirect(nxt)
+
+
+@login_required
+@require_POST
 def review(request, pk):
     r = get_object_or_404(MatchResult, pk=pk, run__batch__toko__in=tokos_for(request.user))
     action = request.POST.get("action", "")

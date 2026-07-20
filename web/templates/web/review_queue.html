@@ -65,7 +65,19 @@
 </div>
 {% endif %}
 
-<form id="bulk-form">{% csrf_token %}</form>
+<form id="bulk-form" method="post" action="{% url 'bulk_review_queue' %}">
+  {% csrf_token %}
+  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+</form>
+<div class="card reveal" style="padding:10px 14px;margin-top:14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+  <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;font-size:13px;font-weight:500">
+    <input type="checkbox" id="checkAll"> pilih semua di halaman ini</label>
+  <span style="flex:1"></span>
+  <button class="btn sm" type="submit" form="bulk-form" name="action" value="mark_matched"
+    onclick="return confirm('Tandai COCOK semua baris terpilih?')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Setujui terpilih</button>
+  <button class="btn sm ghost" type="submit" form="bulk-form" name="action" value="mark_review"
+    onclick="return confirm('Tandai PERLU TINJAU semua baris terpilih?')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>Tinjau terpilih</button>
+</div>
 <div class="card pad0 reveal" style="margin-top:14px">
   <div class="table-wrap tall" style="border:none">
   <table id="tinjau-table"{% if hide_left %} class="lean"{% endif %}>
@@ -85,4 +97,12 @@
 </div>
 
 {% pager page %}
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('checkAll').addEventListener('change', function(){
+  var on = this.checked;
+  document.querySelectorAll('input[name="result_ids"]').forEach(function(c){ c.checked = on; });
+});
+</script>
 {% endblock %}

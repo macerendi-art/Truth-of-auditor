@@ -26,6 +26,7 @@ urlpatterns = [
     path("settlement/", views.settlement_pending, name="settlement_pending"),
     path("mutasi-bank/", views.bank_mutations, name="bank_mutations"),
     path("tinjau/", views.review_queue, name="review_queue"),
+    path("tinjau/bulk-review/", views.bulk_review_queue, name="bulk_review_queue"),
     path("export/", views.export_center, name="export_center"),
     path("tokos/", views.toko_overview, name="toko_overview"),
     path("kelola/toko/", admin_views.kelola_toko, name="kelola_toko"),
