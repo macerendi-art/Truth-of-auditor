@@ -41,6 +41,7 @@ from web.access import is_admin, tokos_for
 from web.biaya import rincian_biaya as hitung_rincian_biaya
 from web.bonus import rekonsiliasi_bonus as hitung_rekonsiliasi_bonus
 from web.breakdown import bracket_breakdown as hitung_bracket_breakdown, KATEGORI_KANONIK
+from web.channels import breakdown_metode
 from web.forms import GantiPasswordForm
 from web.hutang import hutang_piutang as hitung_hutang_piutang
 from web.models import FRKoreksi
@@ -219,6 +220,7 @@ def dashboard(request):
     # harinya (termasuk baris retro yang ditulis-balik) — konsisten dengan
     # summary["dp"]["panel"].
     panel_sum = None
+    metode = None
     if last is not None:
         _pr = Transaction.objects.filter(
             consumed_by_batch=last, source_type__key="panel", is_duplicate=False,
@@ -237,6 +239,9 @@ def dashboard(request):
             "total_n": dp_n + wd_n,
             "net": dp_v - wd_v,
         }
+        # kartu "Metode Pembayaran": breakdown Bank Title dari queryset yang
+        # SAMA (_pr) — satu query agregat kecil, total pasti klop panel_sum.
+        metode = breakdown_metode(_pr)
 
     last_no = total_b if last else None
     last_sel = selisih(last) if last else 0
@@ -261,6 +266,7 @@ def dashboard(request):
         "tren": tren,
         "last": last, "last_no": last_no, "last_sel": last_sel,
         "panel_sum": panel_sum,
+        "metode": metode,
         "pending": pending,
         "um_d": um_d,
         "comp": comp,
