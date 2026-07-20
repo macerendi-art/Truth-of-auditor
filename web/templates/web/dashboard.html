@@ -44,6 +44,37 @@
   {% if last %}</a>{% else %}</div>{% endif %}
 </div>
 
+{# ---- RINGKASAN PANEL (trx & nilai DP/WD batch terakhir) ---- #}
+{% if panel_sum %}
+<style>
+.pstrip-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.pstrip .ps{display:flex;flex-direction:column;gap:3px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
+.pstrip .ps-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.pstrip .ps-k.dp{color:var(--ok)} .pstrip .ps-k.wd{color:var(--bad)}
+.pstrip .ps-n{font-size:13px;color:var(--faint)} .pstrip .ps-n b,.pstrip .ps-n{font-variant-numeric:tabular-nums}
+.pstrip .ps-v{font-size:20px;font-weight:800;letter-spacing:-.01em}
+.pstrip .ps-v.neg{color:var(--bad)}
+.pstrip .ps small{font-size:11px;font-weight:600;color:var(--faint)}
+.pstrip .ps.tot{background:linear-gradient(135deg,rgba(37,99,235,.07),rgba(34,211,238,.07))}
+@media (max-width:700px){.pstrip-grid{grid-template-columns:1fr}}
+</style>
+<div class="card reveal pstrip" style="margin-top:16px">
+  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Panel — {{ last.recon_date|date:"d M Y" }}</h3>
+    <span class="faint" style="font-size:11.5px">baris panel yang terkunci di batch #{{ last_no }}</span></div>
+  <div class="pstrip-grid">
+    <div class="ps"><span class="ps-k dp">Deposit</span>
+      <span class="ps-n">{{ panel_sum.dp.n|intcomma }} <small>trx</small></span>
+      <span class="ps-v mono">{{ panel_sum.dp.v|floatformat:0|intcomma }}</span></div>
+    <div class="ps"><span class="ps-k wd">Withdraw</span>
+      <span class="ps-n">{{ panel_sum.wd.n|intcomma }} <small>trx</small></span>
+      <span class="ps-v mono">{{ panel_sum.wd.v|floatformat:0|intcomma }}</span></div>
+    <div class="ps tot"><span class="ps-k">Total</span>
+      <span class="ps-n">{{ panel_sum.total_n|intcomma }} <small>trx</small></span>
+      <span class="ps-v mono {% if panel_sum.net < 0 %}neg{% endif %}" title="Nilai DP − Nilai WD">{{ panel_sum.net|floatformat:0|intcomma }} <small>net</small></span></div>
+  </div>
+</div>
+{% endif %}
+
 {# ---- KALENDER + TREN ---- #}
 <div class="grid cols-2" style="margin-top:16px">
   <div class="card reveal">

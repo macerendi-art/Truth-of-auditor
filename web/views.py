@@ -213,6 +213,31 @@ def dashboard(request):
 
     # --- kartu status ---
     last = batches[-1] if batches else None
+
+    # --- ringkasan panel (trx & nilai DP/WD) batch terakhir ---
+    # consumed_by_batch=last: baris panel yang terkunci ke batch itulah potret
+    # harinya (termasuk baris retro yang ditulis-balik) — konsisten dengan
+    # summary["dp"]["panel"].
+    panel_sum = None
+    if last is not None:
+        _pr = Transaction.objects.filter(
+            consumed_by_batch=last, source_type__key="panel", is_duplicate=False,
+        )
+        _agg = {
+            r["jenis"]: r for r in _pr.filter(jenis__in=["depo", "wd"])
+            .values("jenis").annotate(n=Count("id"), v=Sum("amount"))
+        }
+        _dp = _agg.get("depo") or {}
+        _wd = _agg.get("wd") or {}
+        dp_n, dp_v = _dp.get("n") or 0, float(_dp.get("v") or 0)
+        wd_n, wd_v = _wd.get("n") or 0, float(_wd.get("v") or 0)
+        panel_sum = {
+            "dp": {"n": dp_n, "v": dp_v},
+            "wd": {"n": wd_n, "v": wd_v},
+            "total_n": dp_n + wd_n,
+            "net": dp_v - wd_v,
+        }
+
     last_no = total_b if last else None
     last_sel = selisih(last) if last else 0
     pending = pending_settlement_count(active)
@@ -235,6 +260,7 @@ def dashboard(request):
         "kal": kal,
         "tren": tren,
         "last": last, "last_no": last_no, "last_sel": last_sel,
+        "panel_sum": panel_sum,
         "pending": pending,
         "um_d": um_d,
         "comp": comp,
