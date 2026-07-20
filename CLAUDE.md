@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The virtualenv is at `.venv`. Activate it first: `source .venv/bin/activate`.
 
 ```bash
-python manage.py test                         # run all tests (~684)
+python manage.py test                         # run all tests (~800)
 python manage.py test web.tests_reconcile     # one module
 python manage.py test web.tests_reconcile.SomeTestCase.test_x   # one test
 python manage.py runserver                     # dev server (sqlite, DEBUG=True)
@@ -60,6 +60,8 @@ Several pages aggregate existing rows **query-time — no new tables or migratio
 - **`web/hutang.py`** (`/hutang-piutang/`) lists bracket rows whose `Kategori` is Hutang/Piutang, across dates, with running totals — same query-time pattern, no overlay.
 - **`web/biaya.py`** (`/biaya-admin/`, "Rincian Biaya") rolls up bank fee rows per channel (E-wallet/BI Fast/Transfer online) — rows tagged `jenis="admin"` plus legacy rows matched query-time via `is_admin_fee`, grouped by date + `source_label_full`.
 - **`web/monthly.py`** (`/bulanan/`) reads `ReconBatch.summary` as-is per day (use `money`/matched, **not** `money_gross` — gross can dwarf panel). **`web/settlement.py`** (`/settlement/`) lists still-waiting credit rows via the engine's `_carried_results`. **`web/exports.py`** builds the Excel workbooks for the Export page and per-run export.
+
+> Note: despite its name, the `reports/` Django app is a dormant scaffold (empty models/views, no migrations, not URL-wired). All real reporting lives in `web/`. Don't add report code to `reports/`.
 
 ## Domain model conventions (critical, easy to get wrong)
 
