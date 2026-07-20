@@ -16,7 +16,17 @@
 
 ## Tasks
 
-- [ ] **G1**: view `dashboard` + `dashboard.html` + `web/tests_dashboard_summary.py` (subagent). Context key `panel_sum = {"dp": {"n", "v"}, "wd": {"n", "v"}, "total_n", "net"}` atau `None` tanpa batch.
-- [ ] **G2**: skrip scratch (flatten + decrypt + migrate + toko slo + validate_brands) — background, lapor match-rate per bucket + kegagalan parser bila ada.
-- [ ] **G3–G7**: inline dengan verifikasi browser per perubahan; suite + collectstatic; screenshot bukti.
-- [ ] Commit per chunk + push origin/main (ff-only). Deploy HANYA setelah konfirmasi user.
+- [x] **G1**: view `dashboard` + `dashboard.html` + `web/tests_dashboard_summary.py` (subagent). Context key `panel_sum = {"dp": {"n", "v"}, "wd": {"n", "v"}, "total_n", "net"}` atau `None` tanpa batch.
+- [x] **G2**: skrip scratch (flatten + decrypt + migrate + toko slo + validate_brands) — background, lapor match-rate per bucket + kegagalan parser bila ada.
+- [x] **G3–G7**: inline dengan verifikasi browser per perubahan; suite + collectstatic; screenshot bukti.
+- [x] Commit per chunk + push origin/main (ff-only). Deploy HANYA setelah konfirmasi user.
+
+## Hasil
+
+- **G1** (subagent, TDD merah→hijau): 4 test baru `tests_dashboard_summary`, suite penuh 849 pass. Strip tampil di dev data K25 27/06: Deposit 6.767 trx / 443.754.000 · Withdraw 927 / 325.212.000 · Total 7.694 / net 118.542.000; mobile 375px collapse 1 kolom.
+- **G2 kalibrasi Vigor/TMG (SLO) 03-07-2026**: 14/14 file terdeteksi & ter-ingest TANPA parser baru — 19.510 baris (panel `cor_panel_bank`+`cor_panel_qris` — varian kolom `Bonus` QR UNO aman, gateway `cor_qris_gateway`+`cor_qris_wd_gateway`, bank bri/bca_csv/bca_pdf/bni_pdf/mandiri terdekripsi, bracket 6.509 agregat → seperti COR, relasi bracket dilewati otomatis). `run_batches_auto`: **cocok 6.017/6.229 = 96,6%**, tinjau 3 (`name_partial`), tidak 209 (semua `no_money` — pola settlement H+1, wajar utk sampel 1 hari), no_panel 189. By value: DP selisih 4,05jt dari 713,98jt (99,4%), WD 28,49jt dari 511,36jt (94,4%). **Onboarding SLO tinggal buat Toko di prod — nol perubahan kode.**
+- **G3 logo**: mark konstelasi kotak (grid 2×2 teal→biru + aksen violet, 2 kotak terbang rotate 45° dgn animasi float CSS, `prefers-reduced-motion` dihormati, drop-shadow brand). GIF/meshy/threejs ditolak dengan alasan terdokumentasi di atas; favicon tetap.
+- **G4**: sec sidebar "Ikhtisar" → **"Laporan"**.
+- **G5**: diagnosa Range-API membuktikan header↔angka sudah rata (d=0) — akar keluhan = kolom melar di layar lebar; fix: lebar kolom numerik dikunci (Rekening menyerap sisa), `th.num` nowrap. Bug ikutan `{# #}` multi-baris ter-render → `{% comment %}`.
+- **G6**: toolbar Riwayat Upload → chip jumlah + search-group menyatu (`.searchbox`, input `.ctl-sm` 32px + tombol ikon) + tombol Hapus terpilih danger ber-badge `.cnt`; separator `.vr`.
+- **G7 akar tombol tak simetris (terukur)**: input/select 39px vs `.btn.primary` 34px (border:none) vs `.btn` 36px → fix global `min-height:39px` + `.primary` border transparan + `.btn.sm` 32px + `:disabled`. Sesudah: select/input/Filter/Reset SEMUA top 269 bottom 308 h 39 (identik) di Mutasi Bank; Area Pengecekan & Bonus & Rekening ikut beres dari satu sumber CSS.
