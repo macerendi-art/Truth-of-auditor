@@ -93,6 +93,11 @@ def rekonsiliasi_bonus(toko, dari=None, sampai=None, kategori=None):
         {c["panel"]["kategori_detail"] for c in cocok}
         | {r["kategori_detail"] for r in panel_only}
         | {r["kategori_detail"] for r in bracket_only})
+    if kategori and kategori not in opsi:
+        # Rentang tanggal baru bisa tak memuat kategori yang sedang difilter —
+        # tetap tampilkan sebagai opsi terpilih supaya state filter terlihat,
+        # bukan menyaru jadi "Semua kategori" padahal filternya masih aktif.
+        opsi = sorted(opsi + [kategori])
 
     if kategori:
         # Display-only, pairing di atas sudah final — hasil cocok tak berubah.

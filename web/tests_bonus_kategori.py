@@ -109,6 +109,18 @@ class KategoriDetailAgregasiTests(_DataKategori):
                           "BONUS ROLLINGAN SLOT 0.5% DAILY",
                           "Redemption Coupon"])
 
+    def test_filter_di_luar_rentang_tetap_jadi_opsi(self):
+        """Ganti rentang tanggal saat filter aktif: kategori yang tak ada di
+        rentang baru harus tetap tampil di dropdown (selected), bukan menyaru
+        jadi "Semua kategori" padahal filternya masih memfilter."""
+        self.isi()
+        data = rekonsiliasi_bonus(self.toko, dari=TGL, sampai=TGL,
+                                  kategori="BONUS TIDAK ADA DI RENTANG")
+        self.assertIn("BONUS TIDAK ADA DI RENTANG", data["kategori_opsi"])
+        self.assertEqual(len(data["cocok"]), 0)
+        self.assertEqual(len(data["panel_only"]), 0)
+        self.assertEqual(len(data["bracket_only"]), 0)
+
     def test_filter_kategori_memfilter_list_dan_ringkas(self):
         self.isi()
         data = rekonsiliasi_bonus(self.toko, dari=TGL, sampai=TGL,

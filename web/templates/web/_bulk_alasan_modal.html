@@ -25,6 +25,11 @@
 <script>
 function bukaBulkAlasan(action){
   var n = document.querySelectorAll('input[name="result_ids"]:checked').length;
+  var f = document.getElementById('bulk-alasan-form');
+  f.reset();
+  var w = f.querySelector('.alasan-catatan');
+  w.style.display = 'none';
+  w.querySelector('textarea').required = false;
   document.getElementById('bulk-aksi').value = action;
   document.getElementById('bulkPopJudul').textContent =
     action === 'mark_matched' ? 'Setujui terpilih' : 'Tinjau terpilih';
@@ -36,7 +41,10 @@ function bukaBulkAlasan(action){
 document.getElementById('bulk-alasan-form').addEventListener('submit', function(e){
   e.preventDefault();
   document.getElementById('bulk-alasan').value = this.alasan.value;
-  document.getElementById('bulk-catatan').value = this.catatan.value;
+  // Catatan hanya relevan utk "Lainnya" — sisa ketikan dari interaksi yang
+  // dibatalkan tidak boleh menempel ke jejak audit aksi berikutnya.
+  document.getElementById('bulk-catatan').value =
+    this.alasan.value === 'lainnya' ? this.catatan.value : '';
   document.getElementById('bulk-form').submit();
 });
 </script>
