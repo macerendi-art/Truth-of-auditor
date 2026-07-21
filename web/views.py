@@ -1343,6 +1343,51 @@ def bracket_breakdown(request):
     })
 
 
+@login_required
+def export_breakdown(request):
+    """Export XLSX tabel Breakdown Bracket (FR) toko aktif — cerminan halaman
+    /bracket/, menghormati filter rentang (Dari–Sampai) + carry-forward saldo
+    (I1). Nama file: breakdown_<toko>_<dari>_<sampai>.xlsx."""
+    import io
+
+    from openpyxl import Workbook
+
+    from web.exports import XLSX_CT, breakdown_sheet, safe_name
+
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    latest = Transaction.objects.filter(
+        toko=active, source_type__key="bracket"
+    ).aggregate(m=Max("posted_date"))["m"]
+    # resolusi tanggal IDENTIK dgn view bracket_breakdown (back-compat ?date=)
+    lama = _parse_date(request.GET.get("date", ""))
+    sampai = _parse_date(request.GET.get("sampai", "")) or lama or latest or date_cls.today()
+    dari = _parse_date(request.GET.get("dari", "")) or lama or sampai
+    if dari > sampai:
+        dari, sampai = sampai, dari
+    data = hitung_bracket_breakdown(active, dari, sampai)
+
+    if dari == sampai:
+        tgl_label = dari.strftime("%d/%m/%Y")
+    else:
+        tgl_label = f"{dari.strftime('%d/%m/%Y')} – {sampai.strftime('%d/%m/%Y')}"
+    wb = Workbook()
+    wb.remove(wb.active)
+    breakdown_sheet(wb, data, "Breakdown Bracket", tgl_label)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    catat(request.user, "export_breakdown", f"{active.name} {dari.isoformat()}..{sampai.isoformat()}")
+    resp = HttpResponse(buf.read(), content_type=XLSX_CT)
+    resp["Content-Disposition"] = (
+        f'attachment; filename="breakdown_{safe_name(active.name)}_'
+        f'{dari.isoformat()}_{sampai.isoformat()}.xlsx"'
+    )
+    return resp
+
+
 _FR_KOLOM_SALDO = {"saldo_awal": "Saldo Awal", "saldo_akhir": "Saldo Akhir"}
 
 

@@ -17,6 +17,7 @@ urlpatterns = [
     path("result/<int:pk>/review/alasan/", views.review_alasan_form, name="review_alasan_form"),
     path("run/<int:pk>/bulk-review/", views.bulk_review, name="bulk_review"),
     path("bracket/", views.bracket_breakdown, name="bracket_breakdown"),
+    path("bracket/export/", views.export_breakdown, name="export_breakdown"),
     path("bracket/koreksi/", views.fr_koreksi_form, name="fr_koreksi_form"),
     path("bracket/koreksi/simpan/", views.fr_koreksi_simpan, name="fr_koreksi_simpan"),
     path("hutang-piutang/", views.hutang_piutang, name="hutang_piutang"),

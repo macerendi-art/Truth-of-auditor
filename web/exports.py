@@ -28,6 +28,87 @@ def batch_filename(batch):
     return f"rekonsiliasi_{toko}_{tgl}.xlsx"
 
 
+def _num(x):
+    """Nilai numerik untuk sel Excel: Decimal→float, None→sel kosong (bukan 0).
+
+    Sumber tanpa saldo (gateway QRIS, PDF) menaruh None di saldo/selisih; sel
+    kosong menjaga "—" tampilan tak berubah jadi angka palsu.
+    """
+    return "" if x is None else float(x)
+
+
+def _akun_label(a):
+    """Label FR Account untuk sel: nama + peran (cerminan badge di tabel web)."""
+    return f"{a['name']} ({a['role']})" if a.get("role") else a["name"]
+
+
+def breakdown_sheet(wb, data, title, tanggal_label=""):
+    """Sheet Control Bracket (per FR Account) — kolom kategori dinamis.
+
+    Header Indonesia, angka float (Excel yang memformat ribuan), header tebal,
+    Saldo Awal/Akhir + Selisih Kontrol, dan baris TOTAL. `tanggal_label` = baris
+    kepala keterangan tanggal/rentang breakdown. `data` = keluaran
+    `web.breakdown.bracket_breakdown` (punya kunci "kolom", "accounts", "total").
+    """
+    d = wb.create_sheet(title)
+    kolom = data["kolom"]  # [(slug, label)]
+    if tanggal_label:
+        d.append([tanggal_label])
+        d["A1"].font = Font(bold=True)
+    header = (
+        ["No", "FR Account", "Saldo Awal"]
+        + [lbl for _slug, lbl in kolom]
+        + ["Total Mutasi", "Saldo Akhir", "Selisih Kontrol"]
+    )
+    d.append(header)
+    for c in d[d.max_row]:
+        c.font = Font(bold=True)
+    for i, a in enumerate(data["accounts"], 1):
+        d.append(
+            [i, _akun_label(a), _num(a["saldo_awal"])]
+            + [_num(a["kategori"].get(slug)) for slug, _lbl in kolom]
+            + [_num(a["mutasi"]), _num(a["saldo_akhir"]), _num(a["selisih"])]
+        )
+    total = data["total"]
+    d.append(
+        ["", "TOTAL", _num(total["saldo_awal"])]
+        + [_num(total["kategori"].get(slug)) for slug, _lbl in kolom]
+        + [_num(total["mutasi"]), _num(total["saldo_akhir"]), _num(total["selisih"])]
+    )
+    for c in d[d.max_row]:
+        c.font = Font(bold=True)
+    return d
+
+
+def rekening_sheet(wb, data, title):
+    """Sheet Rincian Rekening (per rekening bank/gateway) — header Indonesia + TOTAL.
+
+    `data` = keluaran `web.rekening.rekening_breakdown`.
+    """
+    d = wb.create_sheet(title)
+    header = ["No", "Rekening", "Deposit", "Withdraw", "Biaya Admin",
+              "Net", "Trx", "Saldo Awal", "Saldo Akhir", "Selisih Kontrol"]
+    d.append(header)
+    for c in d[1]:
+        c.font = Font(bold=True)
+    for i, a in enumerate(data["accounts"], 1):
+        label = a["label"] + (" (GATEWAY)" if a.get("is_gateway") else "")
+        d.append([
+            i, label, _num(a["deposit"]), _num(a["withdraw"]), _num(a["admin"]),
+            _num(a["net"]), a["trx"], _num(a["saldo_awal"]),
+            _num(a["saldo_akhir"]), _num(a["selisih"]),
+        ])
+    total = data["total"]
+    d.append([
+        "", "TOTAL", _num(total["deposit"]), _num(total["withdraw"]), _num(total["admin"]),
+        _num(total["net"]), total["trx"], _num(total["saldo_awal"]),
+        _num(total["saldo_akhir"]), _num(total["selisih"]),
+    ])
+    for c in d[d.max_row]:
+        c.font = Font(bold=True)
+    return d
+
+
 def _sheet_title(base, existing):
     """Judul sheet <=31 char, tanpa karakter terlarang openpyxl, anti-duplikat."""
     t = re.sub(r"[\\/*?:\[\]]", "-", base)[:31]
@@ -107,4 +188,19 @@ def build_batch_workbook(batch, batch_no, rel_labels):
     titles = {"Ringkasan"}
     for run in batch.runs.all().select_related("tolerance"):
         results_sheet(wb, run, _sheet_title(f"Hasil {run.get_relation_display()}", titles), rel_labels)
+
+    # Sheet tambahan (query-time, retroaktif): Breakdown Bracket + Rincian
+    # Rekening untuk TANGGAL batch. Hanya ditambahkan bila ada baris — batch
+    # tanpa data FR/rekening tetap identik format lama (Ringkasan + Hasil).
+    if batch.recon_date and batch.toko_id:
+        from web.breakdown import bracket_breakdown
+        from web.rekening import rekening_breakdown
+
+        tgl_label = batch.recon_date.strftime("%d/%m/%Y")
+        bd = bracket_breakdown(batch.toko, batch.recon_date)
+        if bd["count"]:
+            breakdown_sheet(wb, bd, _sheet_title("Breakdown Bracket", titles), tgl_label)
+        rk = rekening_breakdown(batch.toko, batch.recon_date)
+        if rk["count"]:
+            rekening_sheet(wb, rk, _sheet_title("Rincian Rekening", titles))
     return wb
