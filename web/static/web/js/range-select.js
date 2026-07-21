@@ -109,7 +109,9 @@
   document.addEventListener('mousedown', function (e) {
     if (e.button !== 0) return; // hanya klik kiri
     // Elemen interaktif di dalam sel → lepas, biar klik normalnya jalan.
-    if (e.target.closest && e.target.closest(INTERACTIVE)) { anchor = null; return; }
+    // clearPaint() juga: kalau seleksi persegi lama masih 'nyala', ia akan
+    // membajak Ctrl+C berikutnya (mis. saat user menyalin teks dari link/input).
+    if (e.target.closest && e.target.closest(INTERACTIVE)) { clearPaint(); anchor = null; return; }
     var cell = dataCell(e.target);
     if (!cell) {
       // mousedown di luar tabel selectable → batalkan seleksi lama.

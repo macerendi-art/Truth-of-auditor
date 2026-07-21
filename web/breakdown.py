@@ -152,13 +152,18 @@ def _norm_akun(bank):
 def _saldo_carry(toko, dari):
     """account(ternormalisasi) → saldo penutup pada hari-berbaris TERBARU < `dari`.
 
-    Ini yang membuat carry-forward benar tanpa memindai seluruh sejarah tiap
-    render: (1) satu agregat SQL `Max(posted_date)` per akun untuk baris
+    (1) satu agregat SQL `Max(posted_date)` per akun untuk baris
     `posted_date < dari` → tanggal-penutup per akun (biasanya `dari−1`);
     (2) fetch baris HANYA untuk himpunan tanggal-penutup itu, lalu hitung
     penutup per (akun, tanggal) via `_saldo_batas`. Akun dorman bersaldo-lama
-    tetap ikut (tak ada batas lookback), tapi materialisasi objek Python
-    dibatasi ke hari-hari "last" saja.
+    tetap ikut (tak ada batas lookback).
+
+    Catatan biaya: agregat (1) tetap MEMINDAI (sisi-DB) semua baris bracket
+    toko pra-`dari` — bukan full-scan yang dimaterialisasi ke Python (itu yang
+    dibatasi ke hari-hari "last" saja), tapi scan-nya tumbuh dgn sejarah. Satu
+    agregat per render, bukan N+1; ringan pada skala sekarang. Bila baris
+    bracket per toko membengkak (ratusan ribu), tambah indeks komposit
+    (toko, source_type, posted_date) agar jadi index-range-scan.
     """
     last = (
         Transaction.objects.filter(
