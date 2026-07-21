@@ -14,14 +14,16 @@
 
 <div class="card reveal" style="margin-bottom:18px">
   <form method="get" class="row" style="align-items:flex-end">
-    <div class="field"><label>Tanggal report</label><input type="date" name="date" value="{{ tanggal|date:'Y-m-d' }}"></div>
+    <div class="field"><label>Dari</label><input type="date" name="dari" value="{{ dari|date:'Y-m-d' }}"></div>
+    <div class="field"><label>Sampai</label><input type="date" name="sampai" value="{{ sampai|date:'Y-m-d' }}"></div>
     <button class="btn primary" type="submit">Terapkan</button>
-    <div class="seg" role="group" aria-label="Geser satu hari">
-      <a href="?date={{ prev_date|date:'Y-m-d' }}" title="Sehari sebelumnya">‹ {{ prev_date|date:"d/m" }}</a>
-      <a href="?date={{ next_date|date:'Y-m-d' }}" title="Sehari berikutnya">{{ next_date|date:"d/m" }} ›</a>
+    <div class="seg" role="group" aria-label="Geser jendela tanggal">
+      <a href="?dari={{ prev_dari|date:'Y-m-d' }}&sampai={{ prev_sampai|date:'Y-m-d' }}" title="Jendela sebelumnya">‹ {{ prev_dari|date:"d/m" }}</a>
+      <a href="?dari={{ next_dari|date:'Y-m-d' }}&sampai={{ next_sampai|date:'Y-m-d' }}" title="Jendela berikutnya">{{ next_sampai|date:"d/m" }} ›</a>
     </div>
     <span class="spacer"></span>
-    <span class="faint" style="font-size:12px">{{ data.count|intcomma }} baris FR pada {{ tanggal|date:"d M Y" }}</span>
+    <span class="faint" style="font-size:12px">{{ data.count|intcomma }} baris FR
+      {% if koreksi_on %}pada {{ dari|date:"d M Y" }}{% else %}pada {{ dari|date:"d M Y" }} – {{ sampai|date:"d M Y" }}{% endif %}</span>
   </form>
 </div>
 
@@ -29,7 +31,7 @@
 <div class="card reveal">
   <div class="cell-empty" style="padding:34px 12px;text-align:center">
     Belum ada data bracket untuk tanggal ini.
-    {% if latest %}<br><a href="?date={{ latest|date:'Y-m-d' }}" style="font-weight:600">Lihat tanggal terakhir yang ada datanya → {{ latest|date:"d M Y" }}</a>
+    {% if latest %}<br><a href="?dari={{ latest|date:'Y-m-d' }}&sampai={{ latest|date:'Y-m-d' }}" style="font-weight:600">Lihat tanggal terakhir yang ada datanya → {{ latest|date:"d M Y" }}</a>
     {% else %}<br><span class="faint">Upload file FR Bracket dulu lewat menu <a href="{% url 'upload' %}">Upload</a>.</span>{% endif %}
   </div>
 </div>

@@ -17,6 +17,7 @@ diambil query-time dari JSON `raw`, jadi berlaku retroaktif untuk data lama.
 from collections import Counter
 from decimal import Decimal
 
+from django.db.models import Max
 from django.db.models.fields.json import KeyTextTransform
 
 from transactions.models import Transaction
@@ -144,34 +145,110 @@ def _apply_koreksi(toko, tanggal, accounts, slugs_muncul):
             acc["selisih"] = acc["saldo_akhir"] - (acc["saldo_awal"] + acc["mutasi"])
 
 
-def bracket_breakdown(toko, tanggal, dengan_koreksi=True):
-    """Agregasi bracket `toko` pada `posted_date == tanggal` → dict untuk view.
+def _norm_akun(bank):
+    return str(bank or "").strip() or "(Tanpa Akun)"
 
-    {"accounts": [per akun], "kolom": [(slug, label) yang muncul],
-     "total": agregat lintas akun, "count": jumlah baris}
+
+def _saldo_carry(toko, dari):
+    """account(ternormalisasi) → saldo penutup pada hari-berbaris TERBARU < `dari`.
+
+    Ini yang membuat carry-forward benar tanpa memindai seluruh sejarah tiap
+    render: (1) satu agregat SQL `Max(posted_date)` per akun untuk baris
+    `posted_date < dari` → tanggal-penutup per akun (biasanya `dari−1`);
+    (2) fetch baris HANYA untuk himpunan tanggal-penutup itu, lalu hitung
+    penutup per (akun, tanggal) via `_saldo_batas`. Akun dorman bersaldo-lama
+    tetap ikut (tak ada batas lookback), tapi materialisasi objek Python
+    dibatasi ke hari-hari "last" saja.
     """
+    last = (
+        Transaction.objects.filter(
+            toko=toko, source_type__key="bracket", posted_date__lt=dari
+        )
+        .annotate(fr_bank=KeyTextTransform("Bank", "raw"))
+        .values("fr_bank")
+        .annotate(d=Max("posted_date"))
+    )
+    per_acc_date = {}  # account_norm → tanggal-penutup
+    for r in last:
+        per_acc_date[_norm_akun(r["fr_bank"])] = r["d"]
+    if not per_acc_date:
+        return {}
+
+    dates = set(per_acc_date.values())  # biasanya {dari−1}
     rows = (
         Transaction.objects.filter(
-            toko=toko, source_type__key="bracket", posted_date=tanggal
+            toko=toko, source_type__key="bracket", posted_date__in=dates
+        )
+        .annotate(
+            fr_bank=KeyTextTransform("Bank", "raw"),
+            fr_jam=KeyTextTransform("Jam", "raw"),
+        )
+        .values_list("posted_date", "id", "money_delta", "balance_after", "fr_bank", "fr_jam")
+    )
+    by = {}  # (account_norm, posted_date) → items untuk _saldo_batas
+    for pd, pk, delta, bal, bank, jam in rows:
+        by.setdefault((_norm_akun(bank), pd), []).append(
+            (f"{pd}T{jam or ''}", pk, delta or NOL, bal, None)
+        )
+
+    carry = {}
+    for acc, d in per_acc_date.items():
+        items = by.get((acc, d))
+        if not items:
+            continue
+        items.sort(key=lambda t: (t[0], t[1]))
+        _awal, akhir = _saldo_batas(items)
+        if akhir is not None:
+            carry[acc] = akhir
+    return carry
+
+
+def bracket_breakdown(toko, dari, sampai=None, dengan_koreksi=True):
+    """Agregasi bracket `toko` untuk `posted_date ∈ [dari, sampai]` → dict view.
+
+    Rentang [dari, sampai] (default `sampai=dari` = perilaku 1-hari). Untuk tiap
+    akun: `saldo_awal` = saldo penutup (dari−1) bila ada (carry-forward), jika
+    tidak pembukaan rantai in-range; `saldo_akhir` = penutup baris hari TERBARU
+    ≤ sampai. Akun tanpa baris in-range tapi masih bersaldo (carry ≠ 0) tetap
+    tampil sebagai baris carry murni (mutasi 0); yang carry == 0 disembunyikan.
+    Koreksi FR (`FRKoreksi`) hanya berlaku pada tampilan 1 hari (`dari == sampai`).
+
+    {"accounts": [per akun], "kolom": [(slug, label) yang muncul],
+     "total": agregat lintas akun, "count": jumlah baris in-range,
+     "dari": date, "sampai": date}
+    """
+    if sampai is None:
+        sampai = dari
+    if dari > sampai:
+        dari, sampai = sampai, dari
+
+    rows = (
+        Transaction.objects.filter(
+            toko=toko, source_type__key="bracket", posted_date__range=(dari, sampai)
         )
         .annotate(
             fr_bank=KeyTextTransform("Bank", "raw"),
             fr_kategori=KeyTextTransform("Kategori", "raw"),
             fr_jam=KeyTextTransform("Jam", "raw"),
         )
-        .values_list("id", "money_delta", "balance_after", "fr_bank", "fr_kategori", "fr_jam")
+        .values_list(
+            "posted_date", "id", "money_delta", "balance_after",
+            "fr_bank", "fr_kategori", "fr_jam",
+        )
     )
 
-    per_akun = {}  # account → list[(jam, id, delta, balance, slug)]
-    for pk, delta, balance, bank, kategori, jam in rows:
-        account = str(bank or "").strip() or "(Tanpa Akun)"
-        per_akun.setdefault(account, []).append(
-            (str(jam or ""), pk, delta or NOL, balance, _slug_kategori(kategori))
+    per_akun = {}  # account → list[(komposit_jam, id, delta, balance, slug)]
+    for pd, pk, delta, balance, bank, kategori, jam in rows:
+        # kunci urutan komposit "tanggalTjam" agar rantai saldo benar lintas hari
+        per_akun.setdefault(_norm_akun(bank), []).append(
+            (f"{pd}T{jam or ''}", pk, delta or NOL, balance, _slug_kategori(kategori))
         )
 
-    accounts, slugs_muncul = [], set()
+    carry = _saldo_carry(toko, dari)  # account_norm → penutup (dari−1)
+
+    accounts, slugs_muncul, seen = [], set(), set()
     for account, items in per_akun.items():
-        items.sort(key=lambda t: (t[0], t[1]))  # (Jam, id) = kronologi file
+        items.sort(key=lambda t: (t[0], t[1]))  # (tanggalTjam, id) = kronologi
         kategori_sum, mutasi, trx = {}, NOL, 0
         deposit = withdraw = NOL
         for _jam, _pk, delta, balance, slug in items:
@@ -183,13 +260,16 @@ def bracket_breakdown(toko, tanggal, dengan_koreksi=True):
             elif slug == "withdrawal":
                 withdraw += delta
                 trx += 1
-        saldo_awal, saldo_akhir = _saldo_batas(items)
+        chain_awal, saldo_akhir = _saldo_batas(items)
+        # utamakan penutup (dari−1) sebagai saldo awal; fallback pembukaan rantai
+        saldo_awal = carry.get(account, chain_awal)
         withdraw = abs(withdraw)
         selisih = None
         if saldo_awal is not None and saldo_akhir is not None:
             selisih = saldo_akhir - (saldo_awal + mutasi)
         slugs_muncul.update(kategori_sum)
         name, role = _pecah_akun(account)
+        seen.add(account)
         accounts.append({
             "account": account, "name": name, "role": role,
             "saldo_awal": saldo_awal, "saldo_akhir": saldo_akhir,
@@ -199,8 +279,21 @@ def bracket_breakdown(toko, tanggal, dengan_koreksi=True):
             "koreksi": {},
         })
 
-    if dengan_koreksi:
-        _apply_koreksi(toko, tanggal, accounts, slugs_muncul)
+    # akun dorman: tak ada baris in-range tapi masih bersaldo (carry ≠ 0)
+    for account, closing in carry.items():
+        if account in seen or closing is None or closing == NOL:
+            continue  # sudah tampil, atau saldo nol → disembunyikan
+        name, role = _pecah_akun(account)
+        accounts.append({
+            "account": account, "name": name, "role": role,
+            "saldo_awal": closing, "saldo_akhir": closing,
+            "mutasi": NOL, "selisih": NOL, "kategori": {},
+            "deposit": NOL, "withdraw": NOL, "net": NOL, "trx": 0,
+            "koreksi": {},
+        })
+
+    if dengan_koreksi and dari == sampai:
+        _apply_koreksi(toko, dari, accounts, slugs_muncul)
 
     accounts.sort(key=lambda a: (_URUT_PERAN.get(a["role"], 3), a["name"], a["account"]))
 
@@ -231,4 +324,6 @@ def bracket_breakdown(toko, tanggal, dengan_koreksi=True):
         "kolom": kolom,
         "total": total,
         "count": sum(len(v) for v in per_akun.values()),
+        "dari": dari,
+        "sampai": sampai,
     }

@@ -1324,12 +1324,22 @@ def bracket_breakdown(request):
     latest = Transaction.objects.filter(
         toko=active, source_type__key="bracket"
     ).aggregate(m=Max("posted_date"))["m"]
-    tanggal = _parse_date(request.GET.get("date", "")) or latest or date_cls.today()
-    data = hitung_bracket_breakdown(active, tanggal)
+    # back-compat: ?date= lama = ?dari=&sampai= (rentang 1 hari)
+    lama = _parse_date(request.GET.get("date", ""))
+    sampai = _parse_date(request.GET.get("sampai", "")) or lama or latest or date_cls.today()
+    dari = _parse_date(request.GET.get("dari", "")) or lama or sampai
+    if dari > sampai:
+        dari, sampai = sampai, dari
+    span = (sampai - dari).days + 1  # geser prev/next seluruh lebar jendela
+    koreksi_on = dari == sampai
+    data = hitung_bracket_breakdown(active, dari, sampai)
     return render(request, "web/breakdown_bracket.html", {
-        "data": data, "tanggal": tanggal, "latest": latest,
-        "prev_date": tanggal - timedelta(days=1),
-        "next_date": tanggal + timedelta(days=1),
+        "data": data, "dari": dari, "sampai": sampai, "tanggal": dari,
+        "latest": latest, "koreksi_on": koreksi_on,
+        "prev_dari": dari - timedelta(days=span),
+        "prev_sampai": sampai - timedelta(days=span),
+        "next_dari": dari + timedelta(days=span),
+        "next_sampai": sampai + timedelta(days=span),
     })
 
 
@@ -1445,7 +1455,8 @@ def fr_koreksi_simpan(request):
 
     data = hitung_bracket_breakdown(active, tanggal)
     html = render_to_string("web/_fr_control_table.html",
-                            {"data": data, "tanggal": tanggal}, request=request)
+                            {"data": data, "tanggal": tanggal, "koreksi_on": True},
+                            request=request)
     html += '<div id="koreksiPop" hx-swap-oob="innerHTML"></div>'
     gerak = render_to_string("web/_fr_gerak_table.html",
                              {"data": data, "tanggal": tanggal}, request=request)

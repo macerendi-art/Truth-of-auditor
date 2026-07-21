@@ -200,7 +200,10 @@ class BreakdownViewTests(_BracketData):
         self.assertIn('value="2026-07-01"', html)
 
     def test_tanggal_kosong_empty_state_dengan_link_data_terakhir(self):
-        self.fr("QRIS HOKI | DEPOSIT / WITHDRAW", "Deposit", "60000", "100000")
+        # Akun ditutup ke 0 di 2026-07-01 → tak ada saldo carry-forward, jadi
+        # tanggal 2026-07-05 memang kosong (bukan akun dorman bersaldo).
+        self.fr("QRIS HOKI | DEPOSIT / WITHDRAW", "Deposit", "60000", "60000", jam="09:00")
+        self.fr("QRIS HOKI | DEPOSIT / WITHDRAW", "Withdrawal", "-60000", "0", jam="10:00")
         r = self.client.get(reverse("bracket_breakdown"), {"date": "2026-07-05"})
         html = r.content.decode()
         self.assertIn("Belum ada data bracket", html)

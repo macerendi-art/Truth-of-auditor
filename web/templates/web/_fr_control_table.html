@@ -3,7 +3,7 @@
 <div class="card pad0 reveal" id="fr-control">
   <div style="padding:16px 18px 4px">
     <h2 style="margin:0;font-size:15px">Control Bracket Transaction <span class="faint" style="font-weight:500">(Harian)</span></h2>
-    <p class="faint" style="margin:4px 0 10px;font-size:12px">Breakdown per kategori FR, mutasi bertanda. <b>Selisih Kontrol</b> = Saldo Akhir − (Saldo Awal + Total Mutasi) — idealnya 0. Klik sel angka untuk mengoreksi; sel bertanda merah punya koreksi (nilai asli tetap tersimpan).</p>
+    <p class="faint" style="margin:4px 0 10px;font-size:12px">Breakdown per kategori FR, mutasi bertanda. <b>Saldo Awal</b> = saldo penutup hari sebelum rentang (carry-forward); akun bersaldo tanpa gerak tetap tampil (mutasi 0). <b>Selisih Kontrol</b> = Saldo Akhir − (Saldo Awal + Total Mutasi) — idealnya 0.{% if koreksi_on %} Klik sel angka untuk mengoreksi; sel bertanda merah punya koreksi (nilai asli tetap tersimpan).{% else %} Koreksi tersedia pada tampilan 1 hari (Dari = Sampai).{% endif %}</p>
   </div>
   <div class="table-wrap" style="border:none">
   <table>
@@ -20,24 +20,24 @@
       <td class="num mono faint">{{ forloop.counter }}</td>
       <td style="font-size:12.5px;white-space:nowrap"><b>{{ a.name }}</b>{% if a.role %} <span class="badge" style="font-size:10px">{{ a.role }}</span>{% endif %}</td>
       {% with kk=a.koreksi|raw_get:"saldo_awal" %}
-      <td class="num mono cell-edit{% if kk %} koreksi{% endif %}"
-          hx-get="{% url 'fr_koreksi_form' %}?date={{ tanggal|date:'Y-m-d' }}&account={{ a.account|urlencode }}&kolom=saldo_awal"
-          hx-target="#koreksiPop" hx-swap="innerHTML"
+      <td class="num mono{% if koreksi_on %} cell-edit{% endif %}{% if kk %} koreksi{% endif %}"
+          {% if koreksi_on %}hx-get="{% url 'fr_koreksi_form' %}?date={{ tanggal|date:'Y-m-d' }}&account={{ a.account|urlencode }}&kolom=saldo_awal"
+          hx-target="#koreksiPop" hx-swap="innerHTML"{% endif %}
           {% if kk %}title="asli {% if kk.asli is None %}—{% else %}{{ kk.asli|floatformat:0|intcomma }}{% endif %} → {{ kk.nilai|floatformat:0|intcomma }}{% if kk.alasan %} · {{ kk.alasan }}{% endif %}"{% endif %}
           >{% if a.saldo_awal is not None %}{{ a.saldo_awal|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
       {% endwith %}
       {% for slug, label in data.kolom %}{% with v=a.kategori|raw_get:slug kk=a.koreksi|raw_get:slug %}
-      <td class="num mono cell-edit{% if kk %} koreksi{% endif %}"
-          hx-get="{% url 'fr_koreksi_form' %}?date={{ tanggal|date:'Y-m-d' }}&account={{ a.account|urlencode }}&kolom={{ slug|urlencode }}"
-          hx-target="#koreksiPop" hx-swap="innerHTML"
+      <td class="num mono{% if koreksi_on %} cell-edit{% endif %}{% if kk %} koreksi{% endif %}"
+          {% if koreksi_on %}hx-get="{% url 'fr_koreksi_form' %}?date={{ tanggal|date:'Y-m-d' }}&account={{ a.account|urlencode }}&kolom={{ slug|urlencode }}"
+          hx-target="#koreksiPop" hx-swap="innerHTML"{% endif %}
           {% if kk %}title="asli {% if kk.asli is None %}—{% else %}{{ kk.asli|floatformat:0|intcomma }}{% endif %} → {{ kk.nilai|floatformat:0|intcomma }}{% if kk.alasan %} · {{ kk.alasan }}{% endif %}"{% endif %}
           >{% if v == "" %}<span class="faint">·</span>{% else %}<span {% if v < 0 %}style="color:var(--bad)"{% endif %}>{{ v|floatformat:0|intcomma }}</span>{% endif %}</td>
       {% endwith %}{% endfor %}
       <td class="num mono" style="font-weight:600">{{ a.mutasi|floatformat:0|intcomma }}</td>
       {% with kk=a.koreksi|raw_get:"saldo_akhir" %}
-      <td class="num mono cell-edit{% if kk %} koreksi{% endif %}"
-          hx-get="{% url 'fr_koreksi_form' %}?date={{ tanggal|date:'Y-m-d' }}&account={{ a.account|urlencode }}&kolom=saldo_akhir"
-          hx-target="#koreksiPop" hx-swap="innerHTML"
+      <td class="num mono{% if koreksi_on %} cell-edit{% endif %}{% if kk %} koreksi{% endif %}"
+          {% if koreksi_on %}hx-get="{% url 'fr_koreksi_form' %}?date={{ tanggal|date:'Y-m-d' }}&account={{ a.account|urlencode }}&kolom=saldo_akhir"
+          hx-target="#koreksiPop" hx-swap="innerHTML"{% endif %}
           {% if kk %}title="asli {% if kk.asli is None %}—{% else %}{{ kk.asli|floatformat:0|intcomma }}{% endif %} → {{ kk.nilai|floatformat:0|intcomma }}{% if kk.alasan %} · {{ kk.alasan }}{% endif %}"{% endif %}
           >{% if a.saldo_akhir is not None %}{{ a.saldo_akhir|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
       {% endwith %}
