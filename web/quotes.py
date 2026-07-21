@@ -225,3 +225,28 @@ MOTIVATION = AUDIT + UMUM
 def random_quote() -> str:
     """Satu kutipan acak dari pool gabungan (audit + umum)."""
     return random.choice(MOTIVATION)
+
+
+# Tagline halaman login — nada elegan & profesional soal rekonsiliasi, ketelitian,
+# dan kepercayaan uang. Dipilih acak server-side per pemuatan halaman login (lihat
+# web.views.AuditorLoginView). Daftar sengaja terpisah dari MOTIVATION agar toast
+# dan login tidak saling mengganggu; jaga tetap distinct dari MOTIVATION.
+LOGIN_TAGLINES = [
+    "Setiap rupiah punya jejak; kami memastikan jejaknya cocok.",
+    "Ketika angka bertemu bukti, keraguan berakhir.",
+    "Rekonsiliasi yang teliti hari ini, ketenangan yang utuh esok hari.",
+    "Panel, Bracket, Bank, Gateway — satu kebenaran dalam satu panel.",
+    "Kepercayaan dibangun dari selisih yang dijawab, bukan diabaikan.",
+    "Bukan sekadar mencocokkan angka, tapi menjaga integritas tiap transaksi.",
+    "Di balik saldo yang seimbang, ada ketelitian yang bekerja diam-diam.",
+    "Uang dan koin disandingkan hingga tak ada yang tersembunyi.",
+    "Kebenaran finansial lahir dari kesabaran mencocokkan baris demi baris.",
+    "Audit yang baik tak berisik; ia hanya memastikan semuanya benar.",
+    "Ketepatan adalah bentuk paling sunyi dari kepercayaan.",
+    "Satu panel untuk melihat uang dan koin apa adanya.",
+]
+
+
+def random_login_tagline() -> str:
+    """Satu tagline acak untuk kartu login. Ringan: O(1)."""
+    return random.choice(LOGIN_TAGLINES)

@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
 from django.contrib.auth import logout as auth_logout, update_session_auth_hash
+from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
@@ -46,6 +47,7 @@ from web.forms import GantiPasswordForm
 from web.hutang import hutang_piutang as hitung_hutang_piutang
 from web.models import FRKoreksi
 from web.monthly import monthly_summary
+from web.quotes import random_login_tagline
 from web.rekening import rekening_breakdown as hitung_rekening_breakdown
 from web.settlement import pending_settlement_rows
 from web.templatetags.web_extras import reason_label
@@ -73,6 +75,15 @@ REL_AMOUNT_LABELS = {
     MatchRun.Relation.BRACKET_BANK.value: ("Kredit/Koin", "Saldo Bank"),
     MatchRun.Relation.SALDO.value: ("Nominal", "Nominal"),
 }
+
+
+class AuditorLoginView(auth_views.LoginView):
+    """LoginView dengan tagline profesional acak per GET (rotasi tiap refresh)."""
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx["login_tagline"] = random_login_tagline()
+        return ctx
 
 
 def _apply_sort(request, qs, allowed, default_order, default_active=None):
