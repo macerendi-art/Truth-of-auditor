@@ -26,14 +26,14 @@
 </div>
 
 <div class="reveal" style="margin-top:12px">
-  <form method="get" class="row" style="align-items:flex-end;margin:0">
+  <form method="get" class="row" style="margin:0">
     <div class="field"><label>Dari tanggal (DP/WD)</label><input type="date" name="from" value="{{ date_from }}"></div>
     <div class="field"><label>Sampai tanggal</label><input type="date" name="to" value="{{ date_to }}"></div>
     {% if bucket != 'perlu_tinjau' %}<input type="hidden" name="bucket" value="{{ bucket }}">{% endif %}
     {% if flow %}<input type="hidden" name="flow" value="{{ flow }}">{% endif %}
     {% if bank %}<input type="hidden" name="bank" value="{{ bank }}">{% endif %}
     {% if btitle %}<input type="hidden" name="btitle" value="{{ btitle }}">{% endif %}
-    <button class="btn primary" type="submit">Filter</button>
+    <button class="btn primary" type="submit">Terapkan</button>
     {% if date_from or date_to or flow or bank or btitle %}<a class="btn" href="{% url 'review_queue' %}{% if bucket != 'perlu_tinjau' %}?bucket={{ bucket }}{% endif %}">Reset</a>{% endif %}
   </form>
 </div>

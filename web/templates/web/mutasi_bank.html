@@ -34,7 +34,7 @@
     <div class="field"><label>Sampai tanggal</label><input type="date" name="to" value="{{ date_to }}"></div>
     {% if src %}<input type="hidden" name="source" value="{{ src }}">{% endif %}
     {% if flow %}<input type="hidden" name="flow" value="{{ flow }}">{% endif %}
-    <button class="btn primary" type="submit">Filter</button>
+    <button class="btn primary" type="submit">Terapkan</button>
     {% if src or flow or sel_upload or date_from or date_to %}<a class="btn" href="{% url 'bank_mutations' %}">Reset</a>{% endif %}
   </form>
 </div>

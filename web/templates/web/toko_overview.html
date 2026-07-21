@@ -11,10 +11,10 @@
 </div>
 
 <div class="card reveal" style="margin-bottom:14px">
-  <form method="get" class="row" style="align-items:flex-end">
+  <form method="get" class="row">
     <div class="field"><label>Dari tanggal</label><input type="date" name="from" value="{{ date_from }}"></div>
     <div class="field"><label>Sampai tanggal</label><input type="date" name="to" value="{{ date_to }}"></div>
-    <button class="btn primary" type="submit">Filter</button>
+    <button class="btn primary" type="submit">Terapkan</button>
     {% if date_from or date_to %}<a class="btn" href="{% url 'toko_overview' %}">Reset</a>{% endif %}
   </form>
   {% if date_from or date_to %}

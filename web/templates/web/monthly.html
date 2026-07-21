@@ -13,13 +13,13 @@
 </div>
 
 <div class="card reveal" style="margin-bottom:18px">
-  <form method="get" class="row" style="align-items:flex-end">
+  <form method="get" class="row">
     <div class="field"><label>Bulan</label>
       <select name="month" onchange="this.form.submit()">
       {% for m in months %}<option value="{{ m|date:'Y-m' }}" {% if m|date:'Y-m' == sel_month %}selected{% endif %}>{{ m|date:"F Y" }}</option>{% endfor %}
       {% if not months %}<option value="{{ sel_month }}" selected>{{ bulan|date:"F Y" }}</option>{% endif %}
       </select></div>
-    <noscript><button class="btn primary" type="submit">Tampilkan</button></noscript>
+    <noscript><button class="btn primary" type="submit">Terapkan</button></noscript>
   </form>
 </div>
 
@@ -52,7 +52,7 @@
       <td class="num mono">{{ r.wd_uang|floatformat:0|intcomma }}</td>
       <td class="num">{% if r.wd_selisih == 0 %}<span class="badge ok">0</span>{% else %}<span class="badge warn mono">{{ r.wd_selisih|floatformat:0|intcomma }}</span>{% endif %}</td>
       <td class="num mono" style="color:var(--ok)">{{ r.cocok|intcomma }}</td>
-      <td class="num mono">{% if r.tinjau %}<span style="color:var(--warn-ink,#a5670f)">{{ r.tinjau|intcomma }}</span>{% else %}0{% endif %}</td>
+      <td class="num mono">{% if r.tinjau %}<span style="color:var(--warn)">{{ r.tinjau|intcomma }}</span>{% else %}0{% endif %}</td>
       <td class="num mono">{% if r.tidak %}<span style="color:var(--bad)">{{ r.tidak|intcomma }}</span>{% else %}0{% endif %}</td>
       <td class="num"><a href="{% url 'batch_detail' r.batch_id %}" title="Buka batch {{ r.date|date:'d M' }}" style="color:var(--brand-2)">›</a></td>
     </tr>

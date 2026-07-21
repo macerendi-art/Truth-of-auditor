@@ -1,5 +1,5 @@
 """Polish temuan minor review: separator baris panel, chip #run dashboard, guard REL_LABELS."""
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -73,3 +73,61 @@ class RelLabelsGuardTests(TestCase):
 
     def test_rel_labels_selaras_dengan_enum(self):
         self.assertEqual(set(REL_LABELS), {rel.value for rel in MatchRun.Relation})
+
+
+class FilterUniformityTests(TestCase):
+    """I5 — sapu keseragaman UI:
+
+    - tombol submit filter memakai satu kata seragam: 'Terapkan' (bukan
+      'Filter'/'Tampilkan') untuk aksi yang identik.
+    - form filter memakai token `.row` (yang sudah menyetel align-items),
+      tanpa inline `style="align-items:flex-end"` yang redundan.
+    - angka 'tinjau' di Ringkasan Bulanan memakai token warna `--warn`,
+      bukan hex hardcode/token tak-terdefinisi `--warn-ink`.
+    """
+
+    # halaman dengan form filter get -> tombol submit harus 'Terapkan'
+    FILTER_PAGES = [
+        "toko_overview", "bank_mutations", "review_queue", "transactions",
+        "bonus_recon", "rincian_biaya", "hutang_piutang", "bracket_breakdown",
+        "rekening_breakdown", "monthly_overview",
+    ]
+    # halaman yang form filternya dulu membawa inline align-items redundan
+    ROW_INLINE_PAGES = [
+        "bonus_recon", "bracket_breakdown", "monthly_overview", "rincian_biaya",
+        "hutang_piutang", "rekening_breakdown", "toko_overview", "review_queue",
+    ]
+
+    def setUp(self):
+        User.objects.create_user("adm", password="pw123456", role="admin")
+        self.client.login(username="adm", password="pw123456")
+        self.tol = ToleranceProfile.objects.get_or_create(
+            name="Default", defaults={"date_window_days": 1}
+        )[0]
+        self.lbs = Toko.objects.get(key="lbs")
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
+
+    def test_tombol_submit_filter_seragam_terapkan(self):
+        for name in self.FILTER_PAGES:
+            r = self.client.get(reverse(name))
+            self.assertEqual(r.status_code, 200, name)
+            self.assertContains(r, ">Terapkan</button>", msg_prefix=name)
+            self.assertNotContains(r, ">Filter</button>", msg_prefix=name)
+            self.assertNotContains(r, ">Tampilkan</button>", msg_prefix=name)
+
+    def test_form_filter_tanpa_inline_align_redundan(self):
+        for name in self.ROW_INLINE_PAGES:
+            r = self.client.get(reverse(name))
+            self.assertNotContains(r, 'style="align-items:flex-end"', msg_prefix=name)
+            self.assertNotContains(r, "align-items:flex-end;margin:0", msg_prefix=name)
+
+    def test_monthly_tinjau_pakai_token_warn(self):
+        # baris dengan perlu_tinjau>0 supaya sel angka 'tinjau' benar-benar tampil
+        ReconBatch.objects.create(
+            toko=self.lbs, tolerance=self.tol, recon_date=date.today(),
+            summary={"buckets": {"cocok": 10, "perlu_tinjau": 3, "tidak_cocok": 1}},
+        )
+        r = self.client.get(reverse("monthly_overview"))
+        self.assertContains(r, "color:var(--warn)")
+        self.assertNotContains(r, "warn-ink")
+        self.assertNotContains(r, "#a5670f")
