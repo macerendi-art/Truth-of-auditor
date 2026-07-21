@@ -63,7 +63,7 @@
     </span>
   </div>
   <div class="table-wrap tall" style="border:none">
-  <table id="tx-table">
+  <table id="tx-table" class="selectable">
     <thead><tr>
       <th><a class="th-sort" href="?{{ qbase }}&sort=waktu&dir={% if sort == 'waktu' and dir == 'asc' %}desc{% else %}asc{% endif %}">Waktu{% if sort == 'waktu' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>
       <th><a class="th-sort" href="?{{ qbase }}&sort=sumber&dir={% if sort == 'sumber' and dir == 'asc' %}desc{% else %}asc{% endif %}">Sumber{% if sort == 'sumber' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>

@@ -34,7 +34,7 @@
 
 <div class="card pad0 reveal">
   <div class="twrap tall" style="border:none">
-  <table>
+  <table class="selectable">
     <thead>
       <tr><th>Kat</th>
         <th><a class="th-sort" href="?k={{ kat }}&sort=tanggal&dir={% if sort == 'tanggal' and dir == 'asc' %}desc{% else %}asc{% endif %}">Tanggal{% if sort == 'tanggal' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>

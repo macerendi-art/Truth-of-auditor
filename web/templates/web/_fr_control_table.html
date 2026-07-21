@@ -6,7 +6,7 @@
     <p class="faint" style="margin:4px 0 10px;font-size:12px">Breakdown per kategori FR, mutasi bertanda. <b>Saldo Awal</b> = saldo penutup hari sebelum rentang (carry-forward); akun bersaldo tanpa gerak tetap tampil (mutasi 0). <b>Selisih Kontrol</b> = Saldo Akhir − (Saldo Awal + Total Mutasi) — idealnya 0.{% if koreksi_on %} Klik sel angka untuk mengoreksi; sel bertanda merah punya koreksi (nilai asli tetap tersimpan).{% else %} Koreksi tersedia pada tampilan 1 hari (Dari = Sampai).{% endif %}</p>
   </div>
   <div class="table-wrap" style="border:none">
-  <table>
+  <table class="selectable">
     <thead><tr>
       <th style="width:44px" class="num">No</th><th>FR Account</th>
       <th class="num">Saldo Awal</th>

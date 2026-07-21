@@ -44,7 +44,7 @@
 {% if data.ringkas.kategori %}
 <div class="card pad0 reveal" style="margin-bottom:18px">
   <div class="table-wrap" style="border:none">
-  <table>
+  <table class="selectable">
     <thead><tr>
       <th>Kategori</th>
       <th class="num">Cocok</th><th class="num">Nilai (Rp)</th>
@@ -91,7 +91,7 @@
 {% else %}
 <div class="card pad0 reveal">
   <div class="table-wrap" style="border:none">
-  <table>
+  <table class="selectable">
     {% if tab == 'cocok' %}
     <thead><tr>
       <th>Tanggal</th><th>Username</th><th>Kategori</th><th class="num">Nominal</th>

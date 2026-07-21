@@ -105,7 +105,7 @@
 
 <div class="card pad0 reveal">
   <div class="table-wrap tall" style="border:none">
-  <table id="hasil-table"{% if hide_left %} class="lean"{% endif %}>
+  <table id="hasil-table" class="selectable{% if hide_left %} lean{% endif %}">
     <thead><tr><th style="width:34px"></th><th style="width:116px">Status</th>{% if not hide_left %}<th style="width:108px">{{ left_label }}</th><th style="width:92px">Username</th><th>Nama Lengkap</th><th class="col-hide">Player Bank</th><th class="col-hide">Bank Title</th><th class="col-hide" style="width:84px">Handler</th>
       <th class="num" style="width:100px"><a class="th-sort" href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&sort=amount&dir={% if sort == 'amount' and dir == 'asc' %}desc{% else %}asc{% endif %}">{{ left_amt_label }}{% if sort == 'amount' %} {% include "web/_sort_icon.html" %}{% endif %}</a></th>{% endif %}
       <th>{{ right_label }}</th><th class="num" style="width:100px">{{ right_amt_label }}</th>

@@ -85,7 +85,7 @@
 </div>
 <div class="card pad0 reveal" style="margin-top:14px">
   <div class="table-wrap tall" style="border:none">
-  <table id="tinjau-table"{% if hide_left %} class="lean"{% endif %}>
+  <table id="tinjau-table" class="selectable{% if hide_left %} lean{% endif %}">
     <thead><tr><th style="width:28px"></th><th>Status</th>{% if not hide_left %}<th>Panel</th><th>Username</th><th>Nama Lengkap</th><th class="col-hide">Player Bank</th><th class="col-hide">Bank Title</th><th class="col-hide">Handler</th><th class="num">Kredit/Koin</th>{% endif %}<th>Mutasi Bank</th><th class="num">Saldo Bank</th><th>Alasan</th><th>Batch/Run</th><th style="text-align:center">Aksi</th></tr></thead>
     <tbody>
     {% for r in page %}{% include "web/_result_row.html" with show_run_col=1 %}{% empty %}
