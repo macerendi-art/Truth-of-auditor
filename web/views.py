@@ -1816,7 +1816,11 @@ def review(request, pk):
         "r": r, "bucket_meta": BUCKET_META, "show_run_col": show_run_col,
         "hide_left": request.POST.get("hide_left") == "1",
     }, request=request)
-    # tutup modal alasan (bila aksi datang dari popup) — pola fr_koreksi_simpan
+    # tutup modal alasan (bila aksi datang dari popup) — div OOB di belakang fragmen
+    # <tr>. BUTUH htmx useTemplateFragments=true (meta htmx-config di app_base):
+    # tanpa itu parser legacy membungkus respons <tr> dgn <table><tbody> dan div
+    # non-tabel ini di-foster-parent keluar -> fragmen kosong (baris lenyap, modal
+    # tak tertutup). Beda dgn fr_koreksi_simpan yang fragmen utamanya <div>.
     html += '<div id="reviewPop" hx-swap-oob="innerHTML"></div>'
     return HttpResponse(html)
 

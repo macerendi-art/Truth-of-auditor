@@ -264,3 +264,45 @@ class AlasanTampilTests(TestCase):
         r = self.client.get(reverse("review_queue"))
         self.assertContains(r, 'id="bulkPop"')
         self.assertContains(r, "Cutoff Mutation")
+
+
+class HtmxTrFragmenTests(TestCase):
+    """Regresi parsing htmx: respons `review` = fragmen <tr> + div OOB penutup modal.
+
+    htmx 1.9.12 default (useTemplateFragments=false) membungkus respons ber-awalan
+    <tr> dengan <table><tbody> lalu descend 2 level; parser HTML5 mem-foster-parent
+    div non-tabel keluar tabel sehingga hasil parse jadi fragmen KOSONG — baris
+    hasil lenyap dari tabel dan modal alasan tak pernah tertutup, padahal POST
+    sukses (klik ulang = ReviewAction ganda). Wajib dua-duanya: config
+    useTemplateFragments aktif di halaman pemuat baris, dan respons review tetap
+    memuat <tr id="res-..."> + div OOB.
+    """
+
+    def setUp(self):
+        User = get_user_model()
+        User.objects.create_user("aud", "a@a.co", "pw12345", role="supervisor")
+        self.client.login(username="aud", password="pw12345")
+        self.tol = ToleranceProfile.objects.get_or_create(
+            name="Default", defaults={"date_window_days": 1}
+        )[0]
+        self.toko = Toko.objects.get(key="lbs")
+        self.batch, self.run, (self.r1, self.r2) = _buat_hasil(self.toko, self.tol)
+
+    def test_respons_review_baris_plus_oob_penutup_modal(self):
+        r = self.client.post(reverse("review", args=[self.r1.pk]),
+                             {"action": "mark_matched", "alasan": "mistake_cs"})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, f'id="res-{self.r1.pk}"')
+        self.assertContains(r, 'id="reviewPop" hx-swap-oob="innerHTML"')
+
+    def test_config_template_fragments_di_halaman_hasil(self):
+        """Meta htmx-config useTemplateFragments wajib ada di run_detail & /tinjau/."""
+        r = self.client.get(reverse("run_detail", args=[self.run.pk]))
+        self.assertContains(r, 'name="htmx-config"')
+        self.assertContains(r, '"useTemplateFragments":true')
+        sesi = self.client.session
+        sesi["active_toko_id"] = self.toko.id
+        sesi.save()
+        r = self.client.get(reverse("review_queue"))
+        self.assertContains(r, 'name="htmx-config"')
+        self.assertContains(r, '"useTemplateFragments":true')
