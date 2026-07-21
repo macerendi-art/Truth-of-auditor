@@ -12,10 +12,11 @@
 <link rel="apple-touch-icon" sizes="180x180" href="{% static 'web/img/apple-touch-icon.png' %}">
 {# font & vendor self-host (dulu Google Fonts/unpkg): CDN eksternal render-blocking menahan first paint tiap halaman #}
 <link rel="stylesheet" href="{% static 'web/css/appfonts.css' %}">
-{# htmx: parse fragmen via <template> (perilaku default htmx 2). Tanpa ini, respons
-   ber-awalan <tr> + div OOB (view `review`) dibungkus <table><tbody> oleh parser legacy,
-   div non-tabel di-foster-parent keluar tabel -> fragmen KOSONG: baris hasil lenyap
-   dan modal alasan tak tertutup. Jangan dihapus. #}
+{% comment %}htmx: parse fragmen via <template> (perilaku default htmx 2). Tanpa ini,
+   respons ber-awalan <tr> + div OOB (view `review`) dibungkus <table><tbody> oleh parser
+   legacy, div non-tabel di-foster-parent keluar tabel -> fragmen KOSONG: baris hasil
+   lenyap dan modal alasan tak tertutup. Jangan dihapus. (Catatan: {# #} Django hanya
+   satu baris — multi-baris bocor ke render, lihat insiden Paket G & I.){% endcomment %}
 <meta name="htmx-config" content='{"useTemplateFragments":true}'>
 <script src="{% static 'web/vendor/htmx-1.9.12.min.js' %}"></script>
 <style>
