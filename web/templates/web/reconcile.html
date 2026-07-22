@@ -154,7 +154,7 @@ details.adv .adv-body{padding:2px 14px 14px}
   {% if batches %}
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>Batch</th><th>Tanggal</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th class="r">Cocok</th><th class="r">Tinjau</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
+    <thead><tr><th>Batch</th><th>Tanggal</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th class="r">Cocok</th><th class="r">Tinjau</th><th class="r">Tidak Cocok</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
     <tbody>
     {% for b in batches %}
       <tr>
@@ -165,6 +165,7 @@ details.adv .adv-body{padding:2px 14px 14px}
         <td class="num">{% if b.summary.wd.selisih == 0 %}<span class="badge ok">0</span>{% else %}{{ b.summary.wd.selisih|default:0|floatformat:0|intcomma }}{% endif %}</td>
         <td class="r num" style="color:var(--ok);font-weight:600">{{ b.summary.buckets.cocok|default:0|intcomma }}</td>
         <td class="r num" style="color:var(--warn)">{{ b.summary.buckets.perlu_tinjau|default:0|intcomma }}</td>
+        <td class="r num" style="color:var(--bad)">{{ b.summary.buckets.tidak_cocok|default:0|intcomma }}</td>
         {% if is_admin_user %}
         <td class="r">
           <form method="post" action="{% url 'delete_batch' b.pk %}" style="display:inline"

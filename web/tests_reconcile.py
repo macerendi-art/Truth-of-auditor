@@ -89,6 +89,22 @@ class ReconcileViewTests(TestCase):
         self.assertEqual(r.context["panel_dates_count"], 1)
         self.assertContains(r, "tanggal panel terdeteksi")
 
+    def test_riwayat_batch_menampilkan_kolom_tidak_cocok(self):
+        # Panel WD tanpa uang pasangan → no_money (bucket tidak_cocok).
+        from datetime import date
+        panel = SourceType.objects.get(key="panel")
+        up = Upload.objects.create(source_type=panel, toko=self.lbs)
+        Transaction.objects.create(
+            upload=up, source_type=panel, toko=self.lbs, jenis="wd",
+            amount=Decimal("70000"), money_delta=Decimal("-70000"),
+            counterparty="X", occurred_at=datetime(2026, 6, 27, 23, 0), row_hash="wd1")
+        tol = ToleranceProfile.objects.get(name="Default")
+        batch = run_batch(self.lbs, tol, recon_date=date(2026, 6, 27))
+        self.assertGreaterEqual(batch.summary["buckets"]["tidak_cocok"], 1)
+        r = self.client.get(reverse("reconcile"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Tidak Cocok")  # header kolom baru di Riwayat Batch
+
 
 class BatchDetailTests(TestCase):
     def setUp(self):
