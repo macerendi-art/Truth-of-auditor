@@ -198,10 +198,14 @@ CSRF_TRUSTED_ORIGINS += [o.strip() for o in os.environ.get('CSRF_TRUSTED_ORIGINS
 # --- Geo-block (kunci wilayah, fitur K4) ---
 # DEFAULT MATI: middleware pass-through total — deploy tidak mengubah akses apa
 # pun sampai env dinyalakan. GEO_BLOCK_COUNTRIES = daftar negara yang DIIZINKAN
-# (kode ISO 2-huruf); IP dari negara di luar daftar dapat 403 saat fitur menyala.
+# (allowlist, kode ISO 2-huruf); IP dari negara di luar daftar dapat 403 saat
+# fitur menyala. DEFAULT 'ID' (Indonesia = basis pengguna nyata): menyalakan
+# GEO_BLOCK_ENABLED saja tetap MENGIZINKAN pengguna Indonesia dan memblok
+# sisanya (termasuk KH) — jangan set 'KH' di sini, itu akan memblok semua
+# auditor Indonesia dan hanya mengizinkan Kamboja.
 GEO_BLOCK_ENABLED = os.environ.get('GEO_BLOCK_ENABLED', 'False').lower() == 'true'
 GEO_BLOCK_COUNTRIES = {
-    c.strip().upper() for c in os.environ.get('GEO_BLOCK_COUNTRIES', 'KH').split(',') if c.strip()
+    c.strip().upper() for c in os.environ.get('GEO_BLOCK_COUNTRIES', 'ID').split(',') if c.strip()
 }
 GEO_BLOCK_ALLOWLIST = [x.strip() for x in os.environ.get('GEO_BLOCK_ALLOWLIST', '').split(',') if x.strip()]
 GEO_BLOCK_BYPASS_STAFF = os.environ.get('GEO_BLOCK_BYPASS_STAFF', 'True').lower() == 'true'

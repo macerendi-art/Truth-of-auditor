@@ -164,5 +164,5 @@ class GeoBlockMiddleware:
             return False
 
         # (7) negara dalam daftar yang diizinkan → lolos; else BLOK.
-        allowed = getattr(settings, "GEO_BLOCK_COUNTRIES", {"KH"})
+        allowed = getattr(settings, "GEO_BLOCK_COUNTRIES", {"ID"})
         return country not in allowed
