@@ -17,6 +17,7 @@ REASON_LABELS = {
     # cocok kuat
     "ticket+amount":    ("Ticket & nominal sama",    "ok"),
     "ticket":           ("Ticket sama",              "ok"),
+    "kode_unik":        ("Kode unik",                "ok"),
     "amount+date+name": ("Nominal · tanggal · nama", "ok"),
     # perlu tinjau
     "amount_fee":       ("Selisih biaya transfer",   "warn"),

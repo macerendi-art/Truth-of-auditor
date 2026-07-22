@@ -155,6 +155,26 @@ NAME_REVIEW_FLOOR = 60
 # 400.000 didebit 406.500 satu baris. Identitas tetap gerbang; ini hanya
 # memperlebar kandidat yang BOLEH dinilai.
 FEE_TOL_MIN = 6500
+# Batas atas "kode unik" deposit: pemain menambah ekor kecil (<=999, 3 digit)
+# ke nominal DP agar mudah dikenali — bank SELALU > panel. Pasangan sudah
+# ber-anchor ticket/reference EXACT; ini murni reklasifikasi bucket TINJAU→COCOK.
+# Underpay (bank<panel), selisih >999, dan WD TIDAK ikut (tetap TINJAU).
+KODE_UNIK_MAX = 999
+
+
+def _kode_unik_or_amount(p, b, diff, amount_reason, amount_detail):
+    """Selisih nominal pada pasangan yang SUDAH ber-anchor ticket/reference EXACT.
+
+    Bila DEPOSIT (p.money_delta>0) DAN bank>panel (int(abs(b))>int(abs(p)))
+    DAN ekor <=KODE_UNIK_MAX → "kode unik" (COCOK). Selain itu (underpay,
+    diff>999, atau WD) → TINJAU selisih nominal, perilaku lama tak berubah.
+    Dipakai pass 0 (ticket) & pass 0b (reference) agar keduanya tak divergen.
+    """
+    if (p.money_delta > 0
+            and int(abs(b.money_delta)) > int(abs(p.money_delta))
+            and diff <= KODE_UNIK_MAX):
+        return (MatchResult.Bucket.COCOK, 100, "kode_unik", f"kode unik +{diff:,}")
+    return (MatchResult.Bucket.TINJAU, 90, amount_reason, amount_detail)
 
 
 def _included_money_sources(include):
@@ -389,8 +409,9 @@ class _MoneyMatcher:
                 if diff == 0:
                     emit(p, b, MatchResult.Bucket.COCOK, 100, "ticket")
                 else:
-                    emit(p, b, MatchResult.Bucket.TINJAU, 90, "ticket_amount",
-                         f"ticket sama, selisih nominal {diff:,}")
+                    emit(p, b, *_kode_unik_or_amount(
+                        p, b, diff, "ticket_amount",
+                        f"ticket sama, selisih nominal {diff:,}"))
                 break
         # --- pass 0b: reference-join gateway (kunci pasti non-ticket, mis. UUID QRIS) ---
         for p in left:
@@ -403,8 +424,9 @@ class _MoneyMatcher:
                 if diff == 0:
                     emit(p, b, MatchResult.Bucket.COCOK, 100, "reference")
                 else:
-                    emit(p, b, MatchResult.Bucket.TINJAU, 90, "reference_amount",
-                         f"reference sama, selisih nominal {diff:,}")
+                    emit(p, b, *_kode_unik_or_amount(
+                        p, b, diff, "reference_amount",
+                        f"reference sama, selisih nominal {diff:,}"))
                 break
         # Gateway ber-ticket/ber-reference yang TAK dikenal panel bukan kandidat fuzzy siapa pun.
         blocked = {
