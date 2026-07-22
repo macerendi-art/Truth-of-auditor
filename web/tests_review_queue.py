@@ -42,6 +42,41 @@ class ReviewQueueTests(TestCase):
             run=run, bucket=MatchResult.Bucket.TINJAU, reason_code="amount_mismatch", left=left,
         )
 
+    def _orphan(self, toko, rh):
+        """Hasil no_panel (uang tanpa kredit) — left=None, right=baris bank."""
+        bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        up = Upload.objects.create(source_type=bank, toko=toko)
+        batch = ReconBatch.objects.create(toko=toko, tolerance=self.tol)
+        run = MatchRun.objects.create(
+            relation=MatchRun.Relation.PANEL_BANK, tolerance=self.tol, batch=batch)
+        right = Transaction.objects.create(
+            upload=up, source_type=bank, toko=toko, jenis="depo",
+            amount=Decimal("50000"), money_delta=Decimal("50000"),
+            counterparty="X", occurred_at=datetime(2026, 6, 27, 10, 0),
+            row_hash=f"o-{next(_seq)}", raw={})
+        return MatchResult.objects.create(
+            run=run, bucket=MatchResult.Bucket.TIDAK, reason_code="no_panel",
+            left=None, right=right)
+
+    def test_tab_orphan_punya_filter_bank_dari_sisi_uang(self):
+        # Sebelumnya tab "Tidak Ada di Panel" tak punya filter bank (kiri kosong).
+        # Kini diturunkan dari sisi UANG (pola run_detail).
+        self._orphan(self.lbs, "o1")
+        r = self.client.get(reverse("review_queue"), {"bucket": "tidak_ada_panel"})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.context["btitles"])  # tak kosong utk orphan
+        self.assertContains(r, "Filter bank/sumber")
+
+    def test_filter_alasan_menyaring(self):
+        a = self._tinjau(self.lbs, "ZZTINA")           # amount_mismatch
+        b = self._tinjau(self.lbs, "ZZTINB")
+        b.reason_code = "name_partial"; b.save()
+        r = self.client.get(reverse("review_queue"))
+        self.assertContains(r, "Filter alasan")        # fold muncul (reasons > 1)
+        r2 = self.client.get(reverse("review_queue"), {"reason": "name_partial"})
+        self.assertContains(r2, "ZZTINB")
+        self.assertNotContains(r2, "ZZTINA")
+
     def test_hanya_bucket_tinjau_toko_aktif(self):
         self._tinjau(self.lbs, "D-LBS")
         self._tinjau(self.slo, "D-SLO")

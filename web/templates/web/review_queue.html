@@ -19,9 +19,9 @@
     <a href="?bucket=tidak_ada_panel&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}" class="{% if bucket == 'tidak_ada_panel' %}active{% endif %}">Tidak Ada di Panel<span class="n">{{ tab_counts.tidak_ada_panel|intcomma }}</span></a>
   </div>
   <div class="seg" role="group" aria-label="Pilah arus Deposit atau Withdraw">
-    <a href="?bucket={{ bucket }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}" class="{% if not flow %}active{% endif %}">Semua</a>
-    <a href="?bucket={{ bucket }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&flow=depo" class="dp {% if flow == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit</a>
-    <a href="?bucket={{ bucket }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&flow=wd" class="wd {% if flow == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw</a>
+    <a href="?bucket={{ bucket }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&reason={{ reason|urlencode }}" class="{% if not flow %}active{% endif %}">Semua</a>
+    <a href="?bucket={{ bucket }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&reason={{ reason|urlencode }}&flow=depo" class="dp {% if flow == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit</a>
+    <a href="?bucket={{ bucket }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&reason={{ reason|urlencode }}&flow=wd" class="wd {% if flow == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw</a>
   </div>
 </div>
 
@@ -33,31 +33,43 @@
     {% if flow %}<input type="hidden" name="flow" value="{{ flow }}">{% endif %}
     {% if bank %}<input type="hidden" name="bank" value="{{ bank }}">{% endif %}
     {% if btitle %}<input type="hidden" name="btitle" value="{{ btitle }}">{% endif %}
+    {% if reason %}<input type="hidden" name="reason" value="{{ reason }}">{% endif %}
     <button class="btn primary" type="submit">Terapkan</button>
-    {% if date_from or date_to or flow or bank or btitle %}<a class="btn" href="{% url 'review_queue' %}{% if bucket != 'perlu_tinjau' %}?bucket={{ bucket }}{% endif %}">Reset</a>{% endif %}
+    {% if date_from or date_to or flow or bank or btitle or reason %}<a class="btn" href="{% url 'review_queue' %}{% if bucket != 'perlu_tinjau' %}?bucket={{ bucket }}{% endif %}">Reset</a>{% endif %}
   </form>
 </div>
 
-{% if banks or btitles %}
+{% if reasons|length > 1 or banks or btitles %}
 <div class="reveal" style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+  {% if reasons|length > 1 %}
+  <details class="filter-fold"{% if reason %} open{% endif %}>
+    <summary><span class="chev" aria-hidden="true">›</span>Filter alasan{% if reason %} <span class="n">· 1 aktif</span>{% endif %}</summary>
+    <div class="fold-body tabs sub">
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}" class="{% if not reason %}active{% endif %}">semua alasan</a>
+      {% for rc in reasons %}
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&reason={{ rc.reason_code|urlencode }}" class="{% if reason == rc.reason_code %}active{% endif %}">{{ rc.reason_code|reason_label }}<span class="n">{{ rc.n|intcomma }}</span></a>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
   {% if banks %}
   <details class="filter-fold"{% if bank %} open{% endif %}>
     <summary><span class="chev" aria-hidden="true">›</span>Filter bank pemain{% if bank %} <span class="n">· {{ bank }}</span>{% endif %}</summary>
     <div class="fold-body tabs sub">
-      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&btitle={{ btitle|urlencode }}" class="{% if not bank %}active{% endif %}">semua bank</a>
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&reason={{ reason|urlencode }}&btitle={{ btitle|urlencode }}" class="{% if not bank %}active{% endif %}">semua bank</a>
       {% for b in banks %}
-      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&btitle={{ btitle|urlencode }}&bank={{ b.code|urlencode }}" class="{% if bank == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&reason={{ reason|urlencode }}&btitle={{ btitle|urlencode }}&bank={{ b.code|urlencode }}" class="{% if bank == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
       {% endfor %}
     </div>
   </details>
   {% endif %}
   {% if btitles %}
   <details class="filter-fold"{% if btitle %} open{% endif %}>
-    <summary><span class="chev" aria-hidden="true">›</span>Filter bank title{% if btitle %} <span class="n">· {{ btitle }}</span>{% endif %}</summary>
+    <summary><span class="chev" aria-hidden="true">›</span>{% if hide_left %}Filter bank/sumber{% else %}Filter bank title{% endif %}{% if btitle %} <span class="n">· {{ btitle }}</span>{% endif %}</summary>
     <div class="fold-body tabs sub">
-      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}" class="{% if not btitle %}active{% endif %}">semua title</a>
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}" class="{% if not btitle %}active{% endif %}">{% if hide_left %}semua bank{% else %}semua title{% endif %}</a>
       {% for b in btitles %}
-      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&bank={{ bank|urlencode }}&btitle={{ b.code|urlencode }}" class="{% if btitle == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}&btitle={{ b.code|urlencode }}" class="{% if btitle == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
       {% endfor %}
     </div>
   </details>

@@ -1187,23 +1187,65 @@ def review_queue(request):
     if bucket != "tidak_ada_panel":
         qs = qs.order_by("-run__batch__recon_date", "-score", "id")
 
-    banks = [
-        {"code": r["left__player_bank"], "n": r["n"]}
-        for r in qs.filter(left__player_bank__gt="")
-        .values("left__player_bank").annotate(n=Count("id")).order_by("-n")
-    ]
-    bank = request.GET.get("bank", "")
-    if bank:
-        qs = qs.filter(left__player_bank=bank)
+    # Filter alasan (chip dihitung DALAM tab+flow+tanggal) — pola run_detail.
+    reasons = list(qs.values("reason_code").annotate(n=Count("id")).order_by("-n"))
+    reason = request.GET.get("reason", "")
+    if reason:
+        qs = qs.filter(reason_code=reason)
 
-    btitles = [
-        {"code": r["left__bank_title"], "n": r["n"]}
-        for r in qs.filter(left__bank_title__gt="")
-        .values("left__bank_title").annotate(n=Count("id")).order_by("-n")
-    ]
+    # Tab "Tidak Ada di Panel": sisi kredit (kiri) kosong → filter bank beralih ke
+    # SISI UANG (bank pemain tak relevan) — pola run_detail agar filter tetap ada.
+    is_orphan = bucket == "tidak_ada_panel"
+
+    bank = request.GET.get("bank", "")
+    if is_orphan:
+        banks, bank = [], ""
+    else:
+        banks = [
+            {"code": r["left__player_bank"], "n": r["n"]}
+            for r in qs.filter(left__player_bank__gt="")
+            .values("left__player_bank").annotate(n=Count("id")).order_by("-n")
+        ]
+        if bank:
+            qs = qs.filter(left__player_bank=bank)
+
+    # Bank title: tab normal = left__bank_title; tab orphan = label bank/sumber
+    # sisi uang (diturunkan dari upload mutasi) — sama persis run_detail.
     btitle = request.GET.get("btitle", "")
-    if btitle:
-        qs = qs.filter(left__bank_title=btitle)
+    if is_orphan:
+        up_ids = list(
+            qs.filter(right__isnull=False)
+            .values_list("right__upload_id", flat=True).distinct()
+        )
+        ups = Upload.objects.filter(id__in=up_ids).select_related("account", "source_type")
+        label_by_upload = {
+            u.id: specific_source_label(u.source_type.key, account=u.account, upload=u)
+            for u in ups
+        }
+        counts = {}
+        for r in (
+            qs.filter(right__isnull=False)
+            .values("right__upload_id").annotate(n=Count("id"))
+        ):
+            lbl = label_by_upload.get(r["right__upload_id"])
+            if lbl:
+                counts[lbl] = counts.get(lbl, 0) + r["n"]
+        btitles = [
+            {"code": lbl, "n": n}
+            for lbl, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+        if btitle:
+            qs = qs.filter(right__upload_id__in=[
+                uid for uid, lbl in label_by_upload.items() if lbl == btitle
+            ])
+    else:
+        btitles = [
+            {"code": r["left__bank_title"], "n": r["n"]}
+            for r in qs.filter(left__bank_title__gt="")
+            .values("left__bank_title").annotate(n=Count("id")).order_by("-n")
+        ]
+        if btitle:
+            qs = qs.filter(left__bank_title=btitle)
 
     # Ringkasan total pada set terfilter penuh (sebelum paginasi) — pola run_detail.
     totals = qs.aggregate(
@@ -1221,8 +1263,8 @@ def review_queue(request):
         "page": page, "active_toko": active,
         "bucket": bucket, "tab_counts": tab_counts, "totals": totals,
         "hide_left": bucket == "tidak_ada_panel",
-        "flow": flow, "bank": bank, "btitle": btitle,
-        "banks": banks, "btitles": btitles,
+        "flow": flow, "bank": bank, "btitle": btitle, "reason": reason,
+        "banks": banks, "btitles": btitles, "reasons": reasons,
         "date_from": request.GET.get("from", "") if date_from else "",
         "date_to": request.GET.get("to", "") if date_to else "",
         "pilihan_alasan": FRKoreksi.ALASAN_KOREKSI,
