@@ -76,6 +76,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'web.middleware.GeoBlockMiddleware',
     'web.middleware.ForcePasswordChangeMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -193,6 +194,17 @@ CSRF_TRUSTED_ORIGINS = []
 if _railway_host:
     CSRF_TRUSTED_ORIGINS.append(f'https://{_railway_host}')
 CSRF_TRUSTED_ORIGINS += [o.strip() for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()]
+
+# --- Geo-block (kunci wilayah, fitur K4) ---
+# DEFAULT MATI: middleware pass-through total — deploy tidak mengubah akses apa
+# pun sampai env dinyalakan. GEO_BLOCK_COUNTRIES = daftar negara yang DIIZINKAN
+# (kode ISO 2-huruf); IP dari negara di luar daftar dapat 403 saat fitur menyala.
+GEO_BLOCK_ENABLED = os.environ.get('GEO_BLOCK_ENABLED', 'False').lower() == 'true'
+GEO_BLOCK_COUNTRIES = {
+    c.strip().upper() for c in os.environ.get('GEO_BLOCK_COUNTRIES', 'KH').split(',') if c.strip()
+}
+GEO_BLOCK_ALLOWLIST = [x.strip() for x in os.environ.get('GEO_BLOCK_ALLOWLIST', '').split(',') if x.strip()]
+GEO_BLOCK_BYPASS_STAFF = os.environ.get('GEO_BLOCK_BYPASS_STAFF', 'True').lower() == 'true'
 
 # Traceback error 500 harus muncul di log Railway (default Django dengan
 # DEBUG=False hanya mengirim ke email ADMINS — tidak pernah terlihat di log).

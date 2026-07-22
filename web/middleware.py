@@ -1,6 +1,10 @@
-"""Middleware gerbang: paksa user ber-flag must_change_password ke halaman ganti password."""
+"""Middleware gerbang: paksa ganti password + kunci wilayah (geo-block)."""
+import ipaddress
+
 from django.conf import settings
+from django.http import HttpResponseForbidden
 from django.shortcuts import redirect
+from django.template.loader import render_to_string
 from django.urls import reverse
 
 
@@ -29,3 +33,136 @@ class ForcePasswordChangeMiddleware:
             if path not in allowed and not path.startswith(asset_prefixes):
                 return redirect("ganti_password")
         return self.get_response(request)
+
+
+# --- Geo-block (kunci wilayah) ---------------------------------------------
+# Fitur K4: hanya negara di GEO_BLOCK_COUNTRIES yang boleh masuk; sisanya 403.
+# DEFAULT MATI (settings.GEO_BLOCK_ENABLED=False) → middleware no-op total.
+
+_geoip_instance = None
+
+
+def _lookup_country(ip):
+    """Kembalikan kode negara 2-huruf (mis. 'KH','ID') untuk IP.
+
+    Import GeoIP LAZY di dalam fungsi supaya app tetap boot bila lib belum
+    terpasang; melempar (ImportError / exception apa pun) bila lookup mustahil,
+    dan pemanggil (middleware) menangkapnya sebagai FAIL-OPEN. Instance
+    GeoIP2Fast di-cache di modul (dibuat sekali).
+    """
+    global _geoip_instance
+    from geoip2fast import GeoIP2Fast  # lazy; ImportError bila lib absen
+
+    if _geoip_instance is None:
+        _geoip_instance = GeoIP2Fast()
+    result = _geoip_instance.lookup(ip)
+    return (getattr(result, "country_code", "") or "").upper()
+
+
+def _client_ip(request):
+    """Ambil IP klien asli di belakang proxy Railway (Envoy).
+
+    Prioritas: X-Envoy-External-Address (dihitung Envoy) → hop PALING KANAN
+    X-Forwarded-For (ditambah infrastruktur, sulit dipalsukan; JANGAN kiri —
+    klien bisa prepend IP palsu) → X-Real-IP → REMOTE_ADDR.
+    """
+    meta = request.META
+    envoy = meta.get("HTTP_X_ENVOY_EXTERNAL_ADDRESS")
+    if envoy and envoy.strip():
+        return envoy.strip()
+    xff = meta.get("HTTP_X_FORWARDED_FOR")
+    if xff:
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]  # rightmost = hop tepercaya
+    real = meta.get("HTTP_X_REAL_IP")
+    if real and real.strip():
+        return real.strip()
+    return (meta.get("REMOTE_ADDR") or "").strip()
+
+
+def _ip_is_internal(ip):
+    """IP privat/loopback/link-local → selalu lolos (health-check + dev)."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return addr.is_private or addr.is_loopback or addr.is_link_local
+
+
+def _ip_in_allowlist(ip, allowlist):
+    """Break-glass: IP klien cocok salah satu entri IP/CIDR di allowlist."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    for entry in allowlist:
+        try:
+            if addr in ipaddress.ip_network(entry, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+class GeoBlockMiddleware:
+    """Kunci wilayah: saat menyala, hanya IP dari negara di
+    GEO_BLOCK_COUNTRIES yang boleh mengakses app; sisanya dapat 403 halaman
+    "Trust No One".
+
+    Aman by design — DEFAULT MATI: bila GEO_BLOCK_ENABLED False (default),
+    __call__ langsung meneruskan request (no-op). Deploy tidak mengubah akses
+    apa pun sampai controller menyalakan env. FAIL-OPEN hanya bila lookup
+    GeoIP mustahil (lib/DB tak termuat) — jangan pernah brick app live.
+
+    Dipasang SETELAH AuthenticationMiddleware supaya request.user tersedia
+    untuk GEO_BLOCK_BYPASS_STAFF (break-glass staff saat lockout).
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if self._blokir(request):
+            html = render_to_string("web/geo_block.html", request=request)
+            return HttpResponseForbidden(html)
+        return self.get_response(request)
+
+    def _blokir(self, request):
+        # (0) DEFAULT MATI → no-op total.
+        if not getattr(settings, "GEO_BLOCK_ENABLED", False):
+            return False
+
+        # (1) aset statis/media exempt (halaman blokir pun tak boleh 500 karena aset).
+        asset_prefixes = tuple(p for p in (settings.STATIC_URL, settings.MEDIA_URL) if p)
+        if asset_prefixes and request.path.startswith(asset_prefixes):
+            return False
+
+        # (2) ambil IP asli; tanpa IP jangan brick → lolos.
+        ip = _client_ip(request)
+        if not ip:
+            return False
+
+        # (3) IP privat/loopback/link-local → lolos (health-check internal + dev).
+        if _ip_is_internal(ip):
+            return False
+
+        # (4) allowlist break-glass.
+        if _ip_in_allowlist(ip, getattr(settings, "GEO_BLOCK_ALLOWLIST", [])):
+            return False
+
+        # (5) bypass staff terautentikasi.
+        if getattr(settings, "GEO_BLOCK_BYPASS_STAFF", True):
+            user = getattr(request, "user", None)
+            if user is not None and user.is_authenticated and user.is_staff:
+                return False
+
+        # (6) resolve negara LAZY; lookup mustahil → FAIL-OPEN (lolos).
+        try:
+            country = _lookup_country(ip)
+        except Exception:
+            return False
+
+        # (7) negara dalam daftar yang diizinkan → lolos; else BLOK.
+        allowed = getattr(settings, "GEO_BLOCK_COUNTRIES", {"KH"})
+        return country not in allowed

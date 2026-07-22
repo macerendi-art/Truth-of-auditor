@@ -6,6 +6,11 @@ pdfplumber
 rapidfuzz
 python-dateutil
 
+# geo-block (kunci wilayah) — DB negara terbundel di paket pip (pure-Python,
+# tanpa license key MaxMind, tanpa panggilan jaringan). Import LAZY di
+# web/middleware.py → app tetap boot & FAIL-OPEN bila paket ini belum terpasang.
+geoip2fast
+
 # deployment (Railway/produksi)
 gunicorn
 whitenoise
