@@ -110,6 +110,50 @@ class RekeningAggregatTests(_MoneyData):
         self.assertEqual(data["accounts"][0]["deposit"], Decimal("500000"))
 
 
+class RekeningRentangTests(_MoneyData):
+    """Rentang [dari, sampai] — mengikuti pola kembaran Breakdown Bracket."""
+
+    def test_rentang_agregasi_lintas_hari_dan_carry(self):
+        # BCA a/n HENDI: 27 Jun awal 1jt, +DP 500rb → 1,5jt; 28 Jun −WD 200rb → 1,3jt.
+        # Rantai saldo nyambung lintas hari → saldo_awal=1jt (sebelum baris in-range
+        # pertama), saldo_akhir=1,3jt, selisih 0, mutasi & trx gabungan 2 hari.
+        self.mv(self.bank, "BCA", "HENDI", "500000", "1500000", jam=9,
+                tanggal=date(2026, 6, 27))
+        self.mv(self.bank, "BCA", "HENDI", "-200000", "1300000", jam=11, jenis="wd",
+                tanggal=date(2026, 6, 28))
+        data = rekening_breakdown(self.toko, date(2026, 6, 27), date(2026, 6, 28))
+        self.assertEqual(data["count"], 2)
+        (acc,) = data["accounts"]
+        self.assertEqual(acc["deposit"], Decimal("500000"))
+        self.assertEqual(acc["withdraw"], Decimal("200000"))
+        self.assertEqual(acc["trx"], 2)
+        self.assertEqual(acc["saldo_awal"], Decimal("1000000"))
+        self.assertEqual(acc["saldo_akhir"], Decimal("1300000"))
+        self.assertEqual(acc["selisih"], Decimal("0"))
+
+    def test_sampai_none_setara_satu_hari(self):
+        # sampai=None (dan sampai==dari) HARUS identik dengan mode satu-hari lama.
+        self.mv(self.bank, "BCA", "HENDI", "500000", "500000", jam=9, tanggal=TGL)
+        self.mv(self.bank, "BCA", "HENDI", "999", "999", jam=9, tanggal=date(2026, 6, 27))
+        satu = rekening_breakdown(self.toko, TGL)
+        rentang1 = rekening_breakdown(self.toko, TGL, TGL)
+        self.assertEqual(satu["count"], 1)
+        self.assertEqual(rentang1["count"], 1)
+        self.assertEqual(satu["accounts"][0]["deposit"], rentang1["accounts"][0]["deposit"])
+
+    def test_dari_sampai_terbalik_ditukar(self):
+        self.mv(self.bank, "BCA", "HENDI", "500000", "500000", jam=9, tanggal=TGL)
+        data = rekening_breakdown(self.toko, date(2026, 6, 29), date(2026, 6, 27))
+        self.assertEqual(data["dari"], date(2026, 6, 27))
+        self.assertEqual(data["sampai"], date(2026, 6, 29))
+        self.assertEqual(data["count"], 1)
+
+    def test_data_membawa_dari_sampai(self):
+        data = rekening_breakdown(self.toko, date(2026, 6, 27), date(2026, 6, 28))
+        self.assertEqual(data["dari"], date(2026, 6, 27))
+        self.assertEqual(data["sampai"], date(2026, 6, 28))
+
+
 class RekeningViewTests(_MoneyData):
     def setUp(self):
         super().setUp()
@@ -135,3 +179,27 @@ class RekeningViewTests(_MoneyData):
         r = self.client.get(reverse("rekening_breakdown"), {"date": "2026-06-28"})
         self.assertEqual(r.status_code, 200)
         self.assertIn("Belum ada mutasi", r.content.decode())
+
+    def test_filter_rentang_dari_sampai(self):
+        # Dua hari, dua rekening; rentang 27–28 Jun harus memuat keduanya.
+        self.mv(self.bank, "BCA", "HENDI", "500000", "500000", jam=9,
+                tanggal=date(2026, 6, 27))
+        self.mv(self.bank, "BRI", "PANCA", "700000", "700000", jam=9,
+                tanggal=date(2026, 6, 28))
+        r = self.client.get(reverse("rekening_breakdown"),
+                            {"dari": "2026-06-27", "sampai": "2026-06-28"})
+        self.assertEqual(r.status_code, 200)
+        html = r.content.decode()
+        self.assertIn("BCA a/n HENDI", html)
+        self.assertIn("BRI a/n PANCA", html)
+        # bar filter seragam dgn Rincian Biaya: dua input Dari & Sampai
+        self.assertIn('name="dari"', html)
+        self.assertIn('name="sampai"', html)
+
+    def test_date_lama_tetap_jalan(self):
+        # back-compat: ?date= lama = rentang 1 hari (dari==sampai).
+        self.mv(self.bank, "BCA", "HENDI", "500000", "500000", jam=9,
+                tanggal=date(2026, 6, 28))
+        r = self.client.get(reverse("rekening_breakdown"), {"date": "2026-06-28"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("BCA a/n HENDI", r.content.decode())

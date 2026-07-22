@@ -1682,19 +1682,23 @@ def settlement_pending(request):
 @login_required
 def rekening_breakdown(request):
     """Rincian Rekening: breakdown sisi uang (bank/gateway) per rekening operator
-    pada satu tanggal — Deposit/Withdraw/Admin/Net/Saldo + Selisih Kontrol."""
+    untuk rentang [dari, sampai] — Deposit/Withdraw/Admin/Net/Saldo + Selisih
+    Kontrol. Filter Dari/Sampai seragam dgn Rincian Biaya; default = hari terakhir
+    yang ada datanya (rentang 1 hari). ?date= lama = rentang 1 hari (back-compat)."""
     active = _active_toko(request)
     if active is None:
         return render(request, "web/no_toko.html")
     latest = Transaction.objects.filter(
         toko=active, source_type__key__in=("bank", "gateway")
     ).aggregate(m=Max("occurred_at__date"))["m"]
-    tanggal = _parse_date(request.GET.get("date", "")) or latest or date_cls.today()
-    data = hitung_rekening_breakdown(active, tanggal)
+    lama = _parse_date(request.GET.get("date", ""))  # ?date= lama = rentang 1 hari
+    sampai = _parse_date(request.GET.get("sampai", "")) or lama or latest or date_cls.today()
+    dari = _parse_date(request.GET.get("dari", "")) or lama or sampai
+    if dari > sampai:
+        dari, sampai = sampai, dari
+    data = hitung_rekening_breakdown(active, dari, sampai)
     return render(request, "web/rekening.html", {
-        "data": data, "tanggal": tanggal, "latest": latest,
-        "prev_date": tanggal - timedelta(days=1),
-        "next_date": tanggal + timedelta(days=1),
+        "data": data, "dari": dari, "sampai": sampai, "latest": latest,
     })
 
 

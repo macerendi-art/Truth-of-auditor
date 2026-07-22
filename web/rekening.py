@@ -16,11 +16,28 @@ NOL = Decimal("0")
 MONEY_KEYS = ("bank", "gateway")
 
 
-def rekening_breakdown(toko, tanggal):
-    """{"accounts": [per rekening], "total": agregat, "count": jumlah baris}."""
+def rekening_breakdown(toko, dari, sampai=None):
+    """Agregasi sisi uang `toko` untuk `occurred_at ∈ [dari, sampai]` → dict view.
+
+    Rentang [dari, sampai] (default `sampai=dari` = perilaku 1-hari lama, dipakai
+    juga oleh sheet export per-batch). Saldo memakai `balance_after`: karena baris
+    diurut `(occurred_at, id)` — `occurred_at` datetime penuh, jadi rantai saldo
+    benar lintas hari — `_saldo_batas` atas baris in-range menghasilkan saldo_awal
+    = saldo sebelum baris pertama rentang (carry-in dari hari sebelumnya, otomatis)
+    dan saldo_akhir = penutup baris terakhir. Rekening tanpa baris in-range tak
+    tampil (sama seperti mode 1-hari).
+
+    {"accounts": [per rekening], "total": agregat, "count": jumlah baris,
+     "dari": date, "sampai": date}
+    """
+    if sampai is None:
+        sampai = dari
+    if dari > sampai:
+        dari, sampai = sampai, dari
     rows = (
         Transaction.objects.filter(
-            toko=toko, source_type__key__in=MONEY_KEYS, occurred_at__date=tanggal
+            toko=toko, source_type__key__in=MONEY_KEYS,
+            occurred_at__date__range=(dari, sampai),
         )
         .select_related("source_type", "upload", "account", "upload__account")
         .order_by("occurred_at", "id")
@@ -78,4 +95,7 @@ def rekening_breakdown(toko, tanggal):
         for k in ("saldo_awal", "saldo_akhir", "selisih"):
             if a[k] is not None:
                 total[k] = (total[k] or NOL) + a[k]
-    return {"accounts": accounts, "total": total, "count": count}
+    return {
+        "accounts": accounts, "total": total, "count": count,
+        "dari": dari, "sampai": sampai,
+    }
