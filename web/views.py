@@ -1024,25 +1024,62 @@ def run_detail(request, pk):
     if reason:
         qs = qs.filter(reason_code=reason)
 
+    # Tab "Tidak Ada di Panel" (orphan uang): sisi kredit (kiri) kosong, jadi
+    # filter bank beralih ke SISI UANG. Bank pemain tak relevan → dikosongkan.
+    is_orphan = bucket == "tidak_ada_panel"
+
     # Chip filter bank pemain (dalam bucket+flow+alasan). Kosong/orphan dikecualikan.
-    banks = [
-        {"code": r["left__player_bank"], "n": r["n"]}
-        for r in qs.filter(left__player_bank__gt="")
-        .values("left__player_bank").annotate(n=Count("id")).order_by("-n")
-    ]
     bank = request.GET.get("bank", "")
-    if bank:
-        qs = qs.filter(left__player_bank=bank)
+    if is_orphan:
+        banks, bank = [], ""
+    else:
+        banks = [
+            {"code": r["left__player_bank"], "n": r["n"]}
+            for r in qs.filter(left__player_bank__gt="")
+            .values("left__player_bank").annotate(n=Count("id")).order_by("-n")
+        ]
+        if bank:
+            qs = qs.filter(left__player_bank=bank)
 
     # Chip filter bank title / tujuan (dalam bucket+flow+alasan+bank).
-    btitles = [
-        {"code": r["left__bank_title"], "n": r["n"]}
-        for r in qs.filter(left__bank_title__gt="")
-        .values("left__bank_title").annotate(n=Count("id")).order_by("-n")
-    ]
+    # Tab normal: bank tujuan sisi kredit (left__bank_title). Tab orphan: label
+    # bank/sumber sisi uang, diturunkan dari upload mutasi (BRI/BCA/Mandiri/...
+    # lewat provider/nama file) — sisi uang tak punya kolom bank ter-denormalisasi.
     btitle = request.GET.get("btitle", "")
-    if btitle:
-        qs = qs.filter(left__bank_title=btitle)
+    if is_orphan:
+        up_ids = list(
+            qs.filter(right__isnull=False)
+            .values_list("right__upload_id", flat=True).distinct()
+        )
+        ups = Upload.objects.filter(id__in=up_ids).select_related("account", "source_type")
+        label_by_upload = {
+            u.id: specific_source_label(u.source_type.key, account=u.account, upload=u)
+            for u in ups
+        }
+        counts = {}
+        for r in (
+            qs.filter(right__isnull=False)
+            .values("right__upload_id").annotate(n=Count("id"))
+        ):
+            lbl = label_by_upload.get(r["right__upload_id"])
+            if lbl:
+                counts[lbl] = counts.get(lbl, 0) + r["n"]
+        btitles = [
+            {"code": lbl, "n": n}
+            for lbl, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+        if btitle:
+            qs = qs.filter(right__upload_id__in=[
+                uid for uid, lbl in label_by_upload.items() if lbl == btitle
+            ])
+    else:
+        btitles = [
+            {"code": r["left__bank_title"], "n": r["n"]}
+            for r in qs.filter(left__bank_title__gt="")
+            .values("left__bank_title").annotate(n=Count("id")).order_by("-n")
+        ]
+        if btitle:
+            qs = qs.filter(left__bank_title=btitle)
 
     # Ringkasan total pada set terfilter penuh (sebelum paginasi).
     totals = qs.aggregate(

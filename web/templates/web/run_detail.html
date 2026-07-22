@@ -74,9 +74,9 @@
   {% endif %}
   {% if btitles %}
   <details class="filter-fold"{% if btitle %} open{% endif %}>
-    <summary><span class="chev" aria-hidden="true">›</span>Filter bank title{% if btitle %} <span class="n">· {{ btitle }}</span>{% endif %}</summary>
+    <summary><span class="chev" aria-hidden="true">›</span>{% if hide_left %}Filter bank/sumber{% else %}Filter bank title{% endif %}{% if btitle %} <span class="n">· {{ btitle }}</span>{% endif %}</summary>
     <div class="fold-body tabs sub">
-      <a href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}" class="{% if not btitle %}active{% endif %}">semua title</a>
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}" class="{% if not btitle %}active{% endif %}">{% if hide_left %}semua bank{% else %}semua title{% endif %}</a>
       {% for b in btitles %}
       <a href="?bucket={{ bucket }}&flow={{ flow }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}&btitle={{ b.code|urlencode }}" class="{% if btitle == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
       {% endfor %}
