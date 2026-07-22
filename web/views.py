@@ -1775,6 +1775,19 @@ def _annot_alasan_review(qs):
     )
 
 
+def _kunci_baris_override(left, batch):
+    """Kunci (consume) baris kiri ke batch asal hasil saat di-review manual —
+    keputusan manual jadi FINAL. Tanpa ini, baris no_money yang masih AKTIF keluar
+    dari carry-over (reason_code berubah dari 'no_money') TAPI tetap aktif, sehingga
+    run tanggal berikutnya memperlakukannya sebagai baris SUSULAN dan menulis hasil
+    tidak_cocok DUPLIKAT yang menimpa override (bug: review manual balik jadi tidak
+    cocok begitu hari berikutnya dijalankan). Idempoten: baris yang sudah dikonsumsi
+    dilewati; batch/None aman."""
+    if left is not None and left.consumed_by_batch_id is None and batch is not None:
+        left.consumed_by_batch = batch
+        left.save(update_fields=["consumed_by_batch"])
+
+
 @login_required
 @require_POST
 def bulk_review(request, pk):
@@ -1791,11 +1804,12 @@ def bulk_review(request, pk):
         return HttpResponseBadRequest("alasan tidak dikenal")
     catatan = (request.POST.get("catatan") or "").strip()
     ids = [i for i in request.POST.getlist("result_ids") if i.isdigit()]
-    rows = list(MatchResult.objects.filter(run=run, id__in=ids))
+    rows = list(MatchResult.objects.filter(run=run, id__in=ids).select_related("left"))
     for r in rows:
         r.bucket = buckets[action]
         r.reason_code = "manual_override"
         r.save(update_fields=["bucket", "reason_code"])
+        _kunci_baris_override(r.left, run.batch)
         ReviewAction.objects.create(
             result=r, action=action, reason=catatan or "bulk",
             alasan=alasan, reviewer=request.user
@@ -1833,12 +1847,13 @@ def bulk_review_queue(request):
     ids = [i for i in request.POST.getlist("result_ids") if i.isdigit()]
     rows = list(MatchResult.objects.filter(
         id__in=ids, run__batch__toko__in=tokos_for(request.user)
-    ).select_related("run__batch"))
+    ).select_related("run__batch", "left"))
     batches = {}
     for r in rows:
         r.bucket = buckets[action]
         r.reason_code = "manual_override"
         r.save(update_fields=["bucket", "reason_code"])
+        _kunci_baris_override(r.left, r.run.batch)
         ReviewAction.objects.create(
             result=r, action=action, reason=catatan or "bulk",
             alasan=alasan, reviewer=request.user)
@@ -1893,13 +1908,12 @@ def review(request, pk):
         return HttpResponseBadRequest("alasan tidak dikenal")
     # catatan bebas: param baru `catatan` (modal alasan) ATAU param lama `reason`
     reason = (request.POST.get("catatan") or "").strip() or request.POST.get("reason", "")
-    # Catatan: override pada hasil no_money yang barisnya masih AKTIF (menunggu
-    # settlement) mengeluarkannya dari carry-over — baris itu akan diperlakukan
-    # sebagai baris baru di run berikutnya. Follow-up kecil bila jadi masalah:
-    # konsumsi baris ke batch asalnya saat di-override.
     r.bucket = buckets[action]
     r.reason_code = "manual_override"
     r.save(update_fields=["bucket", "reason_code"])
+    # Kunci baris ke batch asal: keputusan manual final, cegah baris diproses ulang
+    # sebagai susulan (yang membuat hasil duplikat menimpa override) di run berikutnya.
+    _kunci_baris_override(r.left, r.run.batch)
     ReviewAction.objects.create(
         result=r, action=action, reason=reason, alasan=alasan, reviewer=request.user
     )
