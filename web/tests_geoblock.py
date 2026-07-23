@@ -85,15 +85,25 @@ class GeoBlockOnTests(TestCase):
             r = self.client.get(LOGIN, HTTP_X_FORWARDED_FOR="8.8.8.8")
         self.assertNotEqual(r.status_code, 403)
 
-    def test_anti_spoof_xff_pakai_hop_kanan(self):
-        # Klien memalsukan hop kiri (KH), infra menambah hop kanan (ID nyata).
-        # Middleware harus memakai yang KANAN → ID → 403 (bukan lolos).
+    def test_peer_dari_xff_paling_kiri(self):
+        """DIKOREKSI 2026-07-23 setelah pengujian nyata di prod.
+
+        Dulu tes ini menuntut hop paling KANAN, dengan asumsi proxy MENAMBAH ke
+        XFF kiriman klien. Railway ternyata MENIMPA XFF menjadi
+        `<peer>, <hop internal Railway>` — nilai karangan klien dibuang. Jadi
+        paling kanan = hop Railway (sama untuk semua orang, tak informatif),
+        dan paling KIRI = peer asli. Di sini peer 9.9.9.9 → KH → lolos.
+        """
         resolver = _lc({"9.9.9.9": "KH", "8.8.8.8": "ID"})
         with mock.patch("web.middleware._lookup_country", resolver):
             r = self.client.get(LOGIN, HTTP_X_FORWARDED_FOR="9.9.9.9, 8.8.8.8")
-        self.assertEqual(r.status_code, 403)
+        self.assertNotEqual(r.status_code, 403)
 
-    def test_envoy_header_diprioritaskan(self):
+    def test_envoy_header_TIDAK_dipercaya(self):
+        """DIKOREKSI: dulu tes ini menuntut `X-Envoy-External-Address`
+        diprioritaskan — itu justru lubang bypass-nya. Diverifikasi di prod:
+        header itu LOLOS MENTAH dari klien (tak disanitasi Railway), sedangkan
+        XFF disanitasi. Peer 8.8.8.8 (ID) harus menang atas Envoy palsu (KH)."""
         resolver = _lc({"5.5.5.5": "KH", "8.8.8.8": "ID"})
         with mock.patch("web.middleware._lookup_country", resolver):
             r = self.client.get(
@@ -101,7 +111,7 @@ class GeoBlockOnTests(TestCase):
                 HTTP_X_ENVOY_EXTERNAL_ADDRESS="5.5.5.5",
                 HTTP_X_FORWARDED_FOR="8.8.8.8",
             )
-        self.assertNotEqual(r.status_code, 403)
+        self.assertEqual(r.status_code, 403)
 
     def test_aset_statis_exempt(self):
         with mock.patch("web.middleware._lookup_country", _lc({})):
@@ -221,4 +231,54 @@ class GeoBlockRequireCfTests(TestCase):
     def test_health_check_internal_tetap_lolos(self):
         """Railway health-check datang dari IP privat — jangan sampai mati."""
         r = self.client.get(LOGIN, HTTP_X_FORWARDED_FOR="10.0.0.5")
+        self.assertNotEqual(r.status_code, 403)
+
+
+@override_settings(
+    GEO_BLOCK_ENABLED=True, GEO_BLOCK_COUNTRIES={"KH"},
+    GEO_BLOCK_BYPASS_STAFF=False, GEO_BLOCK_ALLOWLIST=["202.178.121.42"],
+    GEO_BLOCK_REQUIRE_CF=True,
+)
+class GeoBlockAntiSpoofTests(TestCase):
+    """Regresi lubang bypass nyata (ditemukan di prod 2026-07-23).
+
+    Railway MENIMPA `X-Forwarded-For` (jadi `<peer>, <hop railway>`) tapi
+    MELOLOSKAN `X-Envoy-External-Address` / `CF-*` kiriman klien. Dulu
+    `_client_ip` memprioritaskan header Envoy → penyerang dari negara mana pun
+    tinggal mengirim header palsu untuk menyamar datang lewat Cloudflare.
+    """
+
+    def test_envoy_header_palsu_tidak_lagi_dipercaya(self):
+        # Penyerang non-KH mengarang SEMUA header CF + Envoy. XFF asli (dibangun
+        # Railway) tetap menunjuk dirinya → harus TETAP DIBLOKIR.
+        with mock.patch("web.middleware._lookup_country", _lc({BUKAN_CF: "US"})):
+            r = self.client.get(
+                LOGIN,
+                HTTP_X_FORWARDED_FOR=f"{BUKAN_CF}, 152.233.68.97",
+                HTTP_X_ENVOY_EXTERNAL_ADDRESS=CF_PEER,      # palsu
+                HTTP_CF_CONNECTING_IP="202.178.121.42",     # palsu (IP allowlist)
+                HTTP_CF_IPCOUNTRY="KH",                     # palsu
+                HTTP_X_REAL_IP="202.178.121.42",            # palsu
+            )
+        self.assertEqual(r.status_code, 403)
+
+    def test_peer_diambil_dari_xff_paling_kiri_bukan_kanan(self):
+        """Paling kanan = hop internal Railway (sama utk semua orang); kalau
+        dipakai, via_cloudflare selalu salah dan allowlist tak pernah kena."""
+        from web.middleware import _client_ip
+
+        class _R:
+            META = {"HTTP_X_FORWARDED_FOR": "162.158.193.221, 79.127.228.17"}
+
+        self.assertEqual(_client_ip(_R()), "162.158.193.221")
+
+    def test_lewat_cloudflare_asli_tetap_lolos(self):
+        # XFF[0] = IP edge Cloudflare sungguhan → header CF boleh dipercaya.
+        with mock.patch("web.middleware._lookup_country", _lc({})):
+            r = self.client.get(
+                LOGIN,
+                HTTP_X_FORWARDED_FOR=f"{CF_PEER}, 79.127.228.17",
+                HTTP_CF_CONNECTING_IP="202.178.121.42",
+                HTTP_CF_IPCOUNTRY="KH",
+            )
         self.assertNotEqual(r.status_code, 403)

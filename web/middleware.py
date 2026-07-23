@@ -60,24 +60,31 @@ def _lookup_country(ip):
 
 
 def _client_ip(request):
-    """Ambil IP klien asli di belakang proxy Railway (Envoy).
+    """PEER: alamat yang benar-benar membuka koneksi ke edge Railway.
 
-    Prioritas: X-Envoy-External-Address (dihitung Envoy) → hop PALING KANAN
-    X-Forwarded-For (ditambah infrastruktur, sulit dipalsukan; JANGAN kiri —
-    klien bisa prepend IP palsu) → X-Real-IP → REMOTE_ADDR.
+    DIVERIFIKASI DI PROD (2026-07-23) dengan mengirim header palsu ke origin:
+
+      * `X-Forwarded-For` **DITIMPA** Railway — nilai karangan klien dibuang dan
+        header dibangun ulang jadi `<peer>, <hop internal Railway>`. Jadi
+        elemen PALING KIRI = peer asli, dan ini SATU-SATUNYA sinyal yang tidak
+        bisa dipalsukan.
+      * `X-Envoy-External-Address`, `CF-Connecting-IP`, `CF-IPCountry`,
+        `X-Real-IP` **LOLOS MENTAH** dari klien. Header Envoy dulu dipakai
+        sebagai prioritas utama — itu lubang bypass: penyerang tinggal mengirim
+        `X-Envoy-External-Address: <ip Cloudflare>` untuk menyamar datang lewat
+        Cloudflare. Karena itu header tersebut TIDAK LAGI dipercaya di sini.
+
+    Catatan arah: dulu dipakai elemen paling KANAN dengan asumsi proxy
+    MENAMBAH ke XFF kiriman klien. Railway tidak menambah — ia menyanitasi —
+    sehingga paling kanan justru hop internal Railway (selalu sama untuk semua
+    orang), dan paling kiri-lah peer sebenarnya.
     """
     meta = request.META
-    envoy = meta.get("HTTP_X_ENVOY_EXTERNAL_ADDRESS")
-    if envoy and envoy.strip():
-        return envoy.strip()
     xff = meta.get("HTTP_X_FORWARDED_FOR")
     if xff:
         parts = [p.strip() for p in xff.split(",") if p.strip()]
         if parts:
-            return parts[-1]  # rightmost = hop tepercaya
-    real = meta.get("HTTP_X_REAL_IP")
-    if real and real.strip():
-        return real.strip()
+            return parts[0]  # leftmost = peer asli (XFF disanitasi Railway)
     return (meta.get("REMOTE_ADDR") or "").strip()
 
 

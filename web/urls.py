@@ -40,5 +40,4 @@ urlpatterns = [
     path("upload/<int:pk>/delete/", admin_views.delete_upload, name="delete_upload"),
     path("upload/bulk-delete/", admin_views.bulk_delete_uploads, name="bulk_delete_uploads"),
     path("batch/<int:pk>/delete/", admin_views.delete_batch, name="delete_batch"),
-    path("__geodiag_5b1e8c95/", views._geo_diag, name="geo_diag_tmp"),  # SEMENTARA
 ]
