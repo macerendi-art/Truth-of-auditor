@@ -58,12 +58,13 @@ def _panel_phone(t):
     return digits.lstrip("0").removeprefix("62").lstrip("0")
 
 
-def _money_phones(t):
-    """Deret digit (≥9) di baris uang — mutasi VA e-wallet (FTFVA/DANA, GOPAY
-    TOPUP, dst) menaruh nomor HP/VA tujuan di teks keterangan."""
-    text = " ".join(str(v) for v in (t.raw or {}).values())
+def _phones_from(raw, counterparty=""):
+    """Deret digit (≥9) dari raw+counterparty baris uang — mutasi VA e-wallet
+    (FTFVA/DANA, GOPAY TOPUP, dst) menaruh nomor HP/VA tujuan di teks keterangan.
+    Level-raw supaya bisa dipakai juga utk baris historis via values_list."""
+    text = " ".join(str(v) for v in (raw or {}).values())
     out = set()
-    joined = text + " " + (t.counterparty or "")
+    joined = text + " " + (counterparty or "")
     # Span BRIVA diganti nomor bersihnya SEBELUM scan deret digit: nomor ikut
     # terekstrak DAN deret tercemar kode (mis. '301350831448892') hilang.
     joined = _BRIVA_RE.sub(lambda m: f" {m.group(1)} ", joined)
@@ -72,6 +73,10 @@ def _money_phones(t):
         if len(norm) >= 9:
             out.add(norm)
     return out
+
+
+def _money_phones(t):
+    return _phones_from(t.raw, t.counterparty)
 
 
 def _phone_match(pp, phones):
@@ -138,12 +143,55 @@ def _money_channel(t):
     # Hanya awalan description (ditulis parser sendiri) — bukan teks bebas.
     return _channel_from((t.description or "")[:12])
 
+# --- Gate settle gateway (K1) --------------------------------------------------
+# Parser QRFlyer/NXPay menelan SEMUA baris; status pembayaran hanya tersimpan di
+# raw ("Payment Status"/"Status"). QR UNPAID/FAILED = uang BELUM masuk: bukan
+# pasangan sah pass 0/0b, bukan kandidat fuzzy, bukan gross. Fail-open: status
+# kosong / di luar kamus dianggap settle — QHoki/RPay/COR sudah menyaring saat
+# parse dan bisa membawa kolom "Status" bermakna lain; jangan merusak join yang
+# hari ini benar. Hanya token BELUM-settle yang dikenal yang menggerbang.
+UNSETTLED_STATUS = {
+    "UNPAID", "FAILED", "EXPIRED", "PENDING", "CANCELLED", "CANCELED",
+    "REFUND", "REFUNDED", "GAGAL", "BATAL", "KADALUARSA",
+}
+
+
+def _gw_status(raw):
+    return ((raw or {}).get("Payment Status") or (raw or {}).get("Status") or "").strip().upper()
+
+
+def _gw_unsettled(t):
+    """Baris gateway BELUM settle (uang belum masuk)? Panggil hanya utk gateway."""
+    return _gw_status(t.raw) in UNSETTLED_STATUS
+
+
 # Detail baku hasil no_money — juga dipakai untuk MENGEMBALIKAN hasil yang
 # di-flip late settlement, jadi string ini harus tetap satu sumber kebenaran.
 NO_MONEY_DETAIL = "Tak ada padanan nominal+tanggal di Mutasi Bank"
 # Detail no_money ketika ADA kandidat nominal+tanggal tapi identitasnya beda
 # (skor < NAME_REVIEW_FLOOR) → biarkan menunggu settlement tanggal berikutnya.
 NO_MONEY_WAIT_DETAIL = "Ada kandidat nominal+tanggal tapi identitas beda — menunggu settlement"
+
+# Channel deposit pulsa di Panel: Bank Title = provider seluler '(AUTO)'.
+# Uangnya TIDAK lewat bank/gateway (dikonversi terpisah) → jangan difuzzy-kan
+# ke mutasi bank & jangan carried menunggu settlement yang tak akan datang;
+# auditor memverifikasi konversinya manual (perlu_tinjau `pulsa_manual`).
+_PULSA_PROVIDERS = frozenset(
+    {"TELKOMSEL", "AXIS", "XL", "INDOSAT", "IM3", "TRI", "THREE", "SMARTFREN", "BY.U", "PULSA"}
+)
+
+
+def _pulsa_channel(t):
+    """Nama channel pulsa baris kredit ('TELKOMSEL (AUTO)') atau '' bila bukan.
+    Sumber: field bank_title (persisted); fallback raw['Bank Title'] utk baris lama."""
+    bt = (getattr(t, "bank_title", "") or "").strip()
+    if not bt:
+        bt = ((t.raw or {}).get("Bank Title") or "").split("|")[0].strip()
+    if not bt:
+        return ""
+    first = bt.split()[0].upper()
+    return bt if (first in _PULSA_PROVIDERS or "PULSA" in bt.upper()) else ""
+
 
 # Anchor UTAMA (identitas unik) yang menentukan pasangan; nominal+tanggal hanya
 # PENDUKUNG. Nama mirip pada pita ini → perlu_tinjau ('nama mirip'); di bawahnya
@@ -313,6 +361,64 @@ class PanelBracketMatcher:
         return out
 
 
+# --- Alias historis (K4) --------------------------------------------------------
+# Pemain memakai rekening pinjaman BERULANG. Bukti = hasil COCOK lama yang
+# ber-anchor identitas atau keputusan manusia; hasil ticket/reference gateway tak
+# relevan (peta ini khusus sisi bank).
+_ALIAS_EVIDENCE = (
+    "amount+date+name", "amount_fee", "alias_history", "late_settlement",
+    "manual_override",
+)
+
+
+def _alias_map(left_rows):
+    """Kamus alias dari SEJARAH pasangan COCOK: username → {nama rekening} dan
+    {nomor tujuan} yang pernah terbukti dipakai player itu. Diturunkan langsung
+    dari MatchResult hidup — tanpa tabel baru; batch sejarah dihapus = buktinya
+    hilang = aliasnya ikut hilang (self-healing). Per-toko (tak bocor antar toko)
+    dan per-username (tak bocor antar player)."""
+    toko_ids = {t.toko_id for t in left_rows}
+    if not toko_ids:
+        return {}, {}
+    pairs = (
+        MatchResult.objects.filter(
+            bucket=MatchResult.Bucket.COCOK,
+            reason_code__in=_ALIAS_EVIDENCE,
+            left__toko_id__in=toko_ids,
+            right__source_type__key="bank",
+        )
+        .exclude(left__username="")
+        .values_list("left__username", "right__counterparty", "right__raw")
+    )
+    alias_cp, alias_dest = {}, {}
+    for uname, cp, raw in pairs:
+        u = (uname or "").strip().lower()
+        if not u:
+            continue
+        k = clean_name(cp or "").upper()
+        if k:
+            alias_cp.setdefault(u, set()).add(k)
+        for ph in _phones_from(raw, cp):
+            alias_dest.setdefault(u, set()).add(ph)
+    return alias_cp, alias_dest
+
+
+def _is_alias(p, b, alias_cp, alias_dest):
+    """Rekening `b` pernah TERBUKTI dipakai username baris `p`?"""
+    u = (p.username or "").strip().lower()
+    if not u:
+        return False
+    if clean_name(b.counterparty or "").upper() in alias_cp.get(u, ()):
+        return True
+    dests = alias_dest.get(u)
+    if dests:
+        phones = getattr(b, "_phones", None)
+        if phones is None:
+            phones = b._phones = _money_phones(b)
+        return bool(phones & dests)
+    return False
+
+
 class _MoneyMatcher:
     """Cocokkan sisi kredit (Panel/Bracket) ke sisi UANG (Bank/Gateway) — multi-pass:
 
@@ -377,8 +483,18 @@ class _MoneyMatcher:
         bidx = defaultdict(list)
         gw_ticket = defaultdict(list)
         gw_ref = defaultdict(list)
+        gw_unpaid_key = {}  # ticket/reference -> baris gateway BELUM settle
         owners = {}
         for b in right:
+            if b.source_type.key == "gateway" and _gw_unsettled(b):
+                # Gate settle (K1): QR belum dibayar = BUKAN uang. Tak masuk pool
+                # mana pun; kuncinya diingat agar panel ber-tiket sama jadi
+                # gateway_unpaid (terminal), bukan cocok/no_money.
+                if b.ticket_no:
+                    gw_unpaid_key.setdefault(b.ticket_no, b)
+                if b.reference:
+                    gw_unpaid_key.setdefault(b.reference, b)
+                continue
             bidx[(int(abs(b.money_delta)), b.money_delta > 0)].append(b)
             if b.source_type.key == "gateway" and b.ticket_no:
                 gw_ticket[b.ticket_no].append(b)
@@ -398,9 +514,18 @@ class _MoneyMatcher:
             out.append(MatchResult(run=run, bucket=bucket, left=p, right=b,
                                    score=score, reason_code=reason, reason_detail=detail))
 
+        # --- pass 0a: DP pulsa — uang tak lewat bank/gateway → tinjau manual ---
+        for p in left:
+            if p.money_delta <= 0:
+                continue
+            pulsa = _pulsa_channel(p)
+            if pulsa:
+                emit(p, None, MatchResult.Bucket.TINJAU, 0, "pulsa_manual",
+                     f"Deposit pulsa {pulsa} — uangnya tidak lewat bank/gateway; "
+                     "cocokkan dengan laporan konversi pulsa")
         # --- pass 0: ticket-join gateway (seperti Panel↔Bracket) ---
         for p in left:
-            if not p.ticket_no:
+            if p.id in matched or not p.ticket_no:
                 continue
             for b in gw_ticket.get(p.ticket_no, []):
                 if b.id in used or (p.money_delta > 0) != (b.money_delta > 0):
@@ -428,6 +553,19 @@ class _MoneyMatcher:
                         p, b, diff, "reference_amount",
                         f"reference sama, selisih nominal {diff:,}"))
                 break
+        # --- pass 0c: tiket/reference DIKENAL gateway tapi tak ada yang settle ---
+        # Uang belum masuk itu FAKTA -> terminal tidak_cocok (bukan no_money yang
+        # carried menunggu settlement, bukan jatuh ke fuzzy bank uang orang lain).
+        for p in left:
+            if p.id in matched:
+                continue
+            key = (p.ticket_no if p.ticket_no in gw_unpaid_key else "") or \
+                  (p.reference if p.reference in gw_unpaid_key else "")
+            if key:
+                g = gw_unpaid_key[key]
+                emit(p, None, MatchResult.Bucket.TIDAK, 0, "gateway_unpaid",
+                     f"QR {key} belum settle di gateway "
+                     f"(status: {_gw_status(g.raw) or '?'}) — uang belum masuk")
         # Gateway ber-ticket/ber-reference yang TAK dikenal panel bukan kandidat fuzzy siapa pun.
         blocked = {
             b.id for t, lst in gw_ticket.items() if t not in panel_tickets for b in lst
@@ -465,6 +603,11 @@ class _MoneyMatcher:
                         yield b, delta
 
         # --- pass 1: identitas kuat, assignment global urut skor ---
+        # Alias historis ikut di sini: rekening yang pernah TERBUKTI dipakai
+        # username ini (pasangan cocok lama / keputusan reviewer) → skor min 95,
+        # reason alias_history — hanya saat alias-lah anchor penentunya
+        # (identitas persis 100 tetap amount+date+name).
+        alias_cp, alias_dest = _alias_map(left)
         pairs = []
         for p in left:
             if p.id in matched:
@@ -472,28 +615,40 @@ class _MoneyMatcher:
             expected = _expected_owner(p)
             for b, delta in kandidat(p):
                 s = self._identity(p, b)
+                al = s < 100 and _is_alias(p, b, alias_cp, alias_dest)
+                if al:
+                    s = max(s, 95.0)
                 if s >= tol.fuzzy_threshold:
                     route = _route_ok(expected, owners.get(b.upload_id), b.source_type.key)
-                    pairs.append((s, route is True, -delta, p, b))
-        pairs.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
-        for s, _, _, p, b in pairs:
+                    pairs.append((s, route is True, -delta, p, b, al))
+        # Ekor -id: seri total (skor+rute+tanggal) tetap deterministik di Postgres
+        # (tanpa ORDER BY urutan pool arbitrary) — id terkecil menang.
+        pairs.sort(key=lambda x: (x[0], x[1], x[2], -x[3].id, -x[4].id), reverse=True)
+        for s, _, _, p, b, al in pairs:
             if p.id in matched or b.id in used:
                 continue
-            emit(p, b, MatchResult.Bucket.COCOK, s, "amount+date+name")
+            emit(p, b, MatchResult.Bucket.COCOK, s,
+                 "alias_history" if al else "amount+date+name")
 
         # --- pass 2: near-miss identitas kuat (fee kecil & uang H-1) ---
+        # Seleksi seri DETERMINISTIK: urutan pool arbitrary di Postgres, jadi
+        # kandidat dipilih dengan kunci eksplisit — skor tertinggi, lalu selisih
+        # nominal terkecil, lalu tanggal terdekat ke panel, lalu id terkecil.
         for p in left:
             if p.id in matched:
                 continue
             amt = int(abs(p.money_delta))
-            best = None
+            best = None  # (kunci, b, diff); kunci terbesar menang
             for b, delta in kandidat(p, tol_amt=max(FEE_TOL_MIN, amt // 100)):
                 s = self._identity(p, b)
-                if s >= tol.fuzzy_threshold and (best is None or s > best[0]):
-                    best = (s, b)
-            if best:
-                s, b = best
+                if s < tol.fuzzy_threshold:
+                    continue
                 diff = abs(int(abs(b.money_delta)) - amt)
+                key = (s, -diff, -delta, -b.id)
+                if best is None or key > best[0]:
+                    best = (key, b, diff)
+            if best:
+                (s, _, _, _), b, diff = best
                 # Identitas PERSIS (nomor HP/username/nama identik = 100) + selisih
                 # kecil khas biaya transfer → cocok; identitas fuzzy tetap ditinjau.
                 bucket = (MatchResult.Bucket.COCOK if s >= 100
@@ -501,12 +656,15 @@ class _MoneyMatcher:
                 emit(p, b, bucket, s, "amount_fee",
                      f"identitas cocok, selisih nominal {diff:,} (indikasi fee)")
                 continue
+            h1 = None  # H-1: skor tertinggi menang, lalu id terkecil
             for b, delta in kandidat(p, lo=-1, hi=-1):
                 s = self._identity(p, b)
-                if s >= tol.fuzzy_threshold:
-                    emit(p, b, MatchResult.Bucket.TINJAU, s, "date_before",
-                         "uang tiba sehari SEBELUM tanggal panel")
-                    break
+                if s >= tol.fuzzy_threshold and (h1 is None or (s, -b.id) > h1[0]):
+                    h1 = ((s, -b.id), b)
+            if h1:
+                (s, _), b = h1
+                emit(p, b, MatchResult.Bucket.TINJAU, s, "date_before",
+                     "uang tiba sehari SEBELUM tanggal panel")
 
         # --- pass 3: sisa berbasis IDENTITAS — nominal+tanggal cuma pendukung ---
         # Nama mirip pada pita [NAME_REVIEW_FLOOR..threshold) → perlu_tinjau,
@@ -527,7 +685,7 @@ class _MoneyMatcher:
                     route = _route_ok(expected, owners.get(b.upload_id), b.source_type.key)
                     band_pairs.append((s, route is True, -delta, p, b))
             has_candidate[p.id] = any_cand
-        band_pairs.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+        band_pairs.sort(key=lambda x: (x[0], x[1], x[2], -x[3].id, -x[4].id), reverse=True)
         for s, _, _, p, b in band_pairs:
             if p.id in matched or b.id in used:
                 continue
@@ -721,6 +879,8 @@ def _add_retro_gross(batch, rows):
             flow = "dp" if t.jenis == "depo" else "wd"
             s[flow]["panel"] += float(t.amount)
         elif key in MONEY_SOURCES and t.jenis != "admin":
+            if key == "gateway" and _gw_unsettled(t):
+                continue  # QR belum settle bukan uang masuk (gate K1)
             md = float(t.money_delta)
             if md > 0:
                 s["dp"]["money_gross"] += md
@@ -865,7 +1025,10 @@ def classify_unmatched_money(t, recon_date, window, panel_tickets, operator_name
     """Kategori uang tanpa pasangan (satu sumber kebenaran — dipakai engine & web):
     a = histori (di luar jangkauan window pasangan), b = gateway ber-ticket yang
     tak dikenal panel, c = pindah dana internal (lawan = rekening operator),
-    d = dalam periode tanpa penjelasan → layak diperiksa manusia."""
+    d = dalam periode tanpa penjelasan → layak diperiksa manusia,
+    e = gateway belum settle (UNPAID/FAILED — bukan uang masuk)."""
+    if t.source_type.key == "gateway" and _gw_unsettled(t):
+        return "e"
     d = t.occurred_at.date() if t.occurred_at else None
     if d is None or d < recon_date - timedelta(days=window):
         return "a"
@@ -953,6 +1116,14 @@ def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None, excl
     # Baris fee BCA ('admin') dikecualikan dari uang WD (bukan WD nyata).
     # Hanya sumber uang yang dicentang ikut total gross.
     money = tx.filter(source_type__key__in=_included_money_sources(include)).exclude(jenis="admin")
+    # Gate settle (K1): QR belum settle bukan uang masuk -> keluar dari gross
+    # supaya tak menggelembungkan angka & selisih DP.
+    unsettled = [
+        t.id for t in money.filter(source_type__key="gateway").only("id", "raw")
+        if _gw_unsettled(t)
+    ]
+    if unsettled:
+        money = money.exclude(id__in=unsettled)
     dp_panel = total(panel.filter(jenis="depo"), "amount")
     dp_gross = total(money.filter(money_delta__gt=0), "money_delta")
     wd_panel = total(panel.filter(jenis="wd"), "amount")
@@ -1163,7 +1334,7 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
                 .exclude(ticket_no="").values_list("ticket_no", flat=True)
             )
             ops = _operator_names(toko)
-            stats = {k: {"n": 0, "dp": 0.0, "wd": 0.0} for k in "abcd"}
+            stats = {k: {"n": 0, "dp": 0.0, "wd": 0.0} for k in "abcde"}
             new_results = []
             um_qs = (
                 Transaction.objects.filter(
@@ -1264,9 +1435,13 @@ def verify_panel_anchor(toko, date_from, date_to, include, window):
         rows = (
             base.filter(source_type__key__in=money_keys)
             .exclude(jenis="admin")
-            .values_list("occurred_at", "money_delta")
+            .values_list("occurred_at", "money_delta", "source_type__key", "raw")
         )
-        for dt, md in rows:
+        for dt, md, skey, raw in rows:
+            # QR belum settle bukan uang: tanggal berisi HANYA baris begitu
+            # tak butuh panel penutup (jangan memblokir seluruh run auto).
+            if skey == "gateway" and _gw_status(raw) in UNSETTLED_STATUS:
+                continue
             if dt:
                 a = agg[dt.date()]
                 a[0] += abs(float(md or 0))
