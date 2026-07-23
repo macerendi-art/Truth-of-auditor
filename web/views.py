@@ -2127,3 +2127,35 @@ def export_center(request):
         f'attachment; filename="rekonsiliasi_{scope_label}_{tag_from}_{tag_to}.zip"'
     )
     return resp
+
+
+def _geo_diag(request):
+    """SEMENTARA — diagnostik geo-block. Dihapus setelah investigasi selesai.
+    Hanya membuka header terkait geo (tanpa cookie/kredensial)."""
+    from django.conf import settings
+    from django.http import JsonResponse
+
+    from web.middleware import (
+        _client_ip, _ip_in_allowlist, _ip_is_internal, _real_client_ip,
+        _via_cloudflare,
+    )
+
+    peer = _client_ip(request)
+    via_cf = _via_cloudflare(peer)
+    ip = _real_client_ip(request, via_cf)
+    return JsonResponse({
+        "headers": {
+            k: v for k, v in request.META.items()
+            if k.startswith("HTTP_") and any(
+                t in k for t in ("CF_", "FORWARDED", "ENVOY", "REAL_IP", "HOST")
+            )
+        },
+        "REMOTE_ADDR": request.META.get("REMOTE_ADDR"),
+        "peer_ip": peer,
+        "peer_internal": _ip_is_internal(peer),
+        "via_cloudflare": via_cf,
+        "resolved_client_ip": ip,
+        "in_allowlist": _ip_in_allowlist(ip, settings.GEO_BLOCK_ALLOWLIST),
+        "cf_ipcountry": request.META.get("HTTP_CF_IPCOUNTRY"),
+        "would_block_require_cf": bool(settings.GEO_BLOCK_REQUIRE_CF and not via_cf),
+    })
