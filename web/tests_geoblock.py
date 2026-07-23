@@ -133,3 +133,92 @@ class GeoBlockStaffBypassTests(TestCase):
         with mock.patch("web.middleware._lookup_country", _lc({"8.8.8.8": "ID"})):
             r = self.client.get(LOGIN, HTTP_X_FORWARDED_FOR="8.8.8.8")
         self.assertEqual(r.status_code, 403)
+
+
+# --- Origin-lock Cloudflare -------------------------------------------------
+# Sejak app diproxy Cloudflare, penentu negara adalah header CF-IPCountry, TAPI
+# hanya boleh dipercaya kalau peer-nya memang edge Cloudflare. Kalau tidak,
+# siapa pun yang menembak origin Railway langsung bisa mengarang "CF-IPCountry: KH".
+CF_PEER = "104.16.0.1"      # di dalam 104.16.0.0/13 (rentang resmi Cloudflare)
+BUKAN_CF = "8.8.8.8"        # bukan Cloudflare
+
+
+@override_settings(
+    GEO_BLOCK_ENABLED=True, GEO_BLOCK_COUNTRIES={"KH"},
+    GEO_BLOCK_BYPASS_STAFF=False, GEO_BLOCK_ALLOWLIST=[],
+)
+class GeoBlockCloudflareTests(TestCase):
+    def test_header_cf_dipercaya_bila_peer_cloudflare(self):
+        # Lewat CF + CF-IPCountry=KH → lolos, TANPA menyentuh geoip sama sekali.
+        with mock.patch("web.middleware._lookup_country", _lc({})):  # default 'ID'
+            r = self.client.get(
+                LOGIN, HTTP_X_FORWARDED_FOR=CF_PEER,
+                HTTP_CF_IPCOUNTRY="KH", HTTP_CF_CONNECTING_IP="202.178.121.42")
+        self.assertNotEqual(r.status_code, 403)
+
+    def test_header_cf_dari_peer_palsu_TIDAK_dipercaya(self):
+        """INTI ANTI-SPOOF: peer bukan Cloudflare tapi mengarang CF-IPCountry=KH.
+        Header harus diabaikan → jatuh ke geoip (ID) → tetap DIBLOKIR."""
+        with mock.patch("web.middleware._lookup_country", _lc({BUKAN_CF: "ID"})):
+            r = self.client.get(
+                LOGIN, HTTP_X_FORWARDED_FOR=BUKAN_CF,
+                HTTP_CF_IPCOUNTRY="KH", HTTP_CF_CONNECTING_IP="202.178.121.42")
+        self.assertEqual(r.status_code, 403)
+
+    def test_via_cloudflare_negara_lain_tetap_diblok(self):
+        with mock.patch("web.middleware._lookup_country", _lc({})):
+            r = self.client.get(
+                LOGIN, HTTP_X_FORWARDED_FOR=CF_PEER, HTTP_CF_IPCOUNTRY="ID")
+        self.assertEqual(r.status_code, 403)
+
+    def test_allowlist_diuji_pada_ip_pengguna_asli_bukan_edge(self):
+        """IP tim ada di CF-Connecting-IP; peer-nya edge CF. Allowlist harus
+        tetap kena — kalau diuji ke IP edge, break-glass jadi percuma."""
+        with override_settings(GEO_BLOCK_ALLOWLIST=["202.178.121.42"]):
+            with mock.patch("web.middleware._lookup_country", _lc({})):
+                r = self.client.get(
+                    LOGIN, HTTP_X_FORWARDED_FOR=CF_PEER,
+                    HTTP_CF_IPCOUNTRY="ID",  # sengaja negara salah
+                    HTTP_CF_CONNECTING_IP="202.178.121.42")
+        self.assertNotEqual(r.status_code, 403)
+
+    def test_cf_ipcountry_XX_jatuh_ke_geoip(self):
+        # CF membalas 'XX' (tak diketahui) → jangan dipakai, pakai geoip.
+        with mock.patch("web.middleware._lookup_country", _lc({CF_PEER: "KH"})):
+            r = self.client.get(
+                LOGIN, HTTP_X_FORWARDED_FOR=CF_PEER, HTTP_CF_IPCOUNTRY="XX")
+        self.assertNotEqual(r.status_code, 403)
+
+
+@override_settings(
+    GEO_BLOCK_ENABLED=True, GEO_BLOCK_COUNTRIES={"KH"},
+    GEO_BLOCK_BYPASS_STAFF=False, GEO_BLOCK_ALLOWLIST=[],
+)
+class GeoBlockRequireCfTests(TestCase):
+    @override_settings(GEO_BLOCK_REQUIRE_CF=True)
+    def test_akses_origin_langsung_ditolak_walau_negara_benar(self):
+        """Penutup celah bypass: walau geoip bilang KH, request yang tidak
+        lewat Cloudflare tetap 403 saat origin-lock menyala."""
+        with mock.patch("web.middleware._lookup_country", _lc({BUKAN_CF: "KH"})):
+            r = self.client.get(LOGIN, HTTP_X_FORWARDED_FOR=BUKAN_CF)
+        self.assertEqual(r.status_code, 403)
+
+    @override_settings(GEO_BLOCK_REQUIRE_CF=True)
+    def test_lewat_cloudflare_tetap_lolos_saat_origin_lock_on(self):
+        with mock.patch("web.middleware._lookup_country", _lc({})):
+            r = self.client.get(
+                LOGIN, HTTP_X_FORWARDED_FOR=CF_PEER, HTTP_CF_IPCOUNTRY="KH")
+        self.assertNotEqual(r.status_code, 403)
+
+    @override_settings(GEO_BLOCK_REQUIRE_CF=False)
+    def test_default_off_akses_origin_tidak_diubah(self):
+        """Default MATI → origin-lock tak mengubah perilaku apa pun."""
+        with mock.patch("web.middleware._lookup_country", _lc({BUKAN_CF: "KH"})):
+            r = self.client.get(LOGIN, HTTP_X_FORWARDED_FOR=BUKAN_CF)
+        self.assertNotEqual(r.status_code, 403)
+
+    @override_settings(GEO_BLOCK_REQUIRE_CF=True)
+    def test_health_check_internal_tetap_lolos(self):
+        """Railway health-check datang dari IP privat — jangan sampai mati."""
+        r = self.client.get(LOGIN, HTTP_X_FORWARDED_FOR="10.0.0.5")
+        self.assertNotEqual(r.status_code, 403)

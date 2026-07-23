@@ -105,6 +105,28 @@ def _ip_in_allowlist(ip, allowlist):
     return False
 
 
+def _via_cloudflare(peer_ip):
+    """True bila PEER (yang membuka koneksi ke origin) adalah edge Cloudflare.
+
+    Ini gerbang anti-spoof: header `CF-*` baru boleh dipercaya kalau koneksinya
+    memang datang dari rentang IP resmi Cloudflare. Penyerang yang menembak
+    origin Railway langsung TIDAK bisa memalsukan ini — header boleh dikarang,
+    alamat peer tidak.
+    """
+    return _ip_in_allowlist(peer_ip, getattr(settings, "GEO_BLOCK_CF_CIDRS", []))
+
+
+def _real_client_ip(request, via_cf):
+    """IP pengguna sebenarnya. Di belakang Cloudflare, peer = edge CF, jadi IP
+    asli ada di `CF-Connecting-IP` — allowlist tim HARUS diuji terhadap ini,
+    bukan terhadap IP edge."""
+    if via_cf:
+        cf_ip = (request.META.get("HTTP_CF_CONNECTING_IP") or "").strip()
+        if cf_ip:
+            return cf_ip
+    return _client_ip(request)
+
+
 class GeoBlockMiddleware:
     """Kunci wilayah: saat menyala, hanya IP dari negara di
     GEO_BLOCK_COUNTRIES yang boleh mengakses app; sisanya dapat 403 halaman
@@ -138,31 +160,51 @@ class GeoBlockMiddleware:
         if asset_prefixes and request.path.startswith(asset_prefixes):
             return False
 
-        # (2) ambil IP asli; tanpa IP jangan brick → lolos.
-        ip = _client_ip(request)
-        if not ip:
+        # (2) peer = yang membuka koneksi ke origin; tanpa IP jangan brick → lolos.
+        peer = _client_ip(request)
+        if not peer:
             return False
 
         # (3) IP privat/loopback/link-local → lolos (health-check internal + dev).
-        if _ip_is_internal(ip):
+        if _ip_is_internal(peer):
             return False
 
-        # (4) allowlist break-glass.
+        # (4) apakah request datang lewat Cloudflare? (menentukan boleh/tidaknya
+        #     header CF dipercaya, dan mana IP pengguna yang sebenarnya)
+        via_cf = _via_cloudflare(peer)
+        ip = _real_client_ip(request, via_cf)
+
+        # (5) allowlist break-glass — diuji pada IP pengguna asli.
         if _ip_in_allowlist(ip, getattr(settings, "GEO_BLOCK_ALLOWLIST", [])):
             return False
 
-        # (5) bypass staff terautentikasi.
+        # (6) bypass staff terautentikasi.
         if getattr(settings, "GEO_BLOCK_BYPASS_STAFF", True):
             user = getattr(request, "user", None)
             if user is not None and user.is_authenticated and user.is_staff:
                 return False
 
-        # (6) resolve negara LAZY; lookup mustahil → FAIL-OPEN (lolos).
-        try:
-            country = _lookup_country(ip)
-        except Exception:
-            return False
+        # (7) ORIGIN-LOCK: bila diwajibkan, request yang tidak lewat Cloudflare
+        #     ditolak. Inilah penutup celah "akses origin Railway langsung"
+        #     yang kalau tidak ditutup membuat geo-block di edge sia-sia.
+        if getattr(settings, "GEO_BLOCK_REQUIRE_CF", False) and not via_cf:
+            return True
 
-        # (7) negara dalam daftar yang diizinkan → lolos; else BLOK.
+        # (8) negara: utamakan header Cloudflare (akurat, data IPinfo) HANYA bila
+        #     terbukti lewat CF; selain itu jatuh ke geoip2fast. Lookup mustahil
+        #     → FAIL-OPEN (jangan pernah brick app live).
+        country = ""
+        if via_cf and getattr(settings, "GEO_BLOCK_TRUST_CF", True):
+            country = (request.META.get("HTTP_CF_IPCOUNTRY") or "").strip().upper()
+            # 'XX'/'T1' = tak diketahui/Tor menurut Cloudflare → jangan dipakai.
+            if country in ("XX", "T1", ""):
+                country = ""
+        if not country:
+            try:
+                country = _lookup_country(ip)
+            except Exception:
+                return False
+
+        # (9) negara dalam daftar yang diizinkan → lolos; else BLOK.
         allowed = getattr(settings, "GEO_BLOCK_COUNTRIES", {"ID"})
         return country not in allowed
