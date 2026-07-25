@@ -84,6 +84,34 @@ class BadgeVersiTests(TestCase):
         self.assertEqual(r.context["app_rilis"], v.rilis_terbaru())
 
 
+class SidebarTakPernahTerpotongTests(TestCase):
+    """Menu samping bertambah tiap rilis; badge versi sempat mendorong tombol
+    Keluar keluar layar di laptop 720px. Perbaikannya: daftar menu dibungkus
+    `.nav` yang bergulir sendiri, sedangkan badge versi + identitas pengguna
+    berada DI LUAR bungkus itu sehingga selalu menempel di bawah.
+    """
+
+    def setUp(self):
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+        self.html = self.client.get(reverse("riwayat_versi")).content.decode()
+
+    def test_daftar_menu_dibungkus_nav(self):
+        self.assertIn('<div class="nav">', self.html)
+
+    def test_versi_dan_identitas_di_luar_bungkus_bergulir(self):
+        tutup_nav = self.html.index("</div>\n  <a class=\"ver\"")
+        self.assertLess(
+            self.html.index('<div class="nav">'), tutup_nav,
+            "bungkus .nav harus dibuka sebelum ditutup",
+        )
+        self.assertLess(
+            tutup_nav, self.html.index('<div class="who">'),
+            "identitas pengguna harus berada SETELAH bungkus .nav ditutup, "
+            "kalau tidak ia ikut tergulir dan bisa hilang dari layar",
+        )
+
+
 class LoginFooterVersiTests(TestCase):
     def test_halaman_login_menyebut_versi(self):
         """Versi harus terbaca SEBELUM login — tim bisa melapor tanpa masuk dulu."""
