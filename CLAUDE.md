@@ -90,6 +90,16 @@ RBAC is scoped **per Toko** (brand/site). `tokos_for(user)` is the single source
 
 Railway (Nixpacks), config in `railway.json` / `Procfile`. Production is triggered by env: `DATABASE_URL` present → Postgres via `dj-database-url` (else sqlite); `RAILWAY_PUBLIC_DOMAIN` auto-populates `ALLOWED_HOSTS` + `CSRF_TRUSTED_ORIGINS`; `DEBUG=False` turns on the SSL/HSTS/secure-cookie block. Static files served by WhiteNoise (compressed manifest storage). Start command runs `collectstatic` + `migrate` + gunicorn.
 
+## Versioning
+
+`core/version.py` is the **single source of truth**: a `RILIS` tuple of `Rilis` dataclasses, newest first, whose top entry defines the running version. It feeds the sidebar/login badge (`core.context_processors.versi` → `app_versi`/`app_rilis`), the `/versi/` Riwayat Versi page, the `Versi aplikasi` row stamped into every exported workbook's Ringkasan sheet, and `CHANGELOG.md`.
+
+**Shipping a user-visible change means adding a release entry** — prepend a `Rilis(...)`, run `python manage.py changelog`, commit both. `core/tests_version.py` fails the suite if `CHANGELOG.md` drifts, if the ordering/date sequence breaks, or if a release's declared `jenis` doesn't match its number jump (mayor→X+1.0.0, minor→x.Y+1.0, patch→x.y.Z+1).
+
+Scheme (spelled out in the module docstring, including the explicit 2.0.0 criteria): MAYOR = the way the app works changes fundamentally; MINOR = a new capability worth announcing; PATCH = pure fixes; 0.x = pre-production. **New banks/gateways/brands, new report pages, and tighter access control stay MINOR no matter how many** — that rule is what keeps the numbering meaningful.
+
+Release boundaries are drawn on **contiguous commit ranges** (one release = one whole date window, never interleaved), which is what makes the retroactive 0.1.0–1.9.0 map verifiable: the 15 commit-bearing releases tile all 281 commits exactly, no gaps, no overlaps. Preserve that property when adding entries. Business-language summary for management: `docs/ringkasan-versi-2026-07-25.md`.
+
 ## Working notes
 
 - Design specs and implementation plans for completed features live in `docs/superpowers/{specs,plans}/` — check there for intent behind non-obvious decisions.
