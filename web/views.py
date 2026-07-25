@@ -2128,3 +2128,23 @@ def export_center(request):
     )
     return resp
 
+
+
+@login_required
+def riwayat_versi(request):
+    """Riwayat Versi: seluruh rilis aplikasi sejak awal, dari core.version.
+
+    Halaman baca-saja tanpa query DB dan tanpa scope Toko — riwayat rilis
+    berlaku sama untuk semua brand, jadi tidak perlu guard `_active_toko`.
+    """
+    from core.version import MAYOR, MINOR, PATCH, PRA_RILIS, RILIS, ringkasan_jumlah
+
+    n = ringkasan_jumlah()
+    return render(request, "web/versi.html", {
+        "rilis": RILIS,
+        "total_rilis": len(RILIS),
+        "n_mayor": n[MAYOR],
+        "n_minor": n[MINOR],
+        "n_patch": n[PATCH],
+        "n_pra": n[PRA_RILIS],
+    })

@@ -1,0 +1,107 @@
+{% extends "web/app_base.html" %}
+{% block title %}Riwayat Versi · Truth of Auditor{% endblock %}
+{% block crumb %}Riwayat Versi{% endblock %}
+{% block head %}
+<style>
+.ver-now{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.ver-now .num{font-family:'Sora';font-weight:700;font-size:30px;line-height:1;letter-spacing:-.02em;
+  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.ver-now .nm{font-size:15px;font-weight:600}
+.ver-now .dt{font-size:12.5px;color:var(--muted)}
+
+/* Garis waktu rilis: satu kolom rel + titik per rilis. */
+.tl{position:relative;margin-top:22px;padding-left:30px}
+.tl:before{content:"";position:absolute;left:9px;top:6px;bottom:6px;width:2px;background:var(--line-2)}
+.tl-item{position:relative;margin-bottom:16px}
+.tl-item:last-child{margin-bottom:0}
+.tl-item:before{content:"";position:absolute;left:-26px;top:22px;width:12px;height:12px;border-radius:50%;
+  background:var(--panel);border:2px solid var(--line-2)}
+.tl-item.mayor:before{background:var(--brand);border-color:var(--brand);box-shadow:0 0 0 4px rgba(37,99,235,.16)}
+.tl-item.minor:before{border-color:var(--brand)}
+.tl-item.patch:before{border-color:var(--warn)}
+.tl-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.tl-head .v{font-family:'Sora';font-weight:700;font-size:17px;letter-spacing:-.01em}
+.tl-item.mayor .tl-head .v{color:var(--brand)}
+.tl-head .n{font-size:15px;font-weight:600}
+.tl-head .d{font-size:12.5px;color:var(--faint);margin-left:auto;white-space:nowrap}
+.tl-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:7px}
+.tl-list li{font-size:13.5px;line-height:1.55;color:var(--ink)}
+.tl-list li::marker{color:var(--line-2)}
+.tl-note{margin-top:12px;padding:10px 12px;border-radius:9px;background:var(--info-bg);color:var(--info);
+  font-size:12.5px;line-height:1.55}
+.tl-commit{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--faint)}
+@media(max-width:760px){
+  .tl{padding-left:24px}
+  .tl-head .d{margin-left:0;flex-basis:100%}
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Riwayat Versi</h1>
+    <p>Setiap rilis Truth of Auditor sejak hari pertama, beserta isinya. Nomor versi naik mengikuti besarnya perubahan, bukan mengikuti tanggal.</p>
+  </div>
+</div>
+
+<div class="card reveal" style="margin-bottom:18px">
+  <div class="ver-now">
+    <span class="num">v{{ app_versi }}</span>
+    <span>
+      <span class="nm">{{ app_rilis.nama }}</span><br>
+      <span class="dt">Versi yang sedang berjalan · {{ app_rilis.tanggal_id }}</span>
+    </span>
+  </div>
+</div>
+
+<div class="grid cols-4 reveal" style="margin-bottom:6px">
+  <div class="card stat">
+    <div class="l">Total rilis</div>
+    <div class="v">{{ total_rilis }}</div>
+    <div class="faint" style="font-size:12px">sejak 1 Juli 2026</div>
+  </div>
+  <div class="card stat">
+    <div class="l">Rilis besar</div>
+    <div class="v">{{ n_mayor }}</div>
+    <div class="faint" style="font-size:12px">perubahan mendasar</div>
+  </div>
+  <div class="card stat">
+    <div class="l">Rilis fitur</div>
+    <div class="v">{{ n_minor }}</div>
+    <div class="faint" style="font-size:12px">kemampuan baru</div>
+  </div>
+  <div class="card stat">
+    <div class="l">Pra-rilis</div>
+    <div class="v">{{ n_pra }}</div>
+    <div class="faint" style="font-size:12px">sebelum dipakai produksi</div>
+  </div>
+</div>
+
+<div class="tl">
+  {% for r in rilis %}
+  <div class="tl-item {{ r.jenis }}">
+    <div class="card">
+      <div class="tl-head">
+        <span class="v">{{ r.label }}</span>
+        <span class="n">{{ r.nama }}</span>
+        {% if r.jenis == "mayor" %}<span class="badge src">Rilis besar</span>
+        {% elif r.jenis == "patch" %}<span class="badge warn">Perbaikan</span>
+        {% elif r.jenis == "pra-rilis" %}<span class="badge muted plain">Pra-rilis</span>
+        {% endif %}
+        <span class="d">{{ r.tanggal_id }}{% if r.commit %} · <span class="tl-commit">{{ r.commit }}</span>{% endif %}</span>
+      </div>
+      <ul class="tl-list">
+        {% for s in r.sorotan %}<li>{{ s }}</li>{% endfor %}
+      </ul>
+      {% if r.catatan %}<div class="tl-note">{{ r.catatan }}</div>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<p class="faint" style="font-size:12px;margin-top:20px;line-height:1.6">
+  Riwayat v0.1.0 sampai v1.9.0 disusun ulang dari catatan perubahan kode pada 25 Juli 2026; tanggal setiap
+  rilis adalah tanggal perubahan terakhir yang tercakup di dalamnya. Setiap rilis mencakup satu rentang
+  perubahan yang bersambung, sehingga daftar ini bisa diperiksa ulang terhadap riwayat kode.
+</p>
+{% endblock %}

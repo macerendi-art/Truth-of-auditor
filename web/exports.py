@@ -8,6 +8,7 @@ import re
 from openpyxl import Workbook
 from openpyxl.styles import Font
 
+from core.version import versi as app_versi
 from web.templatetags.web_extras import reason_label
 
 XLSX_CT = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -168,6 +169,9 @@ def build_batch_workbook(batch, batch_no, rel_labels):
         ("Tanggal rekonsiliasi", batch.recon_date.strftime("%d/%m/%Y") if batch.recon_date else ""),
         ("Toleransi", f"{batch.tolerance.name} (±{batch.tolerance.date_window_days} hari)"),
         ("Dibuat", batch.created_at.strftime("%d/%m/%Y %H:%M")),
+        # Stempel versi: bila hasil lama perlu ditelusuri ulang, ketahuan versi
+        # aplikasi mana yang membuatnya (aturan pencocokan berbeda antar versi).
+        ("Versi aplikasi", f"v{app_versi()}"),
         ("", ""),
         ("DP Panel", dp.get("panel", 0)),
         ("DP Uang (matched)", dp.get("money_matched", dp.get("money", 0))),

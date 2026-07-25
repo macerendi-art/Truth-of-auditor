@@ -96,6 +96,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'web.context_processors.toko',
                 'web.context_processors.motivation',
+                'core.context_processors.versi',
             ],
         },
     },

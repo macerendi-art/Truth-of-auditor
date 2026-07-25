@@ -31,6 +31,7 @@ urlpatterns = [
     path("tinjau/bulk-review/", views.bulk_review_queue, name="bulk_review_queue"),
     path("export/", views.export_center, name="export_center"),
     path("tokos/", views.toko_overview, name="toko_overview"),
+    path("versi/", views.riwayat_versi, name="riwayat_versi"),
     path("kelola/toko/", admin_views.kelola_toko, name="kelola_toko"),
     path("kelola/toko/<int:pk>/delete/", admin_views.delete_toko, name="delete_toko"),
     path("kelola/user/", admin_views.kelola_user, name="kelola_user"),
