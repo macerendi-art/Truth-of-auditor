@@ -44,19 +44,8 @@
   </div>
 </div>
 
-{% comment %}---- RINGKASAN PANEL & BRACKET GABUNGAN ----{% endcomment %}
-<style>
-.pstrip-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.pstrip .ps{display:flex;flex-direction:column;gap:3px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
-.pstrip .ps-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
-.pstrip .ps-k.dp{color:var(--ok)} .pstrip .ps-k.wd{color:var(--bad)}
-.pstrip .ps-n{font-size:13px;color:var(--faint);font-variant-numeric:tabular-nums}
-.pstrip .ps-v{font-size:20px;font-weight:800;letter-spacing:-.01em}
-.pstrip .ps-v.neg{color:var(--bad)}
-.pstrip .ps small{font-size:11px;font-weight:600;color:var(--faint)}
-.pstrip .ps.tot{background:linear-gradient(135deg,rgba(37,99,235,.07),rgba(34,211,238,.07))}
-@media (max-width:700px){.pstrip-grid{grid-template-columns:1fr}}
-</style>
+{% comment %}---- RINGKASAN PANEL & BRACKET GABUNGAN ----
+CSS .pstrip* kanonik ada di web/templates/web/app_base.html (dipakai juga dashboard.html).{% endcomment %}
 {% if panel_sum %}
 <div class="card reveal pstrip" style="margin-top:16px">
   <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Panel — gabungan</h3>
@@ -93,22 +82,9 @@
 </div>
 {% endif %}
 
-{% comment %}---- METODE PEMBAYARAN (gabungan) ----{% endcomment %}
+{% comment %}---- METODE PEMBAYARAN (gabungan) ----
+CSS .mtd* kanonik ada di web/templates/web/app_base.html (dipakai juga dashboard.html).{% endcomment %}
 {% if metode %}
-<style>
-.mtd-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.mtd .mt{display:flex;flex-direction:column;gap:9px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
-.mtd .mt-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
-.mtd .mt-k.dp{color:var(--ok)} .mtd .mt-k.wd{color:var(--bad)}
-.mtd .mt-row{display:grid;grid-template-columns:84px minmax(36px,1fr) auto;gap:10px;align-items:center;font-size:12.5px}
-.mtd .mt-row .l{font-weight:600}
-.mtd .mt-bar{height:4px;border-radius:99px;background:var(--line);overflow:hidden}
-.mtd .mt-bar i{display:block;height:100%;background:var(--grad);border-radius:99px}
-.mtd .mt-row .r2{text-align:right;color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap}
-.mtd .mt-row .r2 b{color:var(--ink)}
-.mtd .mt-row small{font-size:11px;font-weight:600;color:var(--faint)}
-@media (max-width:700px){.mtd-grid{grid-template-columns:1fr}}
-</style>
 <div class="card reveal mtd" style="margin-top:16px">
   <div class="h-row" style="margin-bottom:10px"><h3>Metode Pembayaran — gabungan</h3>
     <span class="faint" style="font-size:11.5px">acuan Bank Title panel</span></div>

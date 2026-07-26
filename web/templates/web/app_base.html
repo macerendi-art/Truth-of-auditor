@@ -373,6 +373,37 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
 .cal a.bad{border-color:#f4c6c6;background:var(--bad-bg)} .cal a.bad .s{background:var(--bad)}
 .cal a.today{outline:2px solid var(--brand);outline-offset:1px}
 
+/* ---- STRIP KARTU DASHBOARD (kartu ringkas panel & FR harian, rincian
+   metode bayar) ---- Satu salinan kanonik dipakai dashboard.html
+   (single-toko) DAN dashboard_all.html (mode Semua Toko) — dua salinan
+   lokal sebelumnya sudah melenceng satu baris tanpa efek visual
+   (font-variant-numeric diwarisi). CATATAN: jangan tulis ulang judul
+   kartu-kartu ini di komentar CSS — beberapa tes memverifikasi kartu
+   tersembunyi lewat assertNotContains atas judul persisnya, dan teks
+   bebas di dalam <style> tetap ikut terkirim ke response body. */
+.pstrip-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.pstrip .ps{display:flex;flex-direction:column;gap:3px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
+.pstrip .ps-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.pstrip .ps-k.dp{color:var(--ok)} .pstrip .ps-k.wd{color:var(--bad)}
+.pstrip .ps-n{font-size:13px;color:var(--faint)} .pstrip .ps-n b,.pstrip .ps-n{font-variant-numeric:tabular-nums}
+.pstrip .ps-v{font-size:20px;font-weight:800;letter-spacing:-.01em}
+.pstrip .ps-v.neg{color:var(--bad)}
+.pstrip .ps small{font-size:11px;font-weight:600;color:var(--faint)}
+.pstrip .ps.tot{background:linear-gradient(135deg,rgba(37,99,235,.07),rgba(34,211,238,.07))}
+@media (max-width:700px){.pstrip-grid{grid-template-columns:1fr}}
+.mtd-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mtd .mt{display:flex;flex-direction:column;gap:9px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
+.mtd .mt-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.mtd .mt-k.dp{color:var(--ok)} .mtd .mt-k.wd{color:var(--bad)}
+.mtd .mt-row{display:grid;grid-template-columns:84px minmax(36px,1fr) auto;gap:10px;align-items:center;font-size:12.5px}
+.mtd .mt-row .l{font-weight:600}
+.mtd .mt-bar{height:4px;border-radius:99px;background:var(--line);overflow:hidden}
+.mtd .mt-bar i{display:block;height:100%;background:var(--grad);border-radius:99px}
+.mtd .mt-row .r2{text-align:right;color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap}
+.mtd .mt-row .r2 b{color:var(--ink)}
+.mtd .mt-row small{font-size:11px;font-weight:600;color:var(--faint)}
+@media (max-width:700px){.mtd-grid{grid-template-columns:1fr}}
+
 /* ---- CHART BATANG MINI (SVG) ---- */
 .spark{width:100%;height:120px}
 
