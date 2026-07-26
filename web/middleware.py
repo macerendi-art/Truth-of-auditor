@@ -1,6 +1,7 @@
 """Middleware gerbang: paksa ganti password + kunci wilayah (geo-block) +
 allowlist IP (auditor/supervisor)."""
 import ipaddress
+import logging
 
 from django.conf import settings
 from django.http import HttpResponseForbidden
@@ -282,6 +283,11 @@ class IPAllowlistMiddleware:
             # DB hiccup TIDAK BOLEH nge-500-kan setiap request auditor/supervisor
             # — fail-open sama seperti gerbang lain di file ini (jangan pernah
             # brick app live); efeknya sama dengan perilaku dorman sampai DB pulih.
+            # Tapi jangan BISU: gerbang keamanan yang mematikan diri sendiri harus
+            # kelihatan di log ops (Railway), bukan menghilang tanpa jejak.
+            logging.getLogger(__name__).exception(
+                "allowlist IP: query gagal → fail-open (gerbang nonaktif sementara)"
+            )
             return self.get_response(request)
         if not entries:
             # DORMAN: belum ada entri aktif → jangan kunci siapa pun.
@@ -308,9 +314,11 @@ class IPAllowlistMiddleware:
         # yang diblokir BERUBAH dalam sesi yang sama (mis. user pindah jaringan
         # dua kali), tiap IP baru dicatat sebagai baris audit sendiri, bukan
         # dibungkam gara-gara "sudah pernah log sekali di sesi ini".
-        if request.session.get(_SESSION_FLAG) != ip:
+        if request.session.get(_SESSION_FLAG) != ip[:45]:
             catat(user, "ip_blokir", ip)
-            request.session[_SESSION_FLAG] = ip
+            # [:45] = panjang maks representasi IPv6 — jangan simpan header
+            # X-Forwarded-For mentah sepanjang apa pun ke baris sesi.
+            request.session[_SESSION_FLAG] = ip[:45]
 
         html = render_to_string("web/ip_block.html", {"ip": ip}, request=request)
         return HttpResponseForbidden(html)

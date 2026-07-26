@@ -444,7 +444,11 @@ def kelola_ip(request):
                     # pengecekan duplikat di bawah ini tidak lolos gara-gara notasi beda.
                     cidr = str(net)
                     if AllowedIP.objects.filter(cidr=cidr).exists():
-                        messages.error(request, f"IP/CIDR {cidr} sudah ada di allowlist.")
+                        messages.error(
+                            request,
+                            f"IP/CIDR {cidr} sudah ada di allowlist — "
+                            "mungkin berstatus nonaktif (cek daftar di bawah).",
+                        )
                     else:
                         entri = AllowedIP.objects.create(label=label, cidr=cidr, dibuat_oleh=request.user)
                         catat(request.user, "buat_ip_allow", entri.label, label=label, cidr=cidr)
