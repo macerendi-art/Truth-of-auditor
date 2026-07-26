@@ -439,10 +439,7 @@ def dashboard(request):
     total_b = ReconBatch.objects.filter(toko=active).count()
 
     def selisih(b):
-        s = b.summary or {}
-        dp = abs((s.get("dp") or {}).get("selisih") or 0)
-        wd = abs((s.get("wd") or {}).get("selisih") or 0)
-        return dp + wd
+        return _selisih_summary(b.summary)
 
     # --- kalender 14 hari terakhir (anchor: recon terakhir atau hari ini) ---
     today = date_cls.today()
@@ -455,7 +452,7 @@ def dashboard(request):
             st = ""
         else:
             tot = selisih(b)
-            st = "ok" if tot == 0 else ("warn" if tot < 10_000_000 else "bad")
+            st = _status_selisih(tot)
         kal.append({
             "d": d, "batch": b, "st": st, "today": d == today,
             "no": (ReconBatch.objects.filter(toko=active, id__lte=b.id).count() if b else None),
@@ -2289,10 +2286,9 @@ def toko_overview(request):
         total = uang_d = 0
         for b in scope:
             s = b.summary or {}
-            total += abs((s.get("dp") or {}).get("selisih") or 0)
-            total += abs((s.get("wd") or {}).get("selisih") or 0)
+            total += _selisih_summary(s)
             uang_d += ((s.get("unmatched_money") or {}).get("d") or {}).get("n") or 0
-        st = "" if last is None else ("ok" if total == 0 else ("warn" if total < 10_000_000 else "bad"))
+        st = "" if last is None else _status_selisih(total)
         rows.append({
             "toko": t, "last": last, "selisih": total, "status": st,
             "tinjau": tinjau_by_toko.get(t.id, 0),
