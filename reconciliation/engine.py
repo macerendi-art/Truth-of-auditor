@@ -624,7 +624,7 @@ class _MoneyMatcher:
         # pendukung sama sekali, biarkan jatuh ke pass berikutnya.
         acct_pairs = []
         for p in left:
-            # p._phone sudah dihangatkan oleh loop panel_accts di atas.
+            # p._phone sudah dihangatkan oleh loop pemanasan cache di atas.
             if p.id in matched or not p._phone or p.occurred_at is None:
                 continue
             p_date = p.occurred_at.date()
