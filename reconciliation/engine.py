@@ -58,6 +58,16 @@ def _panel_phone(t):
     return digits.lstrip("0").removeprefix("62").lstrip("0")
 
 
+def _norm_acct_digits(s):
+    """Normalisasi nomor rekening gateway (raw['AccountNumber'], sisi UNO WD) —
+    aturan SAMA dengan _panel_phone agar kedua sisi menghasilkan kunci yang
+    bisa dibandingkan langsung: buang non-digit, nol depan, prefix 62, nol
+    depan lagi. Hasil < 6 digit terlalu ambigu untuk diindeks -> ''."""
+    digits = re.sub(r"\D", "", s or "")
+    digits = digits.lstrip("0").removeprefix("62").lstrip("0")
+    return digits if len(digits) >= 6 else ""
+
+
 def _money_phones(t):
     """Deret digit (≥9) di baris uang — mutasi VA e-wallet (FTFVA/DANA, GOPAY
     TOPUP, dst) menaruh nomor HP/VA tujuan di teks keterangan."""
@@ -318,6 +328,9 @@ class _MoneyMatcher:
 
     pass 0  ticket-join gateway (kunci pasti; gateway ber-ticket asing TIDAK
             pernah dipasangkan fuzzy — biar tampil sebagai uang tanpa pasangan),
+    pass 0b reference-join gateway (kunci pasti non-ticket, mis. UUID QRIS),
+    pass 0c account-join gateway (UNO QRIS WD): AccountNumber == rekening
+            panel, HANYA nominal persis (kunci PEMAIN, bukan kunci transaksi),
     pass 1  identitas kuat (skor >= threshold) di-assign GLOBAL urut skor —
             baris lemah tidak bisa mencuri kandidat milik baris kuat,
     pass 2  near-miss identitas kuat: nominal beda kecil (fee) / uang H-1,
@@ -377,6 +390,7 @@ class _MoneyMatcher:
         bidx = defaultdict(list)
         gw_ticket = defaultdict(list)
         gw_ref = defaultdict(list)
+        gw_acct = defaultdict(list)
         owners = {}
         for b in right:
             bidx[(int(abs(b.money_delta)), b.money_delta > 0)].append(b)
@@ -384,12 +398,25 @@ class _MoneyMatcher:
                 gw_ticket[b.ticket_no].append(b)
             if b.source_type.key == "gateway" and b.reference:
                 gw_ref[b.reference].append(b)
+            if b.source_type.key == "gateway":
+                acct = _norm_acct_digits((b.raw or {}).get("AccountNumber", ""))
+                if acct:
+                    gw_acct[acct].append(b)
             if b.upload_id not in owners:
                 owners[b.upload_id] = _norm_owner(
                     b.upload.original_name if b.upload else ""
                 )
         panel_tickets = {p.ticket_no for p in left if p.ticket_no}
         panel_refs = {p.reference for p in left if p.reference}
+        # Rekening panel dikenal (cache p._phone sekalian — idiom sama dgn _identity)
+        # dipakai klausa 'blocked' account di bawah (pair kunci PLAYER, bukan ticket).
+        panel_accts = set()
+        for p in left:
+            pp = getattr(p, "_phone", None)
+            if pp is None:
+                pp = p._phone = _panel_phone(p)
+            if pp:
+                panel_accts.add(pp)
 
         def emit(p, b, bucket, score, reason, detail=""):
             matched.add(p.id)
@@ -428,11 +455,43 @@ class _MoneyMatcher:
                         p, b, diff, "reference_amount",
                         f"reference sama, selisih nominal {diff:,}"))
                 break
-        # Gateway ber-ticket/ber-reference yang TAK dikenal panel bukan kandidat fuzzy siapa pun.
+        # --- pass 0c: account-join gateway (UNO QRIS WD) — jaring robustness ---
+        # AccountNumber gateway adalah kunci PEMAIN (rekening tujuan), BUKAN kunci
+        # transaksi seperti ticket/reference — satu pemain bisa WD berkali-kali ke
+        # rekening yang sama. Karena itu di sini HANYA nominal PERSIS (diff==0)
+        # yang dipasangkan; tidak ada cabang toleran seperti pass 0/0b. Selisih
+        # nominal (fee-shifted) sengaja dibiarkan jatuh ke pass 1/2 yang sudah
+        # menggerbangi lewat skor identitas, bukan lewat kesamaan akun semata.
+        for p in left:
+            if p.id in matched:
+                continue
+            pp = getattr(p, "_phone", None)
+            if pp is None:
+                pp = p._phone = _panel_phone(p)
+            if not pp or pp not in gw_acct:
+                continue
+            p_date = p.occurred_at.date() if p.occurred_at else None
+            cands = sorted(
+                gw_acct[pp],
+                key=lambda b: abs((b.occurred_at.date() - p_date).days)
+                if p_date and b.occurred_at else float("inf"),
+            )
+            for b in cands:
+                if b.id in used or (p.money_delta > 0) != (b.money_delta > 0):
+                    continue
+                diff = abs(int(abs(p.money_delta)) - int(abs(b.money_delta)))
+                if diff == 0:
+                    emit(p, b, MatchResult.Bucket.COCOK, 100, "account")
+                    break
+        # Gateway ber-ticket/ber-reference/ber-akun yang TAK dikenal panel bukan
+        # kandidat fuzzy siapa pun (cermin semantik: uang identitasnya asing bagi
+        # panel tampil sebagai uang tanpa pasangan, bukan dicuri fuzzy pass 1-3).
         blocked = {
             b.id for t, lst in gw_ticket.items() if t not in panel_tickets for b in lst
         } | {
             b.id for ref, lst in gw_ref.items() if ref not in panel_refs for b in lst
+        } | {
+            b.id for acct, lst in gw_acct.items() if acct not in panel_accts for b in lst
         }
 
         def kandidat(p, *, lo=0, hi=None, tol_amt=0):
