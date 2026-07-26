@@ -9,6 +9,8 @@ IP/CIDR terdaftar; header anti-spoof mengikuti aturan `GeoBlockMiddleware`
 Cloudflare resmi) — lihat `web/tests_geoblock.py` untuk regresi lubang yang
 sama di fitur geo-block.
 """
+from unittest.mock import patch
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -24,6 +26,7 @@ DASH = reverse_lazy("dashboard")
 
 CF_PEER = "104.16.0.1"       # di dalam 104.16.0.0/13 (rentang resmi Cloudflare)
 BUKAN_CF = "8.8.8.8"
+BUKAN_CF2 = "1.1.1.1"        # IP asing KEDUA — dipakai utk tes ganti-IP dlm satu sesi
 TIM_IP = "202.178.121.42"    # dipakai sebagai CF-Connecting-IP di beberapa tes
 
 # SENGAJA BUKAN rentang dokumentasi RFC 5737 (203.0.113.0/24 dkk. — "TEST-NET"):
@@ -174,6 +177,29 @@ class ExemptPathTests(_Dasar):
         r = self.client.get("/static/tidak-ada.css", HTTP_X_FORWARDED_FOR=BUKAN_CF)
         self.assertNotEqual(r.status_code, 403)
 
+    def test_media_tidak_exempt_saat_terblokir(self):
+        # FIX 2: MEDIA_URL SENGAJA tidak lagi exempt — file ekspor bank/panel
+        # yang di-ingest tersimpan di bawah MEDIA_ROOT; mengecualikannya
+        # melubangi gerbang ini persis utk user yang mau diblokir.
+        r = self.client.get(f"{settings.MEDIA_URL}apapun.xlsx", HTTP_X_FORWARDED_FOR=BUKAN_CF)
+        self.assertEqual(r.status_code, 403)
+
+
+class FailOpenQueryTests(_Dasar):
+    """FIX 1: query allowlist tidak boleh punya jalur tanpa guard — DB hiccup
+    seharusnya fail-open (perilaku dorman), bukan nge-500-kan SETIAP request
+    auditor/supervisor sementara admin tetap bebas lewat."""
+
+    def setUp(self):
+        super().setUp()
+        AllowedIP.objects.create(label="X", cidr=KANTOR_IP)
+        self.client.login(username="aud1", password="pw123456")
+
+    def test_query_allowlist_gagal_tetap_lolos(self):
+        with patch("web.models.AllowedIP.objects.filter", side_effect=Exception("db hiccup")):
+            r = self.client.get(DASH, HTTP_X_FORWARDED_FOR=BUKAN_CF)
+        self.assertEqual(r.status_code, 200)
+
 
 class AuditTests(_Dasar):
     def setUp(self):
@@ -197,6 +223,22 @@ class AuditTests(_Dasar):
         self.assertEqual(r3.status_code, 403)
         self.assertEqual(AuditLog.objects.filter(aksi="ip_blokir").count(), 2)
 
+    def test_ganti_ip_diblokir_dalam_sesi_sama_dicatat_lagi(self):
+        # FIX 4: flag sesi menyimpan IP yang diblokir, bukan boolean — 2 IP
+        # asing BERBEDA dlm satu sesi (tanpa pernah lolos di antaranya) harus
+        # jadi 2 baris audit, bukan dibungkam jadi 1 gara-gara "sudah pernah
+        # log sekali di sesi ini".
+        self.client.login(username="aud1", password="pw123456")
+        r1 = self.client.get(DASH, HTTP_X_FORWARDED_FOR=BUKAN_CF)
+        self.assertEqual(r1.status_code, 403)
+        r2 = self.client.get(DASH, HTTP_X_FORWARDED_FOR=BUKAN_CF2)
+        self.assertEqual(r2.status_code, 403)
+        self.assertEqual(AuditLog.objects.filter(aksi="ip_blokir").count(), 2)
+        # IP yang sama diulang (BUKAN_CF2) TIDAK menambah baris baru.
+        r3 = self.client.get(DASH, HTTP_X_FORWARDED_FOR=BUKAN_CF2)
+        self.assertEqual(r3.status_code, 403)
+        self.assertEqual(AuditLog.objects.filter(aksi="ip_blokir").count(), 2)
+
 
 class AnonymousTests(TestCase):
     def test_anonymous_login_page_tak_tersentuh(self):
@@ -211,6 +253,17 @@ class MiddlewareOrderTests(TestCase):
         i_force = mw.index("web.middleware.ForcePasswordChangeMiddleware")
         i_ip = mw.index("web.middleware.IPAllowlistMiddleware")
         self.assertEqual(i_ip, i_force + 1)
+
+    def test_rantai_penuh_auth_geoblock_forcepassword_ipallowlist(self):
+        # FIX 8(b): pin urutan LENGKAP — AuthenticationMiddleware → GeoBlock →
+        # ForcePasswordChange → IPAllowlist. Tiap gerbang butuh yang sebelumnya
+        # (request.user utk GeoBlock/ForcePassword/IPAllowlist).
+        mw = settings.MIDDLEWARE
+        i_auth = mw.index("django.contrib.auth.middleware.AuthenticationMiddleware")
+        i_geo = mw.index("web.middleware.GeoBlockMiddleware")
+        i_force = mw.index("web.middleware.ForcePasswordChangeMiddleware")
+        i_ip = mw.index("web.middleware.IPAllowlistMiddleware")
+        self.assertTrue(i_auth < i_geo < i_force < i_ip)
 
 
 class MustChangePasswordInterplayTests(_Dasar):
@@ -231,6 +284,31 @@ class MustChangePasswordInterplayTests(_Dasar):
         self.client.login(username="aud1", password="pw123456")
         r = self.client.get(DASH, HTTP_X_FORWARDED_FOR=BUKAN_CF, follow=True)
         self.assertEqual(r.status_code, 403)
+
+    def test_ganti_password_dari_ip_baik_selesai_normal(self):
+        # FIX 8(a): interplay POSITIF — dari IP TERDAFTAR, auditor berflag
+        # must_change_password harus tetap bisa menuntaskan alur ganti
+        # password apa adanya (dialihkan, isi form, sukses, flag turun),
+        # sama sekali tak tersentuh gerbang IP.
+        AllowedIP.objects.create(label="X", cidr=KANTOR_IP)
+        self.auditor.must_change_password = True
+        self.auditor.save(update_fields=["must_change_password"])
+        self.client.login(username="aud1", password="pw123456")
+
+        r1 = self.client.get(DASH, HTTP_X_FORWARDED_FOR=KANTOR_IP, follow=True)
+        self.assertEqual(r1.status_code, 200)
+        self.assertContains(r1, "password baru")
+
+        r2 = self.client.post(reverse("ganti_password"), {
+            "old_password": "pw123456",
+            "new_password1": "Baru-Beda#99",
+            "new_password2": "Baru-Beda#99",
+        }, HTTP_X_FORWARDED_FOR=KANTOR_IP)
+        self.assertEqual(r2.status_code, 302)
+        self.assertEqual(r2.url, reverse("dashboard"))
+        self.auditor.refresh_from_db()
+        self.assertFalse(self.auditor.must_change_password)
+        self.assertTrue(self.auditor.check_password("Baru-Beda#99"))
 
 
 class BackstopTests(_Dasar):
@@ -277,7 +355,9 @@ class KelolaIpCrudTests(TestCase):
     def test_create_ip_valid(self):
         self.client.post(reverse("kelola_ip"), {
             "action": "create", "label": "Kantor", "cidr": "203.0.113.7"})
-        e = AllowedIP.objects.get(cidr="203.0.113.7")
+        # IP tunggal dinormalisasi ke notasi CIDR kanonik (/32) — bentuk kanonik
+        # dari `ipaddress.ip_network(..., strict=False)`, konsisten dgn FIX 5(a).
+        e = AllowedIP.objects.get(cidr="203.0.113.7/32")
         self.assertEqual(e.label, "Kantor")
         self.assertTrue(e.aktif)
         self.assertEqual(e.dibuat_oleh, self.admin)
@@ -295,6 +375,27 @@ class KelolaIpCrudTests(TestCase):
 
     def test_create_tanpa_label_ditolak(self):
         self.client.post(reverse("kelola_ip"), {"action": "create", "label": "", "cidr": "203.0.113.7"})
+        self.assertEqual(AllowedIP.objects.count(), 0)
+
+    def test_create_normalisasi_cidr_dgn_host_bit(self):
+        # "138.201.14.7/16" → disimpan sebagai bentuk kanonik "138.201.0.0/16"
+        # (tampilan = kebenaran, bukan notasi mentah kiriman admin).
+        self.client.post(reverse("kelola_ip"), {
+            "action": "create", "label": "Kantor", "cidr": "138.201.14.7/16"})
+        self.assertTrue(AllowedIP.objects.filter(cidr="138.201.0.0/16").exists())
+        self.assertFalse(AllowedIP.objects.filter(cidr="138.201.14.7/16").exists())
+
+    def test_create_duplikat_ditolak(self):
+        AllowedIP.objects.create(label="Lama", cidr="138.201.0.0/16")
+        self.client.post(reverse("kelola_ip"), {
+            "action": "create", "label": "Baru (notasi beda)", "cidr": "138.201.14.7/16"})
+        # Notasi mentah beda tapi jaringan sama setelah normalisasi → ditolak,
+        # tidak ada entri kedua yang terbuat.
+        self.assertEqual(AllowedIP.objects.filter(cidr="138.201.0.0/16").count(), 1)
+
+    def test_create_cakupan_nol_ditolak(self):
+        for bad in ("0.0.0.0/0", "::/0"):
+            self.client.post(reverse("kelola_ip"), {"action": "create", "label": "Semua", "cidr": bad})
         self.assertEqual(AllowedIP.objects.count(), 0)
 
     def test_toggle(self):

@@ -229,6 +229,8 @@ class GeoBlockMiddleware:
 # menyalakan fitur (menambah entri pertama) tidak boleh mengunci siapa pun
 # yang belum terdaftar sampai admin sadar dan mendaftarkan IP mereka.
 
+# Nilai yang tersimpan = IP yang terakhir diblokir di sesi ini (bukan boolean)
+# — lihat IPAllowlistMiddleware.__call__ untuk kenapa.
 _SESSION_FLAG = "ip_block_logged"
 
 
@@ -237,6 +239,10 @@ class IPAllowlistMiddleware:
     `GeoBlockMiddleware` (`_client_ip` via XFF paling kiri, `_via_cloudflare`,
     `_real_client_ip`): allowlist TIDAK PERNAH diuji terhadap IP edge
     Cloudflare, selalu terhadap IP pengguna asli (`_real_client_ip`).
+
+    Asumsi kepercayaan: resolusi peer bergantung pada sanitasi header
+    `X-Forwarded-For` oleh Railway (elemen PALING KIRI = peer asli) — sama
+    persis dengan asumsi `GeoBlockMiddleware` pasca commit e4a055b.
 
     Dipasang SETELAH `ForcePasswordChangeMiddleware` (Auth → GeoBlock →
     ForcePassword → IPAllowlist, butuh `request.user`). Konsekuensi yang
@@ -254,23 +260,38 @@ class IPAllowlistMiddleware:
         if user is None or not is_ip_gated(user):
             return self.get_response(request)
 
-        # Aset statis/media + logout selalu lolos: user yang terblokir harus
-        # tetap bisa keluar, dan halaman blokir sendiri tak boleh 500 karena
+        # Aset statis + logout selalu lolos: user yang terblokir harus tetap
+        # bisa keluar, dan halaman blokir sendiri tak boleh 500 karena
         # CSS/font gagal termuat. (Catatan lstrip: lihat ForcePasswordChangeMiddleware —
-        # STATIC_URL/MEDIA_URL dinormalisasi Django jadi berawalan "/" saat
-        # runtime sama seperti request.path, jadi dibandingkan apa adanya.)
+        # STATIC_URL dinormalisasi Django jadi berawalan "/" saat runtime sama
+        # seperti request.path, jadi dibandingkan apa adanya.)
+        # MEDIA_URL SENGAJA TIDAK dikecualikan (beda dari ForcePasswordChangeMiddleware):
+        # file yang di-ingest (mutasi bank/panel) tersimpan di bawah MEDIA_ROOT,
+        # jadi mengecualikannya melubangi gerbang ini persis untuk user yang mau
+        # diblokir. ip_block.html swasembada (CSS inline) — tak butuh MEDIA_URL.
         path = request.path
-        asset_prefixes = tuple(p for p in (settings.STATIC_URL, settings.MEDIA_URL) if p)
+        asset_prefixes = tuple(p for p in (settings.STATIC_URL,) if p)
         if (asset_prefixes and path.startswith(asset_prefixes)) or path == reverse("logout"):
             return self.get_response(request)
 
         from web.models import AllowedIP  # impor lokal: model, hindari siklus saat startup
 
-        entries = list(AllowedIP.objects.filter(aktif=True).values_list("cidr", flat=True))
+        try:
+            entries = list(AllowedIP.objects.filter(aktif=True).values_list("cidr", flat=True))
+        except Exception:
+            # DB hiccup TIDAK BOLEH nge-500-kan setiap request auditor/supervisor
+            # — fail-open sama seperti gerbang lain di file ini (jangan pernah
+            # brick app live); efeknya sama dengan perilaku dorman sampai DB pulih.
+            return self.get_response(request)
         if not entries:
             # DORMAN: belum ada entri aktif → jangan kunci siapa pun.
             return self.get_response(request)
 
+        # Deviasi yang DISENGAJA dari GeoBlockMiddleware: di sana peer kosong
+        # fail-OPEN (langkah (2) `_blokir`, "jangan brick app"). Di sini peer
+        # kosong/tak terparse berakhir fail-CLOSED — allowlist adalah gerbang
+        # default-deny begitu ada entri aktif, jadi identitas peer yang tak
+        # bisa ditentukan tidak boleh diam-diam diloloskan.
         peer = _client_ip(request)
         if _ip_is_internal(peer):  # dev / health-check internal → selalu lolos
             return self.get_response(request)
@@ -283,9 +304,13 @@ class IPAllowlistMiddleware:
             request.session.pop(_SESSION_FLAG, None)
             return self.get_response(request)
 
-        if not request.session.get(_SESSION_FLAG):
+        # Flag sesi menyimpan IP yang diblokir (bukan cuma boolean): kalau IP
+        # yang diblokir BERUBAH dalam sesi yang sama (mis. user pindah jaringan
+        # dua kali), tiap IP baru dicatat sebagai baris audit sendiri, bukan
+        # dibungkam gara-gara "sudah pernah log sekali di sesi ini".
+        if request.session.get(_SESSION_FLAG) != ip:
             catat(user, "ip_blokir", ip)
-            request.session[_SESSION_FLAG] = True
+            request.session[_SESSION_FLAG] = ip
 
         html = render_to_string("web/ip_block.html", {"ip": ip}, request=request)
         return HttpResponseForbidden(html)

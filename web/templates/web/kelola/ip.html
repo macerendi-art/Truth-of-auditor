@@ -1,5 +1,4 @@
 {% extends "web/app_base.html" %}
-{% load humanize %}
 {% block title %}Akses IP · Truth of Auditor{% endblock %}
 {% block crumb %}Admin · Akses IP{% endblock %}
 {% block content %}
@@ -13,6 +12,9 @@
 
 <div class="card reveal" style="max-width:430px">
   <h3>Tambah IP</h3>
+  <div class="msg warning reveal" style="margin-bottom:12px">
+    Entri aktif PERTAMA langsung mengunci semua auditor &amp; supervisor di luar IP ini — efeknya seketika, tidak ada mode uji coba.
+  </div>
   <form method="post">
     {% csrf_token %}
     <input type="hidden" name="action" value="create">
@@ -26,7 +28,7 @@
 
 <div class="card reveal pad0" style="margin-top:16px">
   <div class="card-head"><h3>Daftar IP <span class="faint" style="font-weight:500">({{ entries|length }})</span></h3></div>
-  <div class="twrap selectable" style="border:none">
+  <div class="twrap" style="border:none">
   <table class="selectable">
     <thead><tr><th>Label</th><th>IP/CIDR</th><th>Status</th><th>Dibuat oleh</th><th class="r">Aksi</th></tr></thead>
     <tbody>

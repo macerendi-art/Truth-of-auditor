@@ -420,20 +420,35 @@ def kelola_ip(request):
     menggerbang auditor & supervisor; admin tidak pernah terkunci dari sini."""
     if request.method == "POST" and request.POST.get("action") == "create":
         label = (request.POST.get("label") or "").strip()[:100]
-        cidr = (request.POST.get("cidr") or "").strip()
+        cidr_raw = (request.POST.get("cidr") or "").strip()
         if not label:
             messages.error(request, "Label wajib diisi.")
-        elif not cidr:
+        elif not cidr_raw:
             messages.error(request, "IP/CIDR wajib diisi.")
         else:
             try:
-                ipaddress.ip_network(cidr, strict=False)
+                net = ipaddress.ip_network(cidr_raw, strict=False)
             except ValueError:
-                messages.error(request, f"'{cidr}' bukan IP atau CIDR yang valid.")
+                messages.error(request, f"'{cidr_raw}' bukan IP atau CIDR yang valid.")
             else:
-                entri = AllowedIP.objects.create(label=label, cidr=cidr, dibuat_oleh=request.user)
-                catat(request.user, "buat_ip_allow", entri.label, label=label, cidr=cidr)
-                messages.success(request, f"IP {cidr} ({label}) ditambahkan ke allowlist.")
+                if net.prefixlen == 0:
+                    # /0 (0.0.0.0/0 atau ::/0) mencakup SELURUH internet — kalau
+                    # lolos, entri ini sama saja mematikan gerbang untuk semua
+                    # orang (fitur jadi dorman tanpa admin sadar).
+                    messages.error(
+                        request,
+                        "Cakupan /0 tidak diizinkan — itu mematikan gembok utk semua orang.")
+                else:
+                    # Normalisasi: simpan bentuk kanonik jaringan (mis. "138.201.14.7/16"
+                    # → "138.201.0.0/16") supaya tampilan = kebenaran, dan supaya
+                    # pengecekan duplikat di bawah ini tidak lolos gara-gara notasi beda.
+                    cidr = str(net)
+                    if AllowedIP.objects.filter(cidr=cidr).exists():
+                        messages.error(request, f"IP/CIDR {cidr} sudah ada di allowlist.")
+                    else:
+                        entri = AllowedIP.objects.create(label=label, cidr=cidr, dibuat_oleh=request.user)
+                        catat(request.user, "buat_ip_allow", entri.label, label=label, cidr=cidr)
+                        messages.success(request, f"IP {cidr} ({label}) ditambahkan ke allowlist.")
         return redirect("kelola_ip")
     if request.method == "POST" and request.POST.get("action") == "toggle":
         eid = request.POST.get("ip_id", "")

@@ -91,6 +91,14 @@ AKSI_LABELS = {
     "aktifkan_toko":       ("Aktifkan toko",         "ok"),
     "nonaktifkan_toko":    ("Nonaktifkan toko",      "warn"),
     "hapus_toko":          ("Hapus toko",            "bad"),
+    # keamanan / allowlist IP
+    "ip_blokir":           ("Akses IP diblokir",     "bad"),
+    "buat_ip_allow":       ("Tambah IP allowlist",   "ok"),
+    "toggle_ip_allow":     ("Ubah status IP allowlist", "src"),
+    "hapus_ip_allow":      ("Hapus IP allowlist",    "bad"),
+    # koreksi FR (Control Bracket)
+    "fr_koreksi":          ("Koreksi FR",            "src"),
+    "fr_koreksi_hapus":    ("Hapus koreksi FR",      "bad"),
 }
 
 
