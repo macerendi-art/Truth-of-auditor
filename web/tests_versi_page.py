@@ -39,7 +39,9 @@ class RiwayatVersiHalamanTests(TestCase):
 
     def test_menampilkan_versi_berjalan(self):
         self.assertContains(self.resp, f"v{v.versi()}")
-        self.assertContains(self.resp, v.rilis_terbaru().nama)
+        # Nama rilis bisa memuat "&" → template meng-escape-nya (lihat
+        # test_menampilkan_semua_rilis), jadi pembanding ikut di-escape.
+        self.assertContains(self.resp, escape(v.rilis_terbaru().nama))
 
     def test_menampilkan_semua_rilis(self):
         # Nama rilis memuat "&" (mis. "Kode Unik & Kunci Wilayah") → template
@@ -64,8 +66,9 @@ class RiwayatVersiHalamanTests(TestCase):
 
     def test_urutan_terbaru_di_atas(self):
         html = self.resp.content.decode()
-        baru, lama = v.RILIS[0], v.RILIS[-1]
-        self.assertLess(html.index(baru.nama), html.index(lama.nama))
+        # Nama di-escape template (mis. "&" → "&amp;") — cari bentuk escape-nya.
+        baru, lama = escape(v.RILIS[0].nama), escape(v.RILIS[-1].nama)
+        self.assertLess(html.index(baru), html.index(lama))
 
 
 class BadgeVersiTests(TestCase):
