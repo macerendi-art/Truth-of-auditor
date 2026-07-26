@@ -542,6 +542,18 @@ class HutangCeklisViewTests(TestCase):
         self.assertEqual(r.context["data"]["total_piutang"], Decimal("250000"))
         self.assertEqual(r.context["toko_dipilih"], [self.slo.id])
 
+    def test_ceklis_duplikat_di_querystring_dedup(self):
+        """`?toko=1&toko=1&toko=2` tak boleh membuat toko_dipilih punya id
+        berulang — urutan kemunculan pertama dipertahankan."""
+        self.fr(self.lbs, "Hutang", "-500000")
+        self.fr(self.slo, "Piutang", "250000")
+        _sesi_semua(self.client)
+        r = self.client.get(reverse("hutang_piutang"), {
+            "dari": "2026-01-01", "sampai": date.today().isoformat(),
+            "toko": [str(self.lbs.id), str(self.lbs.id), str(self.slo.id)],
+        })
+        self.assertEqual(r.context["toko_dipilih"], [self.lbs.id, self.slo.id])
+
     def test_id_ngawur_diabaikan(self):
         self.fr(self.lbs, "Hutang", "-500000")
         _sesi_semua(self.client)

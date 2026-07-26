@@ -1886,10 +1886,10 @@ def _toko_scope(request):
     if not daftar:
         return None, [], []  # tak punya toko sama sekali → halaman no_toko
     sah = {t.id for t in daftar}
-    dipilih = [
+    dipilih = list(dict.fromkeys(
         int(v) for v in request.GET.getlist("toko")
         if v.isdecimal() and int(v) in sah
-    ]
+    ))
     target = [t for t in daftar if t.id in dipilih] if dipilih else daftar
     return target, daftar, dipilih
 
