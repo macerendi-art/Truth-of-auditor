@@ -746,6 +746,7 @@ def upload(request):
             "preview": preview, "parsers": sorted(PARSERS.keys()),
             "flows": ["", "dp", "wd"], "active_toko": active,
             "uploads": _uploads_page(active, request, q=q),
+            "semua_toko_tulis": mode_semua(request),
         })
     from reconciliation.engine import check_completeness
 
@@ -754,6 +755,7 @@ def upload(request):
         "uploads": _uploads_page(active, request, q=q),
         "comp": check_completeness(active),
         "q": q,
+        "semua_toko_tulis": mode_semua(request),
     })
 
 
@@ -1059,6 +1061,7 @@ def reconcile(request):
         "panel_dates": panel_dates,
         "panel_dates_count": len(panel_dates),
         "pending_settlement": pending_settlement_count(active),
+        "semua_toko_tulis": mode_semua(request),
     }
     return render(request, "web/reconcile.html", ctx)
 

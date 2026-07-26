@@ -225,7 +225,9 @@ class PickerDanBarTests(TestCase):
     def test_bar_muncul_di_halaman_single_toko(self):
         self._admin()
         _sesi_semua(self.client)
-        r = self.client.get("/upload/")
+        # /rekening/ = halaman BACA (bar bernada info) — /upload/ & /rekonsiliasi/
+        # kini punya varian bernada peringatan sendiri (lihat BarTulisTests).
+        r = self.client.get("/rekening/")
         self.assertContains(r, "Mode Semua Toko aktif")
         # bar menyebut toko fallback yang sedang ditampilkan
         self.assertContains(r, f"<b>{_active_name(r)}</b>")
@@ -233,6 +235,38 @@ class PickerDanBarTests(TestCase):
     def test_bar_tak_muncul_saat_mode_mati(self):
         self._admin()
         self.assertNotContains(self.client.get("/upload/"), "Mode Semua Toko aktif")
+
+
+class BarTulisTests(TestCase):
+    """Bar mode Semua Toko di halaman TULIS (/upload/, /rekonsiliasi/) memakai
+    copy bernada peringatan — taruhannya lebih tinggi daripada halaman baca."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+
+    def test_halaman_tulis_pakai_copy_peringatan(self):
+        _sesi_semua(self.client)
+        for nama in ("upload", "reconcile"):
+            with self.subTest(rute=nama):
+                r = self.client.get(reverse(nama))
+                self.assertContains(r, "Anda dalam mode Semua Toko")
+                self.assertContains(r, "akan tercatat atas nama toko")
+                self.assertContains(r, f"<b>{_active_name(r)}</b>")
+                self.assertContains(r, "mode-bar warn")
+                self.assertNotContains(r, "Mode Semua Toko aktif")
+
+    def test_halaman_baca_tak_pakai_copy_peringatan(self):
+        _sesi_semua(self.client)
+        r = self.client.get("/rekening/")
+        self.assertNotContains(r, "mode-bar warn")
+        self.assertNotContains(r, "Anda dalam mode Semua Toko")
+
+    def test_bar_peringatan_tak_muncul_saat_mode_mati(self):
+        r = self.client.get(reverse("upload"))
+        self.assertNotContains(r, "Anda dalam mode Semua Toko")
+        self.assertNotContains(r, "mode-bar warn")
 
 
 def _active_name(response):

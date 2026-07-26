@@ -333,6 +333,10 @@ table.selectable td.rng-sel{background:rgba(37,99,235,.14);box-shadow:inset 0 0 
 .mode-bar svg{width:16px;height:16px;flex-shrink:0}
 .mode-bar b{font-weight:700}
 .mode-bar .hint{color:var(--muted);font-weight:500}
+/* Varian halaman TULIS (upload/rekonsiliasi): taruhannya lebih tinggi
+   (aksinya tercatat atas nama toko fallback) — pakai palet .msg.warning. */
+.mode-bar.warn{background:var(--warn-bg);border-color:#f0d9a8;color:#8a5208}
+.mode-bar.warn .hint{color:#8a5208}
 
 /* ---- EMPTY STATE & SKELETON ---- */
 .empty{text-align:center;padding:48px 20px}
@@ -581,10 +585,15 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
        tampilan gabungan (view yang punya menandai dirinya lewat `semua_toko_page`) —
        supaya angka di layar tak pernah salah dibaca sebagai total lintas toko.{% endcomment %}
     {% if semua_toko and not semua_toko_page and active_toko %}
-    <div class="mode-bar" role="status">
+    <div class="mode-bar {% if semua_toko_tulis %}warn{% endif %}" role="status">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+      {% if semua_toko_tulis %}
+      <span>Anda dalam mode Semua Toko — berkas/proses di halaman ini akan tercatat atas nama toko <b>{{ active_toko.name }}</b>.
+        <span class="hint">Pastikan ini toko yang dimaksud sebelum melanjutkan. Gabungan lintas toko tersedia di Dashboard dan Hutang/Piutang.</span></span>
+      {% else %}
       <span>Mode Semua Toko aktif — halaman ini menampilkan <b>{{ active_toko.name }}</b>.
         <span class="hint">Angkanya milik satu toko itu saja, bukan gabungan. Gabungan lintas toko tersedia di Dashboard dan Hutang/Piutang.</span></span>
+      {% endif %}
     </div>
     {% endif %}
     {% if messages %}{% for m in messages %}<div class="msg {{ m.tags }}">{{ m }}</div>{% endfor %}{% endif %}
