@@ -7,9 +7,27 @@ from django.shortcuts import redirect
 
 from sources.models import Toko
 
+# Sentinel sesi mode "Semua Toko": `session["active_toko_id"]` yang biasanya
+# berisi id numerik bisa berisi string ini. Hanya admin yang boleh memasangnya
+# (lihat `web.views.set_toko`). Semua view single-toko TETAP menerima objek Toko
+# nyata — `_active_toko` menerjemahkan sentinel jadi toko fallback.
+SEMUA_TOKO = "all"
+
 
 def is_admin(user) -> bool:
     return bool(user.is_authenticated and (user.is_superuser or user.role == "admin"))
+
+
+def mode_semua(request) -> bool:
+    """True bila sesi sedang di mode Semua Toko DAN user memang admin.
+
+    Cek peran ikut di sini supaya pencabutan hak admin langsung mematikan mode
+    ini tanpa perlu menyentuh sesi yang sudah tersimpan.
+    """
+    return (
+        request.session.get("active_toko_id") == SEMUA_TOKO
+        and is_admin(request.user)
+    )
 
 
 def is_ip_gated(user) -> bool:

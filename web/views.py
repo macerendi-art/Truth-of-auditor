@@ -39,7 +39,7 @@ from sources.models import SourceType, Upload
 from sources.parsers.banks import NBMB_RE
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
-from web.access import is_admin, tokos_for
+from web.access import SEMUA_TOKO, is_admin, tokos_for
 from web.biaya import rincian_biaya as hitung_rincian_biaya
 from web.bonus import rekonsiliasi_bonus as hitung_rekonsiliasi_bonus
 from web.breakdown import (
@@ -123,8 +123,17 @@ def csrf_failure(request, reason=""):
 
 
 def _active_toko(request):
+    """Toko aktif sesi — SELALU objek Toko nyata (atau None bila tak punya toko).
+
+    Mode "Semua Toko" menyimpan sentinel string di sesi; di halaman single-toko
+    sentinel itu diterjemahkan jadi toko fallback (yang pertama menurut nama).
+    Tanpa terjemahan ini `allowed.filter(id="all")` melempar ValueError dan
+    SETIAP halaman ikut mati — bukan cuma dashboard.
+    """
     allowed = tokos_for(request.user)
     tid = request.session.get("active_toko_id")
+    if tid == SEMUA_TOKO:
+        return allowed.first()
     t = allowed.filter(id=tid).first() if tid else None
     return t or allowed.first()
 
@@ -133,7 +142,12 @@ def _active_toko(request):
 def set_toko(request):
     if request.method == "POST":
         tid = request.POST.get("toko_id", "")
-        if tid.isdecimal() and tokos_for(request.user).filter(id=tid).exists():
+        if tid == SEMUA_TOKO:
+            # Mode gabungan lintas toko — khusus admin. Peran lain: abaikan diam
+            # (nilai kiriman tak dipercaya; sesi lama tetap utuh).
+            if is_admin(request.user):
+                request.session["active_toko_id"] = SEMUA_TOKO
+        elif tid.isdecimal() and tokos_for(request.user).filter(id=tid).exists():
             request.session["active_toko_id"] = int(tid)
     nxt = request.POST.get("next")
     if nxt and url_has_allowed_host_and_scheme(
