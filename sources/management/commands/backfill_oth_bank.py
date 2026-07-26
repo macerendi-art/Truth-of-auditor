@@ -42,7 +42,9 @@ class Command(BaseCommand):
                 dilewati += 1
 
         if to_update and not opts["dry_run"]:
-            Transaction.objects.bulk_update(to_update, ["bank_title"])
+            # batch_size: satu backfill historis bisa puluhan ribu baris — jangan
+            # jadi satu UPDATE..CASE raksasa (plafon variabel SQLite rendah).
+            Transaction.objects.bulk_update(to_update, ["bank_title"], batch_size=500)
 
         suffix = " (dry-run, tidak ditulis)" if opts["dry_run"] else ""
         self.stdout.write(
