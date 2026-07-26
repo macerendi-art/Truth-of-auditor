@@ -7,11 +7,20 @@ bisa berisi string sentinel "all". Setiap view single-toko memanggil
 maupun Postgres). Karena itu kelas pertama di berkas ini menyapu SELURUH rute
 tanpa argumen dengan sesi "all" — pagar yang harus selalu hijau.
 """
+from datetime import date, datetime
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import URLPattern, reverse
 
-from sources.models import Toko
+from reconciliation.models import ReconBatch, ToleranceProfile
+from sources.models import SourceType, Toko, Upload
+from transactions.models import Transaction
+from web.breakdown import ringkas_bracket_hari
+from web.models import FRKoreksi
 from web.urls import urlpatterns
 
 User = get_user_model()
@@ -228,3 +237,186 @@ class PickerDanBarTests(TestCase):
 
 def _active_name(response):
     return response.context["active_toko"].name
+
+
+class _DataGabungan(TestCase):
+    """Dua toko, tanggal batch BERBEDA — potret gabungan harus memakai batch
+    terakhir MASING-MASING toko, bukan satu tanggal seragam."""
+
+    TGL_LBS = date(2026, 7, 1)
+    TGL_SLO = date(2026, 7, 3)
+
+    def setUp(self):
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+        _sesi_semua(self.client)
+        self.tol = ToleranceProfile.objects.get(name="Default")
+        self.lbs = Toko.objects.get(key="lbs")
+        self.slo = Toko.objects.get(key="slo")
+        self.panel = SourceType.objects.get(key="panel")
+        self.bracket = SourceType.objects.get_or_create(
+            key="bracket", defaults={"name": "Bracket"})[0]
+        self._n = 0
+
+    def batch(self, toko, d):
+        return ReconBatch.objects.create(
+            toko=toko, tolerance=self.tol, recon_date=d,
+            summary={"dp": {"selisih": 0}, "wd": {"selisih": 0}})
+
+    def panel_tx(self, toko, batch, jenis, amount, bank_title="BCA"):
+        self._n += 1
+        up = Upload.objects.create(source_type=self.panel, toko=toko)
+        return Transaction.objects.create(
+            upload=up, source_type=self.panel, toko=toko, jenis=jenis,
+            amount=Decimal(amount), bank_title=bank_title,
+            occurred_at=datetime(2026, 7, 1, 10, 0), row_hash=f"p{self._n}",
+            consumed_by_batch=batch)
+
+    def fr(self, toko, tanggal, bank, kategori, total):
+        self._n += 1
+        up = Upload.objects.create(source_type=self.bracket, toko=toko)
+        return Transaction.objects.create(
+            upload=up, source_type=self.bracket, toko=toko, jenis="lainnya",
+            amount=abs(Decimal(total)), money_delta=Decimal(total),
+            posted_date=tanggal, occurred_at=datetime(2026, 7, 1, 10, 0),
+            row_hash=f"b{self._n}",
+            raw={"Bank": bank, "Kategori": kategori, "Jam": "10:00"})
+
+    def seed(self):
+        """LBS: batch 01/07 (+ batch lama 30/06 yang HARUS diabaikan);
+        SLO: batch 03/07."""
+        lama = self.batch(self.lbs, date(2026, 6, 30))
+        self.panel_tx(self.lbs, lama, "depo", "999000")
+        self.b_lbs = self.batch(self.lbs, self.TGL_LBS)
+        self.b_slo = self.batch(self.slo, self.TGL_SLO)
+        self.panel_tx(self.lbs, self.b_lbs, "depo", "100000")
+        self.panel_tx(self.lbs, self.b_lbs, "wd", "40000")
+        self.panel_tx(self.slo, self.b_slo, "depo", "70000", bank_title="NXPAY QR")
+        self.fr(self.lbs, self.TGL_LBS, "BCA A", "Deposit", "100000")
+        self.fr(self.lbs, self.TGL_LBS, "BCA A", "Withdrawal", "-40000")
+        self.fr(self.lbs, date(2026, 6, 30), "BCA A", "Deposit", "999000")
+        self.fr(self.slo, self.TGL_SLO, "BRI B", "Deposit", "70000")
+
+
+class DashboardSemuaTests(_DataGabungan):
+    def test_render_template_khusus(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"))
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("web/dashboard_all.html", [t.name for t in r.templates])
+        self.assertTrue(r.context["semua_toko_page"])
+
+    def test_bar_penjelas_tak_muncul_di_halaman_gabungan(self):
+        self.seed()
+        self.assertNotContains(self.client.get(reverse("dashboard")),
+                               "Mode Semua Toko aktif")
+
+    def test_non_admin_tetap_dashboard_tunggal(self):
+        self.seed()
+        u = User.objects.create_user("a2", password="pw12345", role="auditor")
+        u.allowed_tokos.set([self.lbs])
+        self.client.logout()
+        self.client.login(username="a2", password="pw12345")
+        _sesi_semua(self.client)
+        r = self.client.get(reverse("dashboard"))
+        self.assertIn("web/dashboard.html", [t.name for t in r.templates])
+
+    def test_panel_gabungan_sama_dengan_jumlah_per_toko(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"))
+        ps = r.context["panel_sum"]
+        # LBS batch 01/07: DP 100.000 + WD 40.000 · SLO batch 03/07: DP 70.000.
+        # Batch lama 30/06 (999.000) TIDAK ikut.
+        self.assertEqual(ps["dp"], {"n": 2, "v": 170000.0})
+        self.assertEqual(ps["wd"], {"n": 1, "v": 40000.0})
+        self.assertEqual(ps["total_n"], 3)
+        self.assertEqual(ps["net"], 130000.0)
+
+    def test_metode_pembayaran_klop_dengan_strip_panel(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"))
+        metode = r.context["metode"]
+        self.assertEqual(sum(x["v"] for x in metode["dp"]),
+                         r.context["panel_sum"]["dp"]["v"])
+        self.assertEqual({x["label"] for x in metode["dp"] if x["n"]},
+                         {"Bank", "QRIS"})
+
+    def test_bracket_gabungan_sama_dengan_jumlah_ringkas_per_toko(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"))
+        harap_dp = (ringkas_bracket_hari(self.lbs, self.TGL_LBS)["dp"]["v"]
+                    + ringkas_bracket_hari(self.slo, self.TGL_SLO)["dp"]["v"])
+        harap_wd = (ringkas_bracket_hari(self.lbs, self.TGL_LBS)["wd"]["v"]
+                    + ringkas_bracket_hari(self.slo, self.TGL_SLO)["wd"]["v"])
+        self.assertEqual(r.context["bracket_sum"]["dp"]["v"], harap_dp)
+        self.assertEqual(r.context["bracket_sum"]["wd"]["v"], harap_wd)
+
+    def test_bracket_gabungan_ikut_overlay_koreksi(self):
+        """Koreksi FR harus terpakai juga di mode gabungan — kalau tidak, angka
+        dashboard gabungan berbeda dari dashboard toko itu sendiri."""
+        self.seed()
+        FRKoreksi.objects.create(toko=self.lbs, tanggal=self.TGL_LBS,
+                                 account="BCA A", kolom="deposit",
+                                 nilai=Decimal("123000"), alasan="mistake_cs")
+        r = self.client.get(reverse("dashboard"))
+        harap = (ringkas_bracket_hari(self.lbs, self.TGL_LBS)["dp"]["v"]
+                 + ringkas_bracket_hari(self.slo, self.TGL_SLO)["dp"]["v"])
+        self.assertEqual(harap, Decimal("193000"))  # 123.000 (dikoreksi) + 70.000
+        self.assertEqual(r.context["bracket_sum"]["dp"]["v"], harap)
+
+    def test_tabel_per_toko_bawa_tanggal_batch_masing_masing(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"))
+        baris = {b["toko"].key: b for b in r.context["rows"]}
+        self.assertEqual(baris["lbs"]["last"]["recon_date"], self.TGL_LBS)
+        self.assertEqual(baris["slo"]["last"]["recon_date"], self.TGL_SLO)
+        self.assertEqual(baris["lbs"]["dp"], 100000.0)
+        self.assertEqual(baris["slo"]["dp"], 70000.0)
+        # tombol pindah toko per baris
+        self.assertContains(r, reverse("set_toko"))
+
+    def test_kalender_ambil_status_terburuk_lintas_toko(self):
+        """Satu toko seimbang + satu toko selisih besar pada hari yang sama →
+        sel kalender harus MERAH (jangan menyembunyikan masalah)."""
+        hari = date.today()
+        b1 = self.batch(self.lbs, hari)
+        b1.summary = {"dp": {"selisih": 0}, "wd": {"selisih": 0}}
+        b1.save()
+        b2 = self.batch(self.slo, hari)
+        b2.summary = {"dp": {"selisih": 50_000_000}, "wd": {"selisih": 0}}
+        b2.save()
+        r = self.client.get(reverse("dashboard"))
+        sel = {k["d"]: k for k in r.context["kal"]}
+        self.assertEqual(sel[hari]["st"], "bad")
+        self.assertEqual(sel[hari]["n"], 2)
+
+    def test_seksi_belum_tersedia_disembunyikan_dengan_penjelasan(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"))
+        self.assertNotContains(r, "Tren selisih")
+        self.assertNotContains(r, "Kerjakan hari ini")
+        self.assertNotContains(r, "Uang periksa")
+        self.assertContains(r, "belum tersedia di mode gabungan")
+
+    def test_tanpa_batch_sama_sekali_tetap_200(self):
+        r = self.client.get(reverse("dashboard"))
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.context["panel_sum"])
+
+
+class DashboardSemuaQueryTests(_DataGabungan):
+    """Jumlah query dashboard gabungan harus KONSTAN terhadap jumlah toko —
+    di prod ada 24 toko; satu query per toko = dashboard yang tak terpakai."""
+
+    def test_query_tidak_tumbuh_saat_toko_bertambah(self):
+        self.seed()
+        self.client.get(reverse("dashboard"))  # warm-up cache ContentType dkk.
+        with CaptureQueriesContext(connection) as before:
+            self.assertEqual(self.client.get(reverse("dashboard")).status_code, 200)
+        for i in range(6):
+            Toko.objects.create(key=f"qq{i}", name=f"QQ{i}", panel="nexus")
+        with CaptureQueriesContext(connection) as after:
+            self.assertEqual(self.client.get(reverse("dashboard")).status_code, 200)
+        self.assertEqual(
+            len(before), len(after),
+            f"query tumbuh {len(before)}→{len(after)} saat toko bertambah (N+1)")

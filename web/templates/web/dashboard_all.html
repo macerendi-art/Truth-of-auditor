@@ -1,0 +1,188 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% block title %}Dashboard · Semua Toko · Truth of Auditor{% endblock %}
+{% block crumb %}Dashboard · Semua Toko{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Dashboard <span class="badge src" style="vertical-align:6px;font-size:11.5px">Semua Toko</span></h1>
+    <p>Potret gabungan {{ n_toko|intcomma }} toko — angka diambil dari rekonsiliasi <b>terakhir masing-masing toko</b>,
+      jadi tanggalnya bisa berbeda antar baris.</p>
+  </div>
+  <div class="actions">
+    <a class="btn" href="{% url 'toko_overview' %}">Ringkasan Toko</a>
+    <a class="btn primary" href="{% url 'reconcile' %}">Rekonsiliasi →</a>
+  </div>
+</div>
+
+{% comment %}---- KARTU STATUS GABUNGAN ----{% endcomment %}
+<div class="grid cols-4 reveal">
+  <div class="card stat">
+    <div class="top"><span class="k">Toko sudah direkon</span>
+      <span class="ic {% if n_rekon == n_toko %}g{% else %}a{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M3 9h18"/></svg></span></div>
+    <div class="v">{{ n_rekon|intcomma }}<span class="faint" style="font-size:16px"> / {{ n_toko|intcomma }}</span></div>
+    <div class="sub">{% if tgl_terakhir %}rekon terbaru {{ tgl_terakhir|date:"d M Y" }}{% else %}belum ada rekonsiliasi{% endif %}</div>
+  </div>
+  <div class="card stat">
+    <div class="top"><span class="k">Selisih gabungan</span>
+      <span class="ic {% if selisih_total == 0 %}g{% elif selisih_total < 10000000 %}a{% else %}r{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span></div>
+    <div class="v {% if selisih_total == 0 %}g{% elif selisih_total < 10000000 %}a{% else %}r{% endif %} mono">{{ selisih_total|floatformat:0|intcomma }}</div>
+    <div class="sub">jumlah selisih DP+WD rekon terakhir</div>
+  </div>
+  <a class="card stat click" href="{% url 'review_queue' %}">
+    <div class="top"><span class="k">Area Pengecekan</span>
+      <span class="ic {% if pending_review_count %}a{% else %}g{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span></div>
+    <div class="v {% if pending_review_count %}a{% else %}g{% endif %}">{{ pending_review_count|intcomma }}</div>
+    <div class="sub">hasil perlu mata manusia · seluruh toko</div>
+  </a>
+  <div class="card stat">
+    <div class="top"><span class="k">Menunggu settlement</span>
+      <span class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span></div>
+    <div class="v {% if pending_total %}a{% endif %}">{{ pending_total|intcomma }}</div>
+    <div class="sub">kredit menunggu uang tiba · seluruh toko</div>
+  </div>
+</div>
+
+{% comment %}---- RINGKASAN PANEL & BRACKET GABUNGAN ----{% endcomment %}
+<style>
+.pstrip-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.pstrip .ps{display:flex;flex-direction:column;gap:3px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
+.pstrip .ps-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.pstrip .ps-k.dp{color:var(--ok)} .pstrip .ps-k.wd{color:var(--bad)}
+.pstrip .ps-n{font-size:13px;color:var(--faint);font-variant-numeric:tabular-nums}
+.pstrip .ps-v{font-size:20px;font-weight:800;letter-spacing:-.01em}
+.pstrip .ps-v.neg{color:var(--bad)}
+.pstrip .ps small{font-size:11px;font-weight:600;color:var(--faint)}
+.pstrip .ps.tot{background:linear-gradient(135deg,rgba(37,99,235,.07),rgba(34,211,238,.07))}
+@media (max-width:700px){.pstrip-grid{grid-template-columns:1fr}}
+</style>
+{% if panel_sum %}
+<div class="card reveal pstrip" style="margin-top:16px">
+  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Panel — gabungan</h3>
+    <span class="faint" style="font-size:11.5px">baris panel terkunci di rekon terakhir tiap toko</span></div>
+  <div class="pstrip-grid">
+    <div class="ps"><span class="ps-k dp">Deposit</span>
+      <span class="ps-n">{{ panel_sum.dp.n|intcomma }} <small>trx</small></span>
+      <span class="ps-v mono">{{ panel_sum.dp.v|floatformat:0|intcomma }}</span></div>
+    <div class="ps"><span class="ps-k wd">Withdraw</span>
+      <span class="ps-n">{{ panel_sum.wd.n|intcomma }} <small>trx</small></span>
+      <span class="ps-v mono">{{ panel_sum.wd.v|floatformat:0|intcomma }}</span></div>
+    <div class="ps tot"><span class="ps-k">Total</span>
+      <span class="ps-n">{{ panel_sum.total_n|intcomma }} <small>trx</small></span>
+      <span class="ps-v mono {% if panel_sum.net < 0 %}neg{% endif %}" title="Nilai DP − Nilai WD">{{ panel_sum.net|floatformat:0|intcomma }} <small>net</small></span></div>
+  </div>
+</div>
+{% endif %}
+
+{% if bracket_sum %}
+<div class="card reveal pstrip" style="margin-top:16px">
+  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Bracket — gabungan</h3>
+    <span class="faint" style="font-size:11.5px">baris FR/Bracket pada tanggal rekon terakhir tiap toko</span></div>
+  <div class="pstrip-grid">
+    <div class="ps"><span class="ps-k dp">Deposit</span>
+      <span class="ps-n">{{ bracket_sum.dp.n|intcomma }} <small>trx</small></span>
+      <span class="ps-v mono">{{ bracket_sum.dp.v|floatformat:0|intcomma }}</span></div>
+    <div class="ps"><span class="ps-k wd">Withdraw</span>
+      <span class="ps-n">{{ bracket_sum.wd.n|intcomma }} <small>trx</small></span>
+      <span class="ps-v mono">{{ bracket_sum.wd.v|floatformat:0|intcomma }}</span></div>
+    <div class="ps tot"><span class="ps-k">Total</span>
+      <span class="ps-n">{{ bracket_sum.total_n|intcomma }} <small>trx</small></span>
+      <span class="ps-v mono {% if bracket_sum.net < 0 %}neg{% endif %}" title="Deposit − Withdraw">{{ bracket_sum.net|floatformat:0|intcomma }} <small>net</small></span></div>
+  </div>
+</div>
+{% endif %}
+
+{% comment %}---- METODE PEMBAYARAN (gabungan) ----{% endcomment %}
+{% if metode %}
+<style>
+.mtd-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mtd .mt{display:flex;flex-direction:column;gap:9px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
+.mtd .mt-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.mtd .mt-k.dp{color:var(--ok)} .mtd .mt-k.wd{color:var(--bad)}
+.mtd .mt-row{display:grid;grid-template-columns:84px minmax(36px,1fr) auto;gap:10px;align-items:center;font-size:12.5px}
+.mtd .mt-row .l{font-weight:600}
+.mtd .mt-bar{height:4px;border-radius:99px;background:var(--line);overflow:hidden}
+.mtd .mt-bar i{display:block;height:100%;background:var(--grad);border-radius:99px}
+.mtd .mt-row .r2{text-align:right;color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap}
+.mtd .mt-row .r2 b{color:var(--ink)}
+.mtd .mt-row small{font-size:11px;font-weight:600;color:var(--faint)}
+@media (max-width:700px){.mtd-grid{grid-template-columns:1fr}}
+</style>
+<div class="card reveal mtd" style="margin-top:16px">
+  <div class="h-row" style="margin-bottom:10px"><h3>Metode Pembayaran — gabungan</h3>
+    <span class="faint" style="font-size:11.5px">acuan Bank Title panel</span></div>
+  <div class="mtd-grid">
+    <div class="mt"><span class="mt-k dp">Deposit</span>
+      {% for r in metode.dp %}
+      <div class="mt-row"><span class="l">{{ r.label }}</span>
+        <span class="mt-bar"><i style="width:{{ r.pct|floatformat:'0u' }}%"></i></span>
+        <span class="r2 mono"><b>{{ r.n|intcomma }}</b> <small>trx</small> · {{ r.v|floatformat:0|intcomma }}</span></div>
+      {% endfor %}
+    </div>
+    <div class="mt"><span class="mt-k wd">Withdraw</span>
+      {% for r in metode.wd %}
+      <div class="mt-row"><span class="l">{{ r.label }}</span>
+        <span class="mt-bar"><i style="width:{{ r.pct|floatformat:'0u' }}%"></i></span>
+        <span class="r2 mono"><b>{{ r.n|intcomma }}</b> <small>trx</small> · {{ r.v|floatformat:0|intcomma }}</span></div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% comment %}---- KALENDER LINTAS TOKO (status terburuk per hari) ----{% endcomment %}
+<div class="card reveal" style="margin-top:16px">
+  <div class="h-row"><h3>Kalender rekonsiliasi — 14 hari, seluruh toko</h3>
+    <span class="faint" style="font-size:11.5px">warna mengikuti toko <b>terburuk</b> hari itu</span></div>
+  <div class="cal">
+    {% for k in kal %}
+    <a class="{{ k.st }} {% if k.today %}today{% endif %}"
+       href="{% url 'toko_overview' %}?from={{ k.d|date:'Y-m-d' }}&to={{ k.d|date:'Y-m-d' }}"
+       title="{% if k.n %}{{ k.n }} toko direkon pada tanggal ini — klik untuk rincian{% else %}Belum ada toko yang direkonsiliasi{% endif %}">
+      <span class="d {% if not k.n %}faint{% endif %}">{{ k.d|date:"j" }}</span>
+      <span class="m">{{ k.d|date:"M" }}</span><span class="s"></span></a>
+    {% endfor %}
+  </div>
+</div>
+
+{% comment %}---- TABEL PER TOKO ----{% endcomment %}
+<div class="card pad0 reveal" style="margin-top:16px">
+  <div class="card-head"><h3>Rincian per toko</h3>
+    <span class="sub">urut selisih terbesar · tanggal rekon bisa berbeda antar toko</span></div>
+  <div class="table-wrap" style="border:none">
+  <table class="selectable">
+    <thead><tr>
+      <th>Toko</th><th>Rekon terakhir</th><th class="num">Deposit</th><th class="num">Withdraw</th>
+      <th class="num">Selisih</th><th class="num col-hide">Tinjau</th><th class="num col-hide">Settlement</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><b>{{ r.toko.name }}</b>{% if r.status %} <span class="badge {{ r.status }}"></span>{% endif %}</td>
+      <td class="mono">{% if r.last %}{{ r.last.recon_date|date:"d/m/Y" }}{% else %}<span class="faint">belum rekon</span>{% endif %}</td>
+      <td class="num mono">{{ r.dp|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ r.wd|floatformat:0|intcomma }}</td>
+      <td class="num mono" {% if r.selisih %}style="color:var(--bad);font-weight:700"{% endif %}>{{ r.selisih|floatformat:0|intcomma }}</td>
+      <td class="num mono col-hide">{{ r.tinjau|intcomma }}</td>
+      <td class="num mono col-hide">{{ r.pending|intcomma }}</td>
+      <td class="r">
+        <form method="post" action="{% url 'set_toko' %}" style="display:inline">
+          {% csrf_token %}
+          <input type="hidden" name="toko_id" value="{{ r.toko.id }}">
+          <input type="hidden" name="next" value="{% url 'dashboard' %}">
+          <button class="btn sm" type="submit" title="Jadikan {{ r.toko.name }} toko aktif">Buka →</button>
+        </form>
+      </td>
+    </tr>
+    {% empty %}<tr><td colspan="8" class="cell-empty">Belum ada toko aktif.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<p class="faint reveal" style="margin:16px 2px 0;font-size:12.5px;line-height:1.7">
+  Beberapa panel harian — grafik pergerakan, daftar kerja, dan pemeriksaan uang tanpa pasangan —
+  belum tersedia di mode gabungan karena keduanya terikat pada satu toko.
+  Pilih satu toko lewat tombol <b>Buka</b> di tabel untuk membukanya.
+</p>
+{% endblock %}

@@ -12,6 +12,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max, Min, OuterRef, Q, Subquery, Sum
+from django.db.models.fields.json import KeyTextTransform
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -39,12 +40,15 @@ from sources.models import SourceType, Upload
 from sources.parsers.banks import NBMB_RE
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
-from web.access import SEMUA_TOKO, is_admin, tokos_for
+from web.access import SEMUA_TOKO, is_admin, mode_semua, tokos_for
 from web.biaya import rincian_biaya as hitung_rincian_biaya
 from web.bonus import rekonsiliasi_bonus as hitung_rekonsiliasi_bonus
 from web.breakdown import (
     bracket_breakdown as hitung_bracket_breakdown,
     KATEGORI_KANONIK,
+    NOL as DEC_NOL,
+    _norm_akun,
+    _slug_kategori,
     ringkas_bracket_hari,
 )
 from web.channels import breakdown_metode
@@ -179,6 +183,232 @@ def ganti_password(request):
     return render(request, "registration/ganti_password.html", {"form": form})
 
 
+def _selisih_summary(summary):
+    """Selisih total (DP+WD, absolut) dari dict `ReconBatch.summary`."""
+    s = summary or {}
+    return (abs((s.get("dp") or {}).get("selisih") or 0)
+            + abs((s.get("wd") or {}).get("selisih") or 0))
+
+
+def _status_selisih(total):
+    return "ok" if total == 0 else ("warn" if total < 10_000_000 else "bad")
+
+
+def _batch_terakhir_per_toko(tokos):
+    """(batch terakhir per toko_id, semua batch) — SATU query untuk semua toko.
+
+    `values()` alih-alih objek: dashboard gabungan cuma perlu id/toko/tanggal/
+    summary, dan 24 toko × ratusan batch tak perlu jadi objek model.
+    Pemenang per toko = tanggal terbesar (seri → id terbesar).
+    """
+    semua = list(
+        ReconBatch.objects.filter(toko__in=tokos, recon_date__isnull=False)
+        .values("id", "toko_id", "recon_date", "summary")
+    )
+    terakhir = {}
+    for b in semua:
+        cur = terakhir.get(b["toko_id"])
+        if cur is None or (b["recon_date"], b["id"]) > (cur["recon_date"], cur["id"]):
+            terakhir[b["toko_id"]] = b
+    return terakhir, semua
+
+
+def _ringkas_bracket_gabungan(pasangan):
+    """Ringkasan bracket DP/WD untuk himpunan pasangan `(toko_id, tanggal)`.
+
+    Hasilnya PERSIS jumlah `ringkas_bracket_hari(toko, tanggal)` tiap pasangan —
+    termasuk overlay `FRKoreksi` dan aturan skip-akun-absen — tapi dengan DUA
+    query saja (agregat baris + koreksi), bukan dua query per toko. Pengelompokan
+    ikut menyertakan akun karena koreksi dikunci per akun; jumlah akun per toko
+    hanya belasan sehingga hasil agregatnya tetap kecil.
+
+    `abs()` withdraw diterapkan per (toko, tanggal) — sama seperti versi satu
+    toko — supaya penjumlahannya tie out apa adanya.
+    """
+    if not pasangan:
+        return None
+    toko_ids = {t for t, _ in pasangan}
+    tanggal = {d for _, d in pasangan}
+    rows = (
+        Transaction.objects.filter(
+            toko_id__in=toko_ids, source_type__key="bracket", posted_date__in=tanggal
+        )
+        .annotate(
+            fr_bank=KeyTextTransform("Bank", "raw"),
+            fr_kategori=KeyTextTransform("Kategori", "raw"),
+        )
+        .values("toko_id", "posted_date", "fr_bank", "fr_kategori")
+        .annotate(v=Sum("money_delta"), n=Count("id"))
+    )
+    per_acc = {}  # (toko_id, tanggal, account) → {slug: {"v", "n"}}
+    for r in rows:
+        hari = (r["toko_id"], r["posted_date"])
+        if hari not in pasangan:
+            continue  # silang toko×tanggal dari filter di atas — bukan hari toko ini
+        sel = per_acc.setdefault(hari + (_norm_akun(r["fr_bank"]),), {})
+        slug = _slug_kategori(r["fr_kategori"])
+        cur = sel.get(slug)
+        if cur is None:
+            sel[slug] = {"v": r["v"] or DEC_NOL, "n": r["n"]}
+        else:
+            cur["v"] += r["v"] or DEC_NOL
+            cur["n"] += r["n"]
+    if not per_acc:
+        return None
+
+    for k in FRKoreksi.objects.filter(
+        toko_id__in=toko_ids, tanggal__in=tanggal, kolom__in=("deposit", "withdrawal")
+    ).values("toko_id", "tanggal", "account", "kolom", "nilai"):
+        sel = per_acc.get((k["toko_id"], k["tanggal"], k["account"]))
+        if sel is None:
+            continue  # akun tak hadir di hari itu → koreksi diabaikan
+        cur = sel.get(k["kolom"])
+        sel[k["kolom"]] = {"v": k["nilai"], "n": cur["n"] if cur else 0}
+
+    per_hari = {}  # (toko_id, tanggal) → [dp_v, dp_n, wd_v, wd_n]
+    for (tid, tgl, _akun), sel in per_acc.items():
+        pos = per_hari.setdefault((tid, tgl), [DEC_NOL, 0, DEC_NOL, 0])
+        dp = sel.get("deposit")
+        if dp:
+            pos[0] += dp["v"]
+            pos[1] += dp["n"]
+        wd = sel.get("withdrawal")
+        if wd:
+            pos[2] += wd["v"]
+            pos[3] += wd["n"]
+    dp_v = dp_n = wd_v = wd_n = 0
+    for pos in per_hari.values():
+        dp_v += pos[0]
+        dp_n += pos[1]
+        wd_v += abs(pos[2])
+        wd_n += pos[3]
+    return {
+        "dp": {"n": dp_n, "v": dp_v},
+        "wd": {"n": wd_n, "v": wd_v},
+        "net": dp_v - wd_v,
+        "total_n": dp_n + wd_n,
+    }
+
+
+def _dashboard_semua(request):
+    """Dashboard mode "Semua Toko" (khusus admin) — potret gabungan batch
+    TERAKHIR masing-masing toko.
+
+    Tanggal batch antar toko boleh berbeda; tabel per-toko menampilkan tanggal
+    tiap baris apa adanya supaya angkanya tak salah dibaca sebagai satu hari.
+    Semua angka lewat query AGREGAT lintas toko — pola yang sama dengan
+    `toko_overview`, karena versi per-toko (24 toko × beberapa query) membuat
+    halaman ini tak terpakai di produksi.
+    """
+    from reconciliation.engine import pending_settlement_counts
+
+    tokos = list(tokos_for(request.user))
+    if not tokos:
+        return render(request, "web/no_toko.html")
+
+    terakhir, semua_batch = _batch_terakhir_per_toko(tokos)
+    last_ids = [b["id"] for b in terakhir.values()]
+
+    # --- strip Panel + kartu Metode: satu agregat, queryset yang sama ---
+    panel_sum = metode = None
+    panel_per_toko = {}
+    if last_ids:
+        pr = Transaction.objects.filter(
+            consumed_by_batch_id__in=last_ids, source_type__key="panel",
+            is_duplicate=False,
+        )
+        dp_n = wd_n = 0
+        dp_v = wd_v = 0.0
+        for r in (
+            pr.filter(jenis__in=["depo", "wd"])
+            .values("toko_id", "jenis")
+            .annotate(n=Count("id"), v=Sum("amount"))
+        ):
+            nilai = float(r["v"] or 0)
+            slot = panel_per_toko.setdefault(r["toko_id"], {"dp": 0.0, "wd": 0.0,
+                                                            "dp_n": 0, "wd_n": 0})
+            if r["jenis"] == "depo":
+                dp_n += r["n"]
+                dp_v += nilai
+                slot["dp"] += nilai
+                slot["dp_n"] += r["n"]
+            else:
+                wd_n += r["n"]
+                wd_v += nilai
+                slot["wd"] += nilai
+                slot["wd_n"] += r["n"]
+        panel_sum = {
+            "dp": {"n": dp_n, "v": dp_v},
+            "wd": {"n": wd_n, "v": wd_v},
+            "total_n": dp_n + wd_n,
+            "net": dp_v - wd_v,
+        }
+        metode = breakdown_metode(pr)
+
+    # --- strip Bracket: hari-terakhir tiap toko, dua query untuk semua toko ---
+    bracket_sum = _ringkas_bracket_gabungan(
+        {(tid, b["recon_date"]) for tid, b in terakhir.items()}
+    )
+
+    # --- antrean tinjau & menunggu settlement: satu agregat masing-masing ---
+    tinjau_per_toko = dict(
+        MatchResult.objects.filter(
+            run__batch__toko__in=tokos, bucket=MatchResult.Bucket.TINJAU
+        ).values_list("run__batch__toko").annotate(n=Count("id"))
+    )
+    pending_per_toko = pending_settlement_counts(tokos)
+
+    # --- kalender 14 hari: status TERBURUK lintas toko per hari ---
+    today = date_cls.today()
+    tgl_terakhir = max((b["recon_date"] for b in semua_batch), default=None)
+    anchor = max(tgl_terakhir, today) if tgl_terakhir else today
+    per_hari = {}
+    for b in semua_batch:
+        per_hari.setdefault(b["recon_date"], []).append(b)
+    urut_st = {"": 0, "ok": 1, "warn": 2, "bad": 3}
+    kal = []
+    for i in range(13, -1, -1):
+        d = anchor - timedelta(days=i)
+        harian = per_hari.get(d, [])
+        st = ""
+        for b in harian:
+            kandidat = _status_selisih(_selisih_summary(b["summary"]))
+            if urut_st[kandidat] > urut_st[st]:
+                st = kandidat
+        kal.append({"d": d, "st": st, "n": len(harian), "today": d == today})
+
+    # --- tabel per toko ---
+    rows, selisih_total = [], 0
+    for t in tokos:
+        b = terakhir.get(t.id)
+        sel = _selisih_summary(b["summary"]) if b else 0
+        selisih_total += sel
+        ps = panel_per_toko.get(t.id) or {}
+        rows.append({
+            "toko": t, "last": b, "selisih": sel,
+            "status": _status_selisih(sel) if b else "",
+            "dp": ps.get("dp", 0.0), "wd": ps.get("wd", 0.0),
+            "tinjau": tinjau_per_toko.get(t.id, 0),
+            "pending": pending_per_toko.get(t.id, 0),
+            "has_batch": b is not None,
+        })
+    rows.sort(key=lambda r: (r["has_batch"], r["selisih"]), reverse=True)
+
+    return render(request, "web/dashboard_all.html", {
+        "semua_toko_page": True,
+        "rows": rows,
+        "n_toko": len(tokos),
+        "n_rekon": len(terakhir),
+        "selisih_total": selisih_total,
+        "pending_total": sum(pending_per_toko.values()),
+        "panel_sum": panel_sum,
+        "metode": metode,
+        "bracket_sum": bracket_sum,
+        "kal": kal,
+        "tgl_terakhir": tgl_terakhir,
+    })
+
+
 @login_required
 def dashboard(request):
     """Kokpit harian auditor: status hari, kalender rekon, tren selisih,
@@ -187,6 +417,8 @@ def dashboard(request):
 
     from reconciliation.engine import check_completeness, pending_settlement_count
 
+    if mode_semua(request):
+        return _dashboard_semua(request)
     active = _active_toko(request)
     if active is None:
         return render(request, "web/no_toko.html")
