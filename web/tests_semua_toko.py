@@ -96,3 +96,135 @@ class SetTokoSentinelTests(TestCase):
         self._login("admin")
         self.client.post(reverse("set_toko"), {"toko_id": "semua"})
         self.assertIsNone(self.client.session.get("active_toko_id"))
+
+
+class ContextProcessorTests(TestCase):
+    """Flag `semua_toko` + `active_toko` fallback + badge tinjau lintas toko."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.slo = Toko.objects.get(key="slo")
+
+    def _ctx(self, path="/upload/"):
+        return self.client.get(path).context
+
+    def test_admin_mode_semua_flag_hidup(self):
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+        _sesi_semua(self.client)
+        ctx = self._ctx()
+        self.assertTrue(ctx["semua_toko"])
+        self.assertIsInstance(ctx["active_toko"], Toko)
+
+    def test_tanpa_sentinel_flag_mati(self):
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+        self.assertFalse(self._ctx()["semua_toko"])
+
+    def test_non_admin_sentinel_tak_mengaktifkan_mode(self):
+        """Sesi warisan (mis. user diturunkan perannya) tak boleh membuka mode."""
+        u = User.objects.create_user("a2", password="pw12345", role="auditor")
+        u.allowed_tokos.set([self.lbs])
+        self.client.login(username="a2", password="pw12345")
+        _sesi_semua(self.client)
+        ctx = self._ctx()
+        self.assertFalse(ctx["semua_toko"])
+        self.assertEqual(ctx["active_toko"], self.lbs)
+
+
+class BadgeTinjauLintasTokoTests(TestCase):
+    """`pending_review_count` ikut mode: lintas toko saat Semua Toko."""
+
+    def setUp(self):
+        from reconciliation.models import ToleranceProfile
+
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+        self.tol = ToleranceProfile.objects.get(name="Default")
+        self.lbs = Toko.objects.get(key="lbs")
+        self.slo = Toko.objects.get(key="slo")
+
+    def _tinjau(self, toko, n):
+        from reconciliation.models import MatchResult, MatchRun, ReconBatch
+
+        import datetime
+
+        b = ReconBatch.objects.create(toko=toko, tolerance=self.tol,
+                                      recon_date=datetime.date(2026, 7, 1))
+        run = MatchRun.objects.create(
+            batch=b, tolerance=self.tol,
+            relation=MatchRun.Relation.PANEL_BANK, summary={})
+        for _ in range(n):
+            MatchResult.objects.create(run=run, bucket=MatchResult.Bucket.TINJAU,
+                                       reason_code="name_partial")
+
+    def test_mode_semua_menjumlah_semua_toko(self):
+        self._tinjau(self.lbs, 2)
+        self._tinjau(self.slo, 3)
+        _sesi_semua(self.client)
+        self.assertEqual(self.client.get("/upload/").context["pending_review_count"], 5)
+
+    def test_mode_tunggal_hanya_toko_aktif(self):
+        self._tinjau(self.lbs, 2)
+        self._tinjau(self.slo, 3)
+        s = self.client.session
+        s["active_toko_id"] = self.lbs.id
+        s.save()
+        self.assertEqual(self.client.get("/upload/").context["pending_review_count"], 2)
+
+    def test_badge_lintas_toko_tetap_satu_query(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        from web.context_processors import toko as cp_toko
+
+        self._tinjau(self.lbs, 1)
+        _sesi_semua(self.client)
+        req = self.client.get("/upload/").wsgi_request
+        with CaptureQueriesContext(connection) as ctx:
+            hasil = cp_toko(req)
+        self.assertEqual(hasil["pending_review_count"], 1)
+        # 1 query daftar toko + 1 query hitung tinjau — bukan per toko.
+        self.assertEqual(len(ctx), 2, [q["sql"][:90] for q in ctx])
+
+
+class PickerDanBarTests(TestCase):
+    """Opsi "Semua Toko" di picker + bar penjelas di halaman single-toko."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+
+    def _admin(self):
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+
+    def test_admin_melihat_opsi_semua_toko(self):
+        self._admin()
+        self.assertContains(self.client.get("/upload/"), 'value="all"')
+
+    def test_non_admin_tak_melihat_opsi(self):
+        u = User.objects.create_user("a2", password="pw12345", role="auditor")
+        u.allowed_tokos.set([self.lbs])
+        self.client.login(username="a2", password="pw12345")
+        self.assertNotContains(self.client.get("/upload/"), 'value="all"')
+
+    def test_opsi_terpilih_saat_mode_aktif(self):
+        self._admin()
+        _sesi_semua(self.client)
+        self.assertContains(self.client.get("/upload/"), '<option value="all" selected>')
+
+    def test_bar_muncul_di_halaman_single_toko(self):
+        self._admin()
+        _sesi_semua(self.client)
+        r = self.client.get("/upload/")
+        self.assertContains(r, "Mode Semua Toko aktif")
+        # bar menyebut toko fallback yang sedang ditampilkan
+        self.assertContains(r, f"<b>{_active_name(r)}</b>")
+
+    def test_bar_tak_muncul_saat_mode_mati(self):
+        self._admin()
+        self.assertNotContains(self.client.get("/upload/"), "Mode Semua Toko aktif")
+
+
+def _active_name(response):
+    return response.context["active_toko"].name

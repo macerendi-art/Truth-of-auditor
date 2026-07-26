@@ -326,6 +326,13 @@ table.selectable td.rng-sel{background:rgba(37,99,235,.14);box-shadow:inset 0 0 
 .msg.error{background:var(--bad-bg);color:#b42222;border-color:#f4c6c6}
 .msg.warning{background:var(--warn-bg);color:#8a5208;border-color:#f0d9a8}
 .msg.info{background:var(--info-bg);color:var(--info);border-color:#d4d9f5}
+/* Bar mode Semua Toko: halaman single-toko yang belum punya tampilan gabungan
+   harus jujur menyebut toko mana yang sedang ditampilkan. */
+.mode-bar{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:10px 14px;border-radius:11px;
+  background:var(--info-bg);border:1px solid #d4d9f5;color:var(--info);font-size:13px;line-height:1.5}
+.mode-bar svg{width:16px;height:16px;flex-shrink:0}
+.mode-bar b{font-weight:700}
+.mode-bar .hint{color:var(--muted);font-weight:500}
 
 /* ---- EMPTY STATE & SKELETON ---- */
 .empty{text-align:center;padding:48px 20px}
@@ -552,23 +559,34 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
       <span class="lbl">Toko</span>
       <input type="hidden" name="next" value="{{ request.path }}">
       <select name="toko_id" onchange="this.form.submit()">
+        {% if is_admin_user %}<option value="all" {% if semua_toko %}selected{% endif %}>Semua Toko</option>{% endif %}
         {% if tokos_grouped|length > 1 %}
         {% for label, grup in tokos_grouped %}
         <optgroup label="{{ label }}">
           {% for t in grup %}
-          <option value="{{ t.id }}" {% if active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
+          <option value="{{ t.id }}" {% if not semua_toko and active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
           {% endfor %}
         </optgroup>
         {% endfor %}
         {% else %}
         {% for t in all_tokos %}
-        <option value="{{ t.id }}" {% if active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
+        <option value="{{ t.id }}" {% if not semua_toko and active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
         {% endfor %}
         {% endif %}
       </select>
     </form>
   </div>
   <div class="content {% block content_class %}{% endblock %}">
+    {% comment %}Bar penjelas mode Semua Toko. Muncul hanya di halaman yang BELUM punya
+       tampilan gabungan (view yang punya menandai dirinya lewat `semua_toko_page`) —
+       supaya angka di layar tak pernah salah dibaca sebagai total lintas toko.{% endcomment %}
+    {% if semua_toko and not semua_toko_page and active_toko %}
+    <div class="mode-bar" role="status">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+      <span>Mode Semua Toko aktif — halaman ini menampilkan <b>{{ active_toko.name }}</b>.
+        <span class="hint">Angkanya milik satu toko itu saja, bukan gabungan. Gabungan lintas toko tersedia di Dashboard dan Hutang/Piutang.</span></span>
+    </div>
+    {% endif %}
     {% if messages %}{% for m in messages %}<div class="msg {{ m.tags }}">{{ m }}</div>{% endfor %}{% endif %}
     {% block content %}{% endblock %}
   </div>
@@ -621,17 +639,18 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
         {% csrf_token %}
         <input type="hidden" name="next" value="{{ request.path }}">
         <select name="toko_id" onchange="this.form.submit()">
+          {% if is_admin_user %}<option value="all" {% if semua_toko %}selected{% endif %}>Semua Toko</option>{% endif %}
           {% if tokos_grouped|length > 1 %}
           {% for label, grup in tokos_grouped %}
           <optgroup label="{{ label }}">
             {% for t in grup %}
-            <option value="{{ t.id }}" {% if active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
+            <option value="{{ t.id }}" {% if not semua_toko and active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
             {% endfor %}
           </optgroup>
           {% endfor %}
           {% else %}
           {% for t in all_tokos %}
-          <option value="{{ t.id }}" {% if active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
+          <option value="{{ t.id }}" {% if not semua_toko and active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
           {% endfor %}
           {% endif %}
         </select>
