@@ -191,8 +191,7 @@
           </select>
         </td>
         <td>
-          <input type="password" name="password" class="f" autocomplete="off"
-                 placeholder="{% if p.needs_password %}terkunci — isi password{% else %}—{% endif %}">
+          <input type="password" name="password" class="f{% if not p.needs_password %} muted{% endif %}" autocomplete="off"{% if not p.needs_password %} readonly tabindex="-1" style="opacity:.45;pointer-events:none;background:var(--panel-2)"{% endif %} placeholder="{% if p.needs_password %}terkunci — isi password{% else %}—{% endif %}">
           {% if p.needs_password %}<div class="faint" style="font-size:12px;margin-top:4px">🔒 terkunci — isi password</div>{% endif %}
         </td>
       </tr>
