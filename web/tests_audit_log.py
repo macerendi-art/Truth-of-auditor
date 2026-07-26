@@ -75,7 +75,8 @@ class PencatatanAksiKelolaTests(TestCase):
         self.assertEqual(self._log("hapus_user").objek, "tgt4")
 
     def test_buat_toko(self):
-        self.client.post(reverse("kelola_toko"), {"action": "create", "kode": "ZZQ"})
+        self.client.post(reverse("kelola_toko"), {
+            "action": "create", "kode": "ZZQ", "panel": Toko.PANEL_NEXUS})
         self.assertEqual(self._log("buat_toko").objek, "ZZQ")
 
     def test_toggle_toko(self):

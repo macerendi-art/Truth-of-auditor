@@ -17,6 +17,14 @@
     <input type="hidden" name="action" value="create">
     <div class="field"><label>Kode toko (mis. AHK)</label>
       <input name="kode" maxlength="30" placeholder="KODE" required style="text-transform:uppercase"></div>
+    <div class="field"><label>Panel</label>
+      <select name="panel" required>
+        <option value="">— pilih panel —</option>
+        {% for val, label in panel_choices %}
+        <option value="{{ val }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
     <button class="btn primary" type="submit">+ Tambah</button>
   </form>
 </div>
@@ -25,11 +33,25 @@
   <div class="card-head"><h3>Daftar Toko <span class="faint" style="font-weight:500">({{ tokos|length }})</span></h3></div>
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>Kode</th><th class="num">Transaksi</th><th class="num">Upload</th><th>Status</th><th class="r">Aksi</th></tr></thead>
+    <thead><tr><th>Kode</th><th>Panel</th><th class="num">Transaksi</th><th class="num">Upload</th><th>Status</th><th class="r">Aksi</th></tr></thead>
     <tbody>
     {% for t in tokos %}
       <tr>
         <td><span style="display:flex;align-items:center;gap:9px"><span class="avatar-ini">{{ t.name|first|upper }}</span><b>{{ t.name }}</b></span></td>
+        <td>
+          <span class="badge {% if t.panel == 'vigor' %}warn{% elif t.panel == 'tm_gaming' %}src{% else %}muted{% endif %} plain">{{ t.get_panel_display }}</span>
+          <form method="post" style="display:inline-flex;gap:4px;align-items:center;margin-top:4px">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="panel">
+            <input type="hidden" name="toko_id" value="{{ t.id }}">
+            <select name="panel" aria-label="Ubah panel {{ t.name }}" style="font-size:12px">
+              {% for val, label in panel_choices %}
+              <option value="{{ val }}" {% if t.panel == val %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn sm" type="submit">Simpan</button>
+          </form>
+        </td>
         <td class="num mono">{{ t.n_tx|intcomma }}</td>
         <td class="num mono">{{ t.n_up|intcomma }}</td>
         <td>{% if t.is_active %}<span class="badge ok">aktif</span>{% else %}<span class="badge bad">nonaktif</span>{% endif %}</td>
@@ -55,7 +77,7 @@
           </form>
         </td>
       </tr>
-    {% empty %}<tr><td colspan="5" class="cell-empty">Belum ada toko.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="6" class="cell-empty">Belum ada toko.</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>

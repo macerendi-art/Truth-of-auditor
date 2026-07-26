@@ -30,9 +30,22 @@ class SourceType(models.Model):
 class Toko(TimeStampedModel):
     """Merek/situs operator (mis. LBS, SLO). Data dipisah per toko."""
 
+    PANEL_NEXUS, PANEL_VIGOR, PANEL_TMG = "nexus", "vigor", "tm_gaming"
+    PANEL_CHOICES = [
+        (PANEL_NEXUS, "Nexus"),
+        (PANEL_VIGOR, "Vigor"),
+        (PANEL_TMG, "TM Gaming"),
+    ]
+
     key = models.SlugField(max_length=30, unique=True)
     name = models.CharField(max_length=100)
     is_active = models.BooleanField(default=True)
+    # Engine panel milik client (Nexus/Vigor/TM Gaming) — METADATA MURNI:
+    # dipakai utk pengelompokan picker toko, badge kelola, dan audit trail
+    # supaya troubleshooting per-panel instan. TIDAK PERNAH dibaca oleh
+    # reconciliation/engine.py — salah label di sini tak pernah mengubah
+    # hasil pencocokan (matching tetap data-driven).
+    panel = models.CharField(max_length=20, choices=PANEL_CHOICES, default=PANEL_NEXUS)
 
     def __str__(self):
         return self.name

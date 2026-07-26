@@ -548,9 +548,19 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
       <span class="lbl">Toko</span>
       <input type="hidden" name="next" value="{{ request.path }}">
       <select name="toko_id" onchange="this.form.submit()">
+        {% if tokos_grouped|length > 1 %}
+        {% for label, grup in tokos_grouped %}
+        <optgroup label="{{ label }}">
+          {% for t in grup %}
+          <option value="{{ t.id }}" {% if active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+        {% else %}
         {% for t in all_tokos %}
         <option value="{{ t.id }}" {% if active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
         {% endfor %}
+        {% endif %}
       </select>
     </form>
   </div>
@@ -607,9 +617,19 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
         {% csrf_token %}
         <input type="hidden" name="next" value="{{ request.path }}">
         <select name="toko_id" onchange="this.form.submit()">
+          {% if tokos_grouped|length > 1 %}
+          {% for label, grup in tokos_grouped %}
+          <optgroup label="{{ label }}">
+            {% for t in grup %}
+            <option value="{{ t.id }}" {% if active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endfor %}
+          {% else %}
           {% for t in all_tokos %}
           <option value="{{ t.id }}" {% if active_toko and t.id == active_toko.id %}selected{% endif %}>{{ t.name }}</option>
           {% endfor %}
+          {% endif %}
         </select>
       </form>
       <small>Ganti di sini bila belum sesuai.</small>

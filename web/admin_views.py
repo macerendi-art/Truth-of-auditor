@@ -46,6 +46,7 @@ def _locking_batches(upload):
 
 
 VALID_ROLES = ("admin", "supervisor", "auditor")
+PANEL_LABELS = dict(Toko.PANEL_CHOICES)
 
 
 def _password_error(password, user=None):
@@ -62,13 +63,16 @@ def _password_error(password, user=None):
 def kelola_toko(request):
     if request.method == "POST" and request.POST.get("action") == "create":
         kode = request.POST.get("kode", "").strip()
+        panel = request.POST.get("panel", "")
         if not kode or not kode.isalnum():
             messages.error(request, "Kode toko wajib huruf/angka tanpa spasi.")
         elif Toko.objects.filter(key=kode.lower()).exists():
             messages.error(request, f"Toko {kode.upper()} sudah ada.")
+        elif panel not in PANEL_LABELS:
+            messages.error(request, "Pilih panel toko (Nexus/Vigor/TM Gaming).")
         else:
-            t = Toko.objects.create(key=kode.lower(), name=kode.upper())
-            catat(request.user, "buat_toko", t.name, toko=t)
+            t = Toko.objects.create(key=kode.lower(), name=kode.upper(), panel=panel)
+            catat(request.user, "buat_toko", t.name, toko=t, panel=PANEL_LABELS[panel])
             messages.success(request, f"Toko {kode.upper()} ditambahkan.")
         return redirect("kelola_toko")
     if request.method == "POST" and request.POST.get("action") == "toggle":
@@ -101,6 +105,25 @@ def kelola_toko(request):
                   toko=t, nama_lama=nama_lama, nama_baru=nama_baru)
             messages.success(request, f"Nama toko {nama_lama} diganti menjadi {nama_baru}.")
         return redirect("kelola_toko")
+    if request.method == "POST" and request.POST.get("action") == "panel":
+        tid = request.POST.get("toko_id", "")
+        panel_baru = request.POST.get("panel", "")
+        if not tid.isdecimal():
+            messages.error(request, "ID toko tidak valid.")
+            return redirect("kelola_toko")
+        if panel_baru not in PANEL_LABELS:
+            messages.error(request, "Pilih panel toko (Nexus/Vigor/TM Gaming).")
+            return redirect("kelola_toko")
+        t = get_object_or_404(Toko, pk=tid)
+        panel_lama = t.panel
+        if panel_baru != panel_lama:
+            t.panel = panel_baru
+            t.save(update_fields=["panel"])
+            catat(request.user, "ubah_panel_toko",
+                  f"{t.name}: {PANEL_LABELS[panel_lama]} → {PANEL_LABELS[panel_baru]}", toko=t)
+            messages.success(
+                request, f"Panel toko {t.name} diganti menjadi {PANEL_LABELS[panel_baru]}.")
+        return redirect("kelola_toko")
     # Jumlah per toko WAJIB dua query agregat terpisah — annotate ganda
     # Count(distinct) atas dua relasi meledakkan join Toko×Transaction×Upload
     # (497rb tx × ratusan upload): terukur 29,8 dtk di prod = halaman putih.
@@ -110,7 +133,8 @@ def kelola_toko(request):
     for t in tokos:
         t.n_tx = tx_counts.get(t.id, 0)
         t.n_up = up_counts.get(t.id, 0)
-    return render(request, "web/kelola/toko.html", {"tokos": tokos})
+    return render(request, "web/kelola/toko.html",
+                  {"tokos": tokos, "panel_choices": Toko.PANEL_CHOICES})
 
 
 @admin_required

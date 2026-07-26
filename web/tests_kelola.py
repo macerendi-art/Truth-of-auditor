@@ -35,10 +35,16 @@ class KelolaTokoCrudTests(TestCase):
         self.client.login(username="adm", password="pw123456")
 
     def test_create_toko(self):
-        self.client.post(reverse("kelola_toko"), {"action": "create", "kode": "zz9"})
+        self.client.post(reverse("kelola_toko"), {
+            "action": "create", "kode": "zz9", "panel": Toko.PANEL_NEXUS})
         t = Toko.objects.get(key="zz9")
         self.assertEqual(t.name, "ZZ9")
         self.assertTrue(t.is_active)
+        self.assertEqual(t.panel, Toko.PANEL_NEXUS)
+
+    def test_create_toko_tanpa_panel_ditolak(self):
+        self.client.post(reverse("kelola_toko"), {"action": "create", "kode": "zz8"})
+        self.assertFalse(Toko.objects.filter(key="zz8").exists())
 
     def test_create_duplikat_ditolak(self):
         self.client.post(reverse("kelola_toko"), {"action": "create", "kode": "LBS"})

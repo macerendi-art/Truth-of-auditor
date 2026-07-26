@@ -2,11 +2,16 @@ from datetime import datetime
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 
+from core.models import AuditLog
 from sources import services
 from sources.models import SourceType, Toko
 from transactions.models import Transaction
+
+User = get_user_model()
 
 
 class TokoModelTests(TestCase):
@@ -57,3 +62,83 @@ class IngestTokoTests(TestCase):
         self.assertEqual(up.provider, "Nexus")
         self.assertEqual(created, 1)
         self.assertEqual(Transaction.objects.get().toko, self.lbs)
+
+
+class TokoPanelMigrationTests(TestCase):
+    """Hasil migrasi data 0012: pengelompokan panel per key toko seed."""
+
+    def test_slo_jadi_vigor(self):
+        self.assertEqual(Toko.objects.get(key="slo").panel, Toko.PANEL_VIGOR)
+
+    def test_w25_dan_g25_jadi_tm_gaming(self):
+        self.assertEqual(Toko.objects.get(key="w25").panel, Toko.PANEL_TMG)
+        self.assertEqual(Toko.objects.get(key="g25").panel, Toko.PANEL_TMG)
+
+    def test_toko_lain_tetap_nexus(self):
+        self.assertEqual(Toko.objects.get(key="lbs").panel, Toko.PANEL_NEXUS)
+        self.assertEqual(Toko.objects.get(key="ahk").panel, Toko.PANEL_NEXUS)
+
+
+class TokoPanelModelTests(TestCase):
+    """Default field panel = nexus utk toko baru yang tak menyebut panel."""
+
+    def test_default_panel_nexus(self):
+        t = Toko.objects.create(key="qqq", name="QQQ")
+        self.assertEqual(t.panel, Toko.PANEL_NEXUS)
+
+
+class TokoPanelKelolaViewTests(TestCase):
+    """Panel wajib diisi saat buat toko + aksi ubah panel per baris — via kelola_toko."""
+
+    def setUp(self):
+        User.objects.create_user("adm_panel", password="pw123456", role="admin")
+        self.client.login(username="adm_panel", password="pw123456")
+
+    def test_create_dengan_panel_valid_tersimpan_dan_terlog(self):
+        self.client.post(reverse("kelola_toko"), {
+            "action": "create", "kode": "zzp", "panel": Toko.PANEL_VIGOR,
+        })
+        t = Toko.objects.get(key="zzp")
+        self.assertEqual(t.panel, Toko.PANEL_VIGOR)
+        log = AuditLog.objects.filter(aksi="buat_toko", objek="ZZP").latest("id")
+        self.assertEqual(log.toko_id, t.id)
+
+    def test_create_tanpa_panel_ditolak_tak_buat_toko(self):
+        n = Toko.objects.count()
+        r = self.client.post(reverse("kelola_toko"), {
+            "action": "create", "kode": "zzb",
+        }, follow=True)
+        self.assertEqual(Toko.objects.count(), n)
+        self.assertFalse(Toko.objects.filter(key="zzb").exists())
+        self.assertContains(r, "Pilih panel toko")
+
+    def test_create_panel_bogus_ditolak_tak_buat_toko(self):
+        n = Toko.objects.count()
+        self.client.post(reverse("kelola_toko"), {
+            "action": "create", "kode": "zzc", "panel": "galaksi",
+        })
+        self.assertEqual(Toko.objects.count(), n)
+        self.assertFalse(Toko.objects.filter(key="zzc").exists())
+
+    def test_action_panel_mengubah_dan_terlog(self):
+        t = Toko.objects.get(key="lbs")
+        self.assertEqual(t.panel, Toko.PANEL_NEXUS)
+        self.client.post(reverse("kelola_toko"), {
+            "action": "panel", "toko_id": t.id, "panel": Toko.PANEL_VIGOR,
+        })
+        t.refresh_from_db()
+        self.assertEqual(t.panel, Toko.PANEL_VIGOR)
+        log = AuditLog.objects.filter(aksi="ubah_panel_toko").latest("id")
+        self.assertIn("LBS", log.objek)
+        self.assertEqual(log.toko_id, t.id)
+
+    def test_action_panel_tanpa_perubahan_tak_menulis_audit(self):
+        t = Toko.objects.get(key="lbs")  # sudah nexus (default)
+        n_sebelum = AuditLog.objects.filter(aksi="ubah_panel_toko").count()
+        self.client.post(reverse("kelola_toko"), {
+            "action": "panel", "toko_id": t.id, "panel": Toko.PANEL_NEXUS,
+        })
+        t.refresh_from_db()
+        self.assertEqual(t.panel, Toko.PANEL_NEXUS)
+        self.assertEqual(
+            AuditLog.objects.filter(aksi="ubah_panel_toko").count(), n_sebelum)
