@@ -3,6 +3,7 @@
 Nominal dalam RUPIAH penuh (JANGAN x1000). File dari exporter non-standar -> dibaca
 lewat read_xlsx_rows yang sudah tahan-styles. Kolom bank format "KODE - NOREK - NAMA".
 """
+import re
 from decimal import Decimal
 
 from .base import (
@@ -14,6 +15,23 @@ from .base import (
     read_xlsx_rows,
     row_hash,
 )
+
+# Akun WD/DP situs sendiri (Vigor/TM Gaming) muncul di panel sebagai kode operator
+# "OTH" -- bank aslinya "tersembunyi" di ekor nama pemilik, mis.
+# "IGNATIUS IVAN / WITHDRAW BCA". Tanpa urai ini, chip filter Bank Title di
+# run-detail menumpuk >1000 baris jadi satu "OTH" generik tak berguna.
+_OTH_EMBED_RE = re.compile(r"/\s*(?:WITHDRAW|DEPOSIT)\s+([A-Z][A-Z0-9]+)\s*$", re.IGNORECASE)
+
+
+def resolve_oth_bank(code, name):
+    """Kode operator "OTH" -> bank asli hasil urai `name` ("... / WITHDRAW BCA" /
+    "... / DEPOSIT BCA" -> "BCA"). Kode selain "OTH" dikembalikan apa adanya
+    (fungsi ini murni penanganan kasus khusus OTH). Tanpa pola cocok -> "OTH"
+    dipertahankan (dipakai juga oleh command backfill_oth_bank, harus idempoten)."""
+    if (code or "").strip().upper() != "OTH":
+        return code
+    m = _OTH_EMBED_RE.search(str(name or ""))
+    return m.group(1).upper() if m else code
 
 
 class CORPanelBankParser(BaseParser):
@@ -36,11 +54,12 @@ class CORPanelBankParser(BaseParser):
                 player_raw, oper_raw = r.get("From Bank"), r.get("Destination Bank")
             pk_code, pk_acct, pk_name = parse_bank_triplet(player_raw)
             op_code, op_acct, op_name = parse_bank_triplet(oper_raw)
+            op_code_eff = resolve_oth_bank(op_code, op_name)
             occurred = parse_dt(r.get("Requested Date"))
             posted = parse_dt(r.get("Approved Date"))
             raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
             raw["Player Bank"] = f"{pk_code}|{pk_name}|{pk_acct}"
-            raw["Bank Title"] = f"{op_code}|{op_name}|{op_acct}"
+            raw["Bank Title"] = f"{op_code_eff}|{op_name}|{op_acct}"
             player_bank, bank_title = derive_bank_fields("panel", raw)
             row = {
                 "source_type": "panel",

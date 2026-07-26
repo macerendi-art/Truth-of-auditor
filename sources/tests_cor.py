@@ -1,12 +1,19 @@
 import os, tempfile
+from decimal import Decimal
+from io import StringIO
+
+from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 from openpyxl import Workbook
+from sources.models import SourceType, Toko, Upload
 from sources.parsers.base import parse_bank_triplet
 from sources.parsers.cor import CORPanelBankParser
 from sources.parsers.cor import CORPanelQRISParser
 from sources.parsers.cor import CORQRISGatewayParser
+from sources.parsers.cor import resolve_oth_bank
 from sources import services
 from transactions.models import Transaction
+from web.channels import kelas_metode
 
 class BankTripletTests(SimpleTestCase):
     def test_triplet_bank(self):
@@ -104,6 +111,194 @@ class CORPanelBankTests(SimpleTestCase):
             self.assertEqual(CORPanelBankParser().parse(path, flow="dp"), [])
         finally:
             os.remove(path)
+
+    def test_wd_oth_terurai_ke_bank_asli(self):
+        # Akun WD situs sendiri (Vigor/TM Gaming) berlabel "OTH" -> bank asli
+        # tersimpan di ekor nama ("... / WITHDRAW BCA"). Tanpa urai ini, chip
+        # filter Bank Title run-detail menumpuk 1212/1277 baris jadi 1 "OTH".
+        path = _xlsx([
+            self.HEADER,
+            ["1", "01 Jul 2026 23:57:08", "01 Jul 2026 23:56:43", "zhaa1234",
+             "OTH - 4840394374 - IGNATIUS IVAN / WITHDRAW BCA",
+             "DANA - 082112822248 - RUSMAN", "350000", "approved", "gacor25sub40"],
+        ])
+        try:
+            rows = CORPanelBankParser().parse(path, flow="wd")
+        finally:
+            os.remove(path)
+        r = rows[0]
+        self.assertEqual(r["bank_title"], "BCA")
+        self.assertEqual(r["raw"]["From Bank"],
+                          "OTH - 4840394374 - IGNATIUS IVAN / WITHDRAW BCA")  # raw asli utuh
+        self.assertEqual(r["raw"]["Bank Title"],
+                          "BCA|IGNATIUS IVAN / WITHDRAW BCA|4840394374")
+
+    def test_dp_oth_varian_deposit_terurai(self):
+        path = _xlsx([
+            self.HEADER,
+            ["1", "01 Jul 2026 23:52:18", "01 Jul 2026 23:50:06", "febri72",
+             "DANA - 081270670097 - FEBRIA MEGASARI",
+             "OTH - 1966367781 - SUPRIYADI / DEPOSIT BNI",
+             "200000", "approved", "gacor25sub59"],
+        ])
+        try:
+            rows = CORPanelBankParser().parse(path, flow="dp")
+        finally:
+            os.remove(path)
+        r = rows[0]
+        self.assertEqual(r["bank_title"], "BNI")
+        self.assertEqual(r["raw"]["Destination Bank"],
+                          "OTH - 1966367781 - SUPRIYADI / DEPOSIT BNI")
+
+    def test_oth_tanpa_pola_bank_tetap_oth(self):
+        path = _xlsx([
+            self.HEADER,
+            ["1", "01 Jul 2026 23:57:08", "01 Jul 2026 23:56:43", "zhaa1234",
+             "OTH - 4840394374 - NAMA TANPA POLA",
+             "DANA - 082112822248 - RUSMAN", "350000", "approved", "gacor25sub40"],
+        ])
+        try:
+            rows = CORPanelBankParser().parse(path, flow="wd")
+        finally:
+            os.remove(path)
+        self.assertEqual(rows[0]["bank_title"], "OTH")
+
+    def test_non_oth_tak_tersentuh(self):
+        # test_dp_rupiah_dan_bank_fields sudah menutupi jalur non-OTH biasa;
+        # ini menegaskan kode non-OTH lain (mis. "DANA") juga tak diutak-atik.
+        path = _xlsx([
+            self.HEADER,
+            ["1", "01 Jul 2026 23:57:08", "01 Jul 2026 23:56:43", "zhaa1234",
+             "DANA - 4840394374 - IGNATIUS IVAN / WITHDRAW BCA",
+             "DANA - 082112822248 - RUSMAN", "350000", "approved", "gacor25sub40"],
+        ])
+        try:
+            rows = CORPanelBankParser().parse(path, flow="wd")
+        finally:
+            os.remove(path)
+        self.assertEqual(rows[0]["bank_title"], "DANA")
+
+
+class ResolveOthBankTests(SimpleTestCase):
+    """Unit test `resolve_oth_bank` — dipakai parser & command backfill."""
+
+    def test_wd_bca(self):
+        self.assertEqual(
+            resolve_oth_bank("OTH", "IGNATIUS IVAN / WITHDRAW BCA"), "BCA")
+
+    def test_wd_bni(self):
+        self.assertEqual(
+            resolve_oth_bank("OTH", "SUPRIYADI / WITHDRAW BNI"), "BNI")
+
+    def test_wd_bri(self):
+        self.assertEqual(
+            resolve_oth_bank("OTH", "SUPARDI / WITHDRAW BRI"), "BRI")
+
+    def test_wd_bca_supardi(self):
+        self.assertEqual(
+            resolve_oth_bank("OTH", "SUPARDI / WITHDRAW BCA"), "BCA")
+
+    def test_deposit_varian(self):
+        self.assertEqual(
+            resolve_oth_bank("OTH", "BUDI / DEPOSIT MANDIRI"), "MANDIRI")
+
+    def test_non_oth_kembali_apa_adanya(self):
+        self.assertEqual(resolve_oth_bank("BCA", "APA SAJA / WITHDRAW BNI"), "BCA")
+        self.assertEqual(resolve_oth_bank("DANA", ""), "DANA")
+
+    def test_oth_tanpa_pola_tetap_oth(self):
+        self.assertEqual(resolve_oth_bank("OTH", "NAMA POLOS"), "OTH")
+        self.assertEqual(resolve_oth_bank("OTH", ""), "OTH")
+        self.assertEqual(resolve_oth_bank("OTH", None), "OTH")
+
+    def test_kode_kosong_atau_none(self):
+        self.assertEqual(resolve_oth_bank("", "APA SAJA"), "")
+        self.assertEqual(resolve_oth_bank(None, "APA SAJA"), None)
+
+
+class KelasMetodeOthPinTests(SimpleTestCase):
+    """Pin: "OTH" mentah sudah jatuh ke bucket "Bank" (fallback tanpa QR/NXPAY),
+    sama seperti kode bank asli hasil urai — jadi fix ini tak mengubah bucket
+    kartu dashboard "Metode Pembayaran", cuma memecah isi bucket Bank lebih rinci."""
+
+    def test_oth_dan_bca_sama_sama_bucket_bank(self):
+        self.assertEqual(kelas_metode("wd", "BCA"), "Bank")
+        self.assertEqual(kelas_metode("wd", "OTH"), "Bank")
+        self.assertEqual(kelas_metode("wd", "BCA"), kelas_metode("wd", "OTH"))
+
+
+class BackfillOthBankCommandTests(TestCase):
+    """Command idempoten: baris `panel` lama dengan bank_title=="OTH" diurai
+    ulang dari segmen tengah raw["Bank Title"] (nama), tanpa menyentuh raw."""
+
+    def setUp(self):
+        self.toko = Toko.objects.get(key="lbs")
+        self.toko_lain = Toko.objects.get(key="slo")
+        self.st_panel = SourceType.objects.get(key="panel")
+        self.up = Upload.objects.create(
+            source_type=self.st_panel, toko=self.toko, original_name="lama.xlsx")
+
+    def _buat_baris_oth(self, toko=None, upload=None, acct="4840394374",
+                         nama="IGNATIUS IVAN / WITHDRAW BCA", row_hash="backfill-oth-1"):
+        return Transaction.objects.create(
+            upload=upload or self.up, source_type=self.st_panel, toko=toko or self.toko,
+            jenis="wd", amount=Decimal("350000"), credit_delta=Decimal("350000"),
+            money_delta=Decimal("-350000"), ticket_no="", username="zhaa1234",
+            reference="", counterparty="RUSMAN", player_bank="DANA", bank_title="OTH",
+            raw={
+                "From Bank": f"OTH - {acct} - {nama}",
+                "Bank Title": f"OTH|{nama}|{acct}",
+            },
+            row_hash=row_hash,
+        )
+
+    def test_backfill_mengurai_oth_jadi_bank_asli(self):
+        tx = self._buat_baris_oth()
+        out = StringIO()
+        call_command("backfill_oth_bank", stdout=out)
+        tx.refresh_from_db()
+        self.assertEqual(tx.bank_title, "BCA")
+        self.assertEqual(tx.raw["From Bank"],
+                          "OTH - 4840394374 - IGNATIUS IVAN / WITHDRAW BCA")  # raw tak berubah
+        laporan = out.getvalue()
+        self.assertIn("diperiksa=1", laporan)
+        self.assertIn("diubah=1", laporan)
+        self.assertIn("dilewati=0", laporan)
+
+    def test_backfill_idempoten_jalan_dua_kali(self):
+        self._buat_baris_oth()
+        call_command("backfill_oth_bank")
+        out2 = StringIO()
+        call_command("backfill_oth_bank", stdout=out2)
+        self.assertIn("diubah=0", out2.getvalue())
+
+    def test_backfill_dry_run_tidak_menulis(self):
+        tx = self._buat_baris_oth()
+        out = StringIO()
+        call_command("backfill_oth_bank", "--dry-run", stdout=out)
+        tx.refresh_from_db()
+        self.assertEqual(tx.bank_title, "OTH")  # tak ditulis
+        self.assertIn("diubah=1", out.getvalue())  # tapi tetap dihitung/dilaporkan
+
+    def test_backfill_tanpa_pola_bank_dilewati(self):
+        tx = self._buat_baris_oth(nama="TANPA POLA BANK")
+        out = StringIO()
+        call_command("backfill_oth_bank", stdout=out)
+        tx.refresh_from_db()
+        self.assertEqual(tx.bank_title, "OTH")
+        self.assertIn("dilewati=1", out.getvalue())
+
+    def test_backfill_filter_toko(self):
+        up_lain = Upload.objects.create(
+            source_type=self.st_panel, toko=self.toko_lain, original_name="lain.xlsx")
+        tx_lbs = self._buat_baris_oth(row_hash="backfill-oth-lbs")
+        tx_lain = self._buat_baris_oth(
+            toko=self.toko_lain, upload=up_lain, row_hash="backfill-oth-lain")
+        call_command("backfill_oth_bank", "--toko", "lbs")
+        tx_lbs.refresh_from_db()
+        tx_lain.refresh_from_db()
+        self.assertEqual(tx_lbs.bank_title, "BCA")
+        self.assertEqual(tx_lain.bank_title, "OTH")  # toko lain tak tersentuh
 
 
 class CORPanelQRISTests(SimpleTestCase):
