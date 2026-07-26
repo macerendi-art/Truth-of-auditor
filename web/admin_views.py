@@ -22,6 +22,16 @@ from web.models import AllowedIP
 from web.views import _active_toko, _parse_date
 
 
+# Halaman admin di berkas ini BEBAS TOKO: isinya daftar user, daftar seluruh
+# toko, allowlist IP, dan log lintas-toko — tak satu pun angka di layar milik
+# toko aktif. Karena itu bar mode Semua Toko ("halaman ini menampilkan <toko>")
+# harus DIAM di sini: ia mengklaim atribusi yang tidak ada, dan di /kelola/toko/
+# malah bertolak belakang dengan tabelnya sendiri yang memuat semua toko.
+# `semua_toko_page` adalah penanda yang sama yang dipakai dashboard gabungan
+# (lihat app_base.html) — hanya menyembunyikan BAR, pemilih toko tetap ada.
+BEBAS_TOKO = {"semua_toko_page": True}
+
+
 def _batch_no(batch):
     """Nomor batch per-toko posisional (bukan pk) — konsisten dgn view lain."""
     return ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
@@ -137,7 +147,8 @@ def kelola_toko(request):
         t.n_tx = tx_counts.get(t.id, 0)
         t.n_up = up_counts.get(t.id, 0)
     return render(request, "web/kelola/toko.html",
-                  {"tokos": tokos, "panel_choices": Toko.PANEL_CHOICES})
+                  {"tokos": tokos, "panel_choices": Toko.PANEL_CHOICES,
+                   **BEBAS_TOKO})
 
 
 @admin_required
@@ -179,6 +190,7 @@ def kelola_user(request):
         "users": users,
         "tokos": Toko.objects.filter(is_active=True).order_by("name"),
         "roles": User.Role.choices,
+        **BEBAS_TOKO,
     })
 
 
@@ -244,6 +256,7 @@ def kelola_user_edit(request, pk):
         "tokos": Toko.objects.filter(is_active=True).order_by("name"),
         "roles": User.Role.choices,
         "target_toko_ids": set(target.allowed_tokos.values_list("id", flat=True)),
+        **BEBAS_TOKO,
     })
 
 
@@ -280,6 +293,7 @@ def kelola_log(request):
         "tokos": Toko.objects.order_by("name"),
         "f": {"q": q, "aksi": aksi, "user": user_id, "toko": toko_id,
               "from": request.GET.get("from", ""), "to": request.GET.get("to", "")},
+        **BEBAS_TOKO,
     })
 
 
@@ -479,4 +493,4 @@ def kelola_ip(request):
         messages.success(request, f"IP {cidr} ({label}) dihapus dari allowlist.")
         return redirect("kelola_ip")
     entries = AllowedIP.objects.select_related("dibuat_oleh").order_by("-aktif", "label")
-    return render(request, "web/kelola/ip.html", {"entries": entries})
+    return render(request, "web/kelola/ip.html", {"entries": entries, **BEBAS_TOKO})

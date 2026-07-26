@@ -255,8 +255,15 @@ class PickerDanBarTests(TestCase):
 
 
 class BarTulisTests(TestCase):
-    """Bar mode Semua Toko di halaman TULIS (/upload/, /rekonsiliasi/) memakai
-    copy bernada peringatan — taruhannya lebih tinggi daripada halaman baca."""
+    """Bar mode Semua Toko di halaman TULIS memakai copy bernada peringatan —
+    taruhannya lebih tinggi daripada halaman baca.
+
+    "Tulis" = halaman yang menyimpan sesuatu ATAS NAMA toko fallback: /upload/,
+    /rekonsiliasi/, dan dua halaman yang gampang terlewat karena tampak seperti
+    laporan — /rekap-bulanan/ (RekapManual + Penyebab Selisih) dan /bracket/
+    (overlay FRKoreksi). Salah baca toko di dua halaman terakhir menulis
+    koreksi angka ke toko yang salah tanpa jejak di layar.
+    """
 
     def setUp(self):
         self.lbs = Toko.objects.get(key="lbs")
@@ -265,7 +272,7 @@ class BarTulisTests(TestCase):
 
     def test_halaman_tulis_pakai_copy_peringatan(self):
         _sesi_semua(self.client)
-        for nama in ("upload", "reconcile"):
+        for nama in ("upload", "reconcile", "rekap_bulanan", "bracket_breakdown"):
             with self.subTest(rute=nama):
                 r = self.client.get(reverse(nama))
                 self.assertContains(
@@ -289,6 +296,41 @@ class BarTulisTests(TestCase):
         self.assertNotContains(
             r, "pekerjaan di halaman ini tercatat atas nama toko")
         self.assertNotContains(r, "mode-bar warn")
+
+
+class BarAdminGlobalTests(TestCase):
+    """Halaman admin global tak punya data ber-toko sama sekali (daftar user,
+    daftar toko, allowlist IP, log lintas-toko). Bar "halaman ini menampilkan
+    <toko>" di sana MENYESATKAN: ia mengklaim atribusi yang tak ada, dan di
+    /kelola/toko/ ia bahkan bertolak belakang dengan tabel di bawahnya yang
+    memuat SEMUA toko. Halaman-halaman itu menandai diri `semua_toko_page`."""
+
+    def setUp(self):
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+        _sesi_semua(self.client)
+
+    def test_halaman_admin_global_tak_memunculkan_bar(self):
+        for nama in ("kelola_toko", "kelola_user", "kelola_ip", "kelola_log"):
+            with self.subTest(rute=nama):
+                r = self.client.get(reverse(nama))
+                self.assertEqual(r.status_code, 200)
+                self.assertTrue(r.context["semua_toko_page"])
+                self.assertNotContains(r, "Mode Semua Toko aktif")
+
+    def test_halaman_edit_user_juga_bebas_toko(self):
+        target = User.objects.create_user("u2", password="pw12345", role="auditor")
+        r = self.client.get(reverse("kelola_user_edit", args=[target.pk]))
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.context["semua_toko_page"])
+        self.assertNotContains(r, "Mode Semua Toko aktif")
+
+    def test_picker_toko_tetap_ada(self):
+        """Menandai halaman sbg `semua_toko_page` hanya menyembunyikan BAR —
+        pemilih toko di sidebar wajib tetap ada supaya admin bisa keluar dari
+        mode Semua Toko dari halaman mana pun."""
+        r = self.client.get(reverse("kelola_user"))
+        self.assertContains(r, '<option value="all" selected>')
 
 
 def _active_name(response):

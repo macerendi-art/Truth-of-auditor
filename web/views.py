@@ -1705,6 +1705,10 @@ def bracket_breakdown(request):
     return render(request, "web/breakdown_bracket.html", {
         "data": data, "dari": dari, "sampai": sampai, "tanggal": dari,
         "latest": latest, "koreksi_on": koreksi_on,
+        # Halaman TULIS meski tampak laporan: sel koreksi menulis FRKoreksi ke
+        # toko fallback. Bar mode Semua Toko harus bernada peringatan, sama
+        # seperti /upload/ dan /rekonsiliasi/.
+        "semua_toko_tulis": mode_semua(request),
         "prev_dari": dari - timedelta(days=span),
         "prev_sampai": sampai - timedelta(days=span),
         "next_dari": dari + timedelta(days=span),
@@ -2138,6 +2142,9 @@ def rekap_bulanan_page(request):
         # top-level) — jangan disamakan dgn `row.petunjuk` (hint per baris di
         # registry FIELDS) supaya template tak pernah tertukar keduanya.
         "peringatan_kunci": data["petunjuk"],
+        # Halaman TULIS: edit manual + Penyebab Selisih menyimpan RekapManual
+        # atas nama toko fallback → bar mode Semua Toko bernada peringatan.
+        "semua_toko_tulis": mode_semua(request),
     })
 
 
