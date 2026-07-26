@@ -582,8 +582,16 @@ class DashboardSemuaQueryTests(_DataGabungan):
         self.client.get(reverse("dashboard"))  # warm-up cache ContentType dkk.
         with CaptureQueriesContext(connection) as before:
             self.assertEqual(self.client.get(reverse("dashboard")).status_code, 200)
+        # Setiap toko baru harus punya batch + baris panel + baris bracket
+        # nyata (bukan toko kosong) — toko kosong tak menggerakkan jalur
+        # data (panel_sum/bracket_sum/tinjau/pending), jadi tak bisa
+        # mendeteksi regresi loop-query-per-toko di jalur itu.
         for i in range(6):
-            Toko.objects.create(key=f"qq{i}", name=f"QQ{i}", panel="nexus")
+            t = Toko.objects.create(key=f"qq{i}", name=f"QQ{i}", panel="nexus")
+            d = date(2026, 7, 5)
+            b = self.batch(t, d)
+            self.panel_tx(t, b, "depo", "10000")
+            self.fr(t, d, "BCA X", "Deposit", "10000")
         with CaptureQueriesContext(connection) as after:
             self.assertEqual(self.client.get(reverse("dashboard")).status_code, 200)
         self.assertEqual(
