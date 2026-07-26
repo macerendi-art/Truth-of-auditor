@@ -424,7 +424,20 @@ class PanelBracketMatcher:
             pd = _tanggal_baris(p)
             if pd is None:
                 continue
+            pt = (p.ticket_no or "").strip()
             for b in bidx.get(kp, []):
+                # Ticket yang MEMBANTAH mengalahkan kunci pemain. Di rezim
+                # campuran (minoritas baris ber-ticket) bisa muncul pasangan yang
+                # KEDUA sisinya ber-ticket dan tickets-nya BEDA — itu bukti keras
+                # dua transaksi berlainan. Aturan anchor: username adalah anchor
+                # UTAMA, tapi kunci transaksi yang eksplisit membantah harus
+                # membatalkan pasangan (biarkan keduanya jadi no_bracket/no_panel)
+                # ketimbang dikalahkan kebetulan username+nominal sama. Satu sisi
+                # kosong = tak ada bantahan (kasus COR normal); ticket IDENTIK
+                # justru konfirmasi.
+                bt = (b.ticket_no or "").strip()
+                if pt and bt and pt != bt:
+                    continue
                 bd = _tanggal_baris(b)
                 if bd is None:
                     continue
@@ -1175,13 +1188,21 @@ def _mode_ticket_warning(runs):
     return None
 
 
-def _panel_bracket_total_warning(toko, date_from, date_to, include):
+def _panel_bracket_total_warning(toko, date_from, date_to, include, exclude_tx_ids=None):
     """Cross-check AGREGAT Panel vs Bracket per arah (untuk toko tanpa join ticket,
-    mis. COR): bila total DP/WD beda > 2% padahal kedua sisi ada, beri peringatan."""
+    mis. COR): bila total DP/WD beda > 2% padahal kedua sisi ada, beri peringatan.
+
+    `exclude_tx_ids` = himpunan yang sama dengan `_aggregate_batch` (carried +
+    susulan). Baris carried masih AKTIF saat peringatan dihitung (konsumsi baru
+    terjadi di langkah terakhir run) sementara pasangan Bracket-nya sudah
+    dikonsumsi di batch asalnya — tanpa pengecualian ini dua hari yang
+    rekonsiliasinya sempurna tetap dituduh "total beda" di hari kedua."""
     if not _inc(include, "bracket"):
         return None
     base = _date_filter(_active(_toko_filter(
         Transaction.objects.filter(is_duplicate=False), toko)), date_from, date_to)
+    if exclude_tx_ids:
+        base = base.exclude(id__in=exclude_tx_ids)
 
     def tot(key, jenis):
         return float(base.filter(source_type__key=key, jenis=jenis)
@@ -1231,7 +1252,7 @@ def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None, excl
     for w in (
         _bracket_overlap_warning(runs),
         _mode_ticket_warning(runs),
-        _panel_bracket_total_warning(toko, date_from, date_to, include),
+        _panel_bracket_total_warning(toko, date_from, date_to, include, exclude_tx_ids),
     ):
         if w:
             warnings.append(w)

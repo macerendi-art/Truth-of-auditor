@@ -18,7 +18,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
-from reconciliation.engine import run_batch, run_match
+from reconciliation.engine import run_batch, run_batches_auto, run_match
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ToleranceProfile
 from sources.models import SourceType, Toko, Upload
 from transactions.models import Transaction
@@ -525,6 +525,83 @@ class PanelBracketModeRasioTests(_Base):
         self.assertEqual(self._run().summary["mode"], "ticket")
 
 
+class PanelBracketTicketKontradiksiTests(_Base):
+    """Di mode username, ticket yang MEMBANTAH mengalahkan kunci pemain.
+
+    Mode username hanya menjangkarkan username; ticket ikut menumpang. Tapi
+    dalam rezim campuran (minoritas baris ber-ticket) bisa muncul pasangan yang
+    KEDUA sisinya punya ticket dan tickets-nya BERBEDA — itu bukti keras dua
+    transaksi berlainan. Aturan anchor: kunci transaksi yang membantah harus
+    membatalkan pasangan, bukan dikalahkan kebetulan username+nominal sama.
+    """
+
+    def _isi_agar_mode_username(self, mulai=0):
+        """3 pasang panel/FR tanpa ticket → rasio ber-ticket < 50% (mode username)."""
+        for i, u in enumerate(("siti99", "andi", "rina7")):
+            amt = f"{50000 + mulai + i}"
+            self.tx(self.panel, self.up_p, amt, datetime(2026, 7, 1, 10),
+                    username=u)
+            self.tx(self.bracket, self.up_b, amt, datetime(2026, 7, 1, 10, 5),
+                    username=u)
+
+    def test_ticket_berbeda_membatalkan_pasangan_username(self):
+        p = self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 9),
+                    ticket="D999999", username="budi88")
+        b = self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 9, 5),
+                    ticket="D111111", username="budi88")
+        self._isi_agar_mode_username()
+        run = self._run()
+        self.assertEqual(run.summary["mode"], "username")
+        self.assertEqual(run.summary["cocok"], 3)   # hanya 3 pasang pengisi
+        kiri = MatchResult.objects.get(left=p)
+        self.assertIsNone(kiri.right_id)
+        self.assertEqual(kiri.reason_code, "no_bracket")
+        kanan = MatchResult.objects.get(right=b)
+        self.assertIsNone(kanan.left_id)
+        self.assertEqual(kanan.reason_code, "no_panel")
+
+    def test_ticket_sama_tetap_dipasangkan(self):
+        """Ticket identik = KONFIRMASI, bukan bantahan — pasangan tetap terbentuk."""
+        p = self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 9),
+                    ticket="D999999", username="budi88")
+        b = self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 9, 5),
+                    ticket="D999999", username="budi88")
+        self._isi_agar_mode_username()
+        run = self._run()
+        self.assertEqual(run.summary["mode"], "username")
+        res = MatchResult.objects.get(left=p)
+        self.assertEqual(res.right_id, b.id)
+        self.assertEqual(res.bucket, MatchResult.Bucket.COCOK)
+
+    def test_ticket_hanya_di_sisi_bracket_tetap_dipasangkan(self):
+        """Kasus COR normal (cermin dari sisi panel): satu sisi kosong = tak ada
+        bantahan, jadi username tetap menjangkarkan pasangan."""
+        p = self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 9),
+                    username="budi88")
+        b = self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 9, 5),
+                    ticket="D999999", username="budi88")
+        self._isi_agar_mode_username()
+        self.assertEqual(self._run().summary["mode"], "username")
+        res = MatchResult.objects.get(left=p)
+        self.assertEqual(res.right_id, b.id)
+        self.assertEqual(res.bucket, MatchResult.Bucket.COCOK)
+
+    def test_ticket_membantah_tak_menghalangi_kandidat_lain(self):
+        """Baris FR ber-ticket yang membantah tidak boleh 'memakan' baris panel:
+        kandidat FR lain dengan username+nominal sama tetap boleh dipasangkan."""
+        p = self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 9),
+                    ticket="D999999", username="budi88")
+        self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 9, 1),
+                ticket="D111111", username="budi88")           # membantah
+        sah = self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 9, 5),
+                      username="budi88")                        # tanpa ticket → sah
+        self._isi_agar_mode_username()
+        self.assertEqual(self._run().summary["mode"], "username")
+        res = MatchResult.objects.get(left=p)
+        self.assertEqual(res.right_id, sah.id)
+        self.assertEqual(res.bucket, MatchResult.Bucket.COCOK)
+
+
 class PanelBracketPeringatanPopulasiTests(_Base):
     """Peringatan batch untuk populasi yang TIDAK ternilai relasi ini."""
 
@@ -634,3 +711,45 @@ class PanelBracketModeDiUITests(_Base):
         self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 10, 5),
                 ticket="D111111", username="budi88")
         self.assertNotContains(self._batch_html(), "join username+nominal")
+
+
+class PanelBracketPeringatanTotalCarriedTests(_Base):
+    """Peringatan agregat "total beda" hanya boleh menilai baris SEGAR batch ini.
+
+    Baris kredit yang menunggu settlement (carried) nilainya sudah tercatat di
+    batch ASALnya — persis alasan `_aggregate_batch` mengecualikannya. Tanpa
+    pengecualian yang sama, dua hari yang rekonsiliasinya SEMPURNA tetap
+    meneriakkan "Panel↔Bracket DP total beda" di hari kedua: baris panel hari-1
+    masih aktif (menunggu mutasi), sedangkan pasangan FR-nya sudah dikonsumsi.
+    """
+
+    def _pasangan(self, hari, amount, username):
+        self.tx(self.panel, self.up_p, amount, datetime(2026, 7, hari, 10),
+                username=username)
+        self.tx(self.bracket, self.up_b, amount, datetime(2026, 7, hari, 10, 5),
+                username=username)
+
+    def _batch_tanggal(self, hasil, hari):
+        return next(b for b in hasil["batches"] if b.recon_date == date(2026, 7, hari))
+
+    def test_baris_carried_tak_memicu_peringatan_total(self):
+        # Tanpa mutasi bank: baris panel hari-1 jadi no_money → carried ke hari-2.
+        self._pasangan(1, "150000", "budi88")
+        self._pasangan(2, "88000", "siti99")
+        hasil = run_batches_auto(self.toko, self.tol)
+        self.assertTrue(hasil["ok"], hasil.get("violations"))
+        b2 = self._batch_tanggal(hasil, 2)
+        joined = " ".join(b2.summary.get("warnings", []))
+        self.assertNotIn("total beda", joined)
+
+    def test_total_benar_benar_beda_tetap_diperingatkan(self):
+        """Penjaga positif-benar: file FR yang memang kurang tetap diteriakkan."""
+        self._pasangan(1, "150000", "budi88")
+        self.tx(self.panel, self.up_p, "88000", datetime(2026, 7, 2, 10),
+                username="siti99")
+        self.tx(self.bracket, self.up_b, "20000", datetime(2026, 7, 2, 10, 5),
+                username="siti99")
+        hasil = run_batches_auto(self.toko, self.tol)
+        self.assertTrue(hasil["ok"], hasil.get("violations"))
+        joined = " ".join(self._batch_tanggal(hasil, 2).summary.get("warnings", []))
+        self.assertIn("total beda", joined)
