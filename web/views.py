@@ -15,6 +15,7 @@ from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max
 from django.db.models.fields.json import KeyTextTransform
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.defaultfilters import date as date_filter
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.html import format_html, format_html_join
@@ -50,6 +51,7 @@ from web.breakdown import (
     _norm_akun,
     _slug_kategori,
     ringkas_bracket_hari,
+    ringkas_bracket_rentang,
 )
 from web.channels import breakdown_metode
 from web.forms import GantiPasswordForm
@@ -429,6 +431,19 @@ def dashboard(request):
     active = _active_toko(request)
     if active is None:
         return render(request, "web/no_toko.html")
+
+    # --- filter tanggal (?dari=&sampai=) — tanpa parameter = perilaku lama:
+    # potret batch TERAKHIR. Ladder resolusi tanggal sama dengan /rekening/
+    # dan /bracket/ (satu sisi kosong = 1 hari, terbalik = ditukar).
+    f_dari = _parse_date(request.GET.get("dari", ""))
+    f_sampai = _parse_date(request.GET.get("sampai", ""))
+    mode_filter = f_dari is not None or f_sampai is not None
+    if mode_filter:
+        f_sampai = f_sampai or f_dari
+        f_dari = f_dari or f_sampai
+        if f_dari > f_sampai:
+            f_dari, f_sampai = f_sampai, f_dari
+
     tx = Transaction.objects.filter(toko=active)
     uploads = Upload.objects.filter(toko=active)
     runs = MatchRun.objects.filter(batch__toko=active)
@@ -448,9 +463,13 @@ def dashboard(request):
     def selisih(b):
         return _selisih_summary(b.summary)
 
-    # --- kalender 14 hari terakhir (anchor: recon terakhir atau hari ini) ---
+    # --- kalender 14 hari terakhir (anchor: recon terakhir atau hari ini;
+    # mode filter: 14 hari terakhir jendela dipilih) ---
     today = date_cls.today()
-    anchor = max(batches[-1].recon_date, today) if batches else today
+    if mode_filter:
+        anchor = f_sampai
+    else:
+        anchor = max(batches[-1].recon_date, today) if batches else today
     kal = []
     for i in range(13, -1, -1):
         d = anchor - timedelta(days=i)
@@ -465,9 +484,15 @@ def dashboard(request):
             "no": (ReconBatch.objects.filter(toko=active, id__lte=b.id).count() if b else None),
         })
 
-    # --- tren selisih 30 hari kalender terakhir (bar DP/WD + garis total) ---
-    tren_cutoff = anchor - timedelta(days=29)
-    tren_src = [b for b in batches if b.recon_date and b.recon_date >= tren_cutoff]
+    # --- tren selisih 30 hari kalender terakhir (bar DP/WD + garis total);
+    # mode filter: seluruh batch dalam jendela dipilih ---
+    if mode_filter:
+        rentang = [b for b in batches if f_dari <= b.recon_date <= f_sampai]
+        tren_src = rentang
+    else:
+        rentang = None
+        tren_cutoff = anchor - timedelta(days=29)
+        tren_src = [b for b in batches if b.recon_date and b.recon_date >= tren_cutoff]
     mx = max((selisih(b) for b in tren_src), default=0) or 1
     tren = []
     for b in tren_src:
@@ -481,7 +506,14 @@ def dashboard(request):
         })
 
     # --- kartu status ---
-    last = batches[-1] if batches else None
+    # mode filter: "last" = batch TERAKHIR dalam jendela; kartu berbasis batch
+    # (panel/metode/uang periksa/selisih) beralih ke agregat seluruh jendela.
+    if mode_filter:
+        last = rentang[-1] if rentang else None
+        batch_tampil = rentang
+    else:
+        last = batches[-1] if batches else None
+        batch_tampil = [last] if last else []
 
     # --- ringkasan panel (trx & nilai DP/WD) batch terakhir ---
     # consumed_by_batch=last: baris panel yang terkunci ke batch itulah potret
@@ -489,9 +521,10 @@ def dashboard(request):
     # summary["dp"]["panel"].
     panel_sum = None
     metode = None
-    if last is not None:
+    if batch_tampil:
         _pr = Transaction.objects.filter(
-            consumed_by_batch=last, source_type__key="panel", is_duplicate=False,
+            consumed_by_batch_id__in=[b.id for b in batch_tampil],
+            source_type__key="panel", is_duplicate=False,
         )
         _agg = {
             r["jenis"]: r for r in _pr.filter(jenis__in=["depo", "wd"])
@@ -515,19 +548,54 @@ def dashboard(request):
     # Versi ringan (bukan bracket_breakdown penuh — _saldo_carry terlalu berat
     # utk render dashboard); tetap tie-out persis lewat overlay FRKoreksi yang sama.
     bracket_sum = None
-    if last is not None and last.recon_date is not None:
+    if mode_filter:
+        # kartu FR mengikuti jendela filter apa adanya — baris bracket hidup
+        # terlepas dari batch, jadi tetap informatif meski jendela tanpa batch.
+        bracket_sum = ringkas_bracket_rentang(active, f_dari, f_sampai)
+    elif last is not None and last.recon_date is not None:
         bracket_sum = ringkas_bracket_hari(active, last.recon_date)
 
     last_no = total_b if last else None
-    last_sel = selisih(last) if last else 0
+    last_sel = sum(selisih(b) for b in batch_tampil)
     pending = pending_settlement_count(active)
     um_d = {}
-    if last is not None:
-        um = (last.summary or {}).get("unmatched_money") or {}
+    if len(batch_tampil) == 1:
+        um = (batch_tampil[0].summary or {}).get("unmatched_money") or {}
         um_d = um.get("d") or {}
+    elif batch_tampil:
+        # rentang multi-batch: total D lintas batch jendela (baris uang milik
+        # tepat satu batch — dikonsumsi saat run — jadi jumlah tak dobel).
+        um_d = {"n": sum(
+            (((b.summary or {}).get("unmatched_money") or {}).get("d") or {}).get("n") or 0
+            for b in batch_tampil
+        )}
 
     comp = check_completeness(active)
-    next_date = (last.recon_date + timedelta(days=1)) if last else today
+    # "rekonsiliasi berikutnya" selalu live — mengacu batch terakhir toko,
+    # bukan batch terakhir jendela filter.
+    terakhir_semua = batches[-1] if batches else None
+    next_date = (terakhir_semua.recon_date + timedelta(days=1)) if terakhir_semua else today
+
+    # tabel "Rekonsiliasi Terkini": mode filter menampilkan run milik jendela
+    runs_tampil = runs.select_related("batch").order_by("-id")
+    if mode_filter:
+        runs_tampil = runs_tampil.filter(
+            batch__recon_date__gte=f_dari, batch__recon_date__lte=f_sampai
+        )
+
+    # label periode utk judul kartu (ikut locale, mis. "12 Jul – 23 Jul 2026")
+    label_periode = None
+    if mode_filter:
+        if f_dari == f_sampai:
+            label_periode = date_filter(f_dari, "j M Y")
+        elif f_dari.year != f_sampai.year:
+            label_periode = f"{date_filter(f_dari, 'j M Y')} – {date_filter(f_sampai, 'j M Y')}"
+        else:
+            label_periode = f"{date_filter(f_dari, 'j M')} – {date_filter(f_sampai, 'j M Y')}"
+    # prefill bar filter: mode default = tanggal batch terakhir (menekan
+    # Terapkan mereproduksi tampilan yang sedang terlihat)
+    bar_dari = f_dari if mode_filter else ((last.recon_date if last else None) or today)
+    bar_sampai = f_sampai if mode_filter else bar_dari
 
     ctx = {
         "active_toko": active,
@@ -536,7 +604,7 @@ def dashboard(request):
         "run_total": runs.count(),
         "by_source": by_source,
         "uploads": uploads.select_related("source_type").order_by("-id")[:6],
-        "runs": runs.select_related("batch").order_by("-id")[:6],
+        "runs": runs_tampil[:6],
         "kal": kal,
         "tren": tren,
         "last": last, "last_no": last_no, "last_sel": last_sel,
@@ -547,6 +615,11 @@ def dashboard(request):
         "um_d": um_d,
         "comp": comp,
         "next_date": next_date,
+        "mode_filter": mode_filter,
+        "f_dari": f_dari, "f_sampai": f_sampai,
+        "n_batch": len(batch_tampil),
+        "label_periode": label_periode,
+        "bar_dari": bar_dari, "bar_sampai": bar_sampai,
     }
     return render(request, "web/dashboard.html", ctx)
 

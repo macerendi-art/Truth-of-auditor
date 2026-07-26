@@ -408,3 +408,58 @@ def ringkas_bracket_hari(toko, tanggal, dengan_koreksi=True):
         "net": dp_v - wd_v,
         "total_n": dp_n + wd_n,
     }
+
+
+def ringkas_bracket_rentang(toko, dari, sampai):
+    """Ringkasan bracket RENTANG untuk kartu dashboard mode filter tanggal.
+
+    `dari == sampai` → delegasi ke `ringkas_bracket_hari` (dengan overlay
+    `FRKoreksi`) — sama dengan halaman /bracket/ 1-hari yang jadi tujuan
+    kliknya. Rentang > 1 hari → agregat mentah TANPA overlay, mengikuti
+    aturan `bracket_breakdown` mode rentang (koreksi hanya berlaku 1-hari),
+    supaya kartu tie out persis dengan `total["deposit"/"withdraw"/"trx"]`
+    halaman rentangnya. `withdraw` di-abs PER AKUN (bukan global) — persis
+    cara `bracket_breakdown` menjumlah lintas akun.
+
+    Satu query grouped `(Bank, Kategori)`; bentuk hasil sama dengan
+    `ringkas_bracket_hari`, atau None bila tak ada baris bracket in-range.
+    """
+    if dari > sampai:
+        dari, sampai = sampai, dari
+    if dari == sampai:
+        return ringkas_bracket_hari(toko, dari)
+    rows = list(
+        Transaction.objects.filter(
+            toko=toko, source_type__key="bracket",
+            posted_date__range=(dari, sampai),
+        )
+        .annotate(
+            fr_bank=KeyTextTransform("Bank", "raw"),
+            fr_kategori=KeyTextTransform("Kategori", "raw"),
+        )
+        .values("fr_bank", "fr_kategori")
+        .annotate(v=Sum("money_delta"), n=Count("id"))
+    )
+    if not rows:
+        return None
+
+    dp_v = NOL
+    dp_n = wd_n = 0
+    wd_per_akun = {}  # account_norm → Σ delta withdrawal (abs belakangan)
+    for r in rows:
+        slug = _slug_kategori(r["fr_kategori"])
+        if slug == "deposit":
+            dp_v += r["v"] or NOL
+            dp_n += r["n"]
+        elif slug == "withdrawal":
+            akun = _norm_akun(r["fr_bank"])
+            wd_per_akun[akun] = wd_per_akun.get(akun, NOL) + (r["v"] or NOL)
+            wd_n += r["n"]
+    wd_v = sum((abs(v) for v in wd_per_akun.values()), NOL)
+
+    return {
+        "dp": {"n": dp_n, "v": dp_v},
+        "wd": {"n": wd_n, "v": wd_v},
+        "net": dp_v - wd_v,
+        "total_n": dp_n + wd_n,
+    }

@@ -14,16 +14,31 @@
   </div>
 </div>
 
+{# ---- FILTER TANGGAL (default = potret rekon terakhir) ---- #}
+<div class="card reveal" style="margin-bottom:16px">
+  <form method="get" class="row">
+    <div class="field"><label>Dari</label><input type="date" name="dari" value="{{ bar_dari|date:'Y-m-d' }}"></div>
+    <div class="field"><label>Sampai</label><input type="date" name="sampai" value="{{ bar_sampai|date:'Y-m-d' }}"></div>
+    <button class="btn primary" type="submit">Terapkan</button>
+    {% if mode_filter %}<a class="btn" href="{% url 'dashboard' %}">Terbaru ↺</a>{% endif %}
+    <span class="spacer"></span>
+    <span class="faint" style="font-size:12px">{% if mode_filter %}menampilkan {{ n_batch }} batch · {{ label_periode }}{% else %}tanpa filter — potret rekon terakhir{% endif %}</span>
+  </form>
+</div>
+
 {# ---- KARTU STATUS ---- #}
 <div class="grid cols-4 reveal">
-  {% if last %}<a class="card stat click" href="{% url 'batch_detail' last.pk %}">{% else %}<div class="card stat">{% endif %}
-    <div class="top"><span class="k">Rekon terakhir</span>
+  {% if n_batch == 1 %}<a class="card stat click" href="{% url 'batch_detail' last.pk %}">{% else %}<div class="card stat">{% endif %}
+    <div class="top"><span class="k">{% if mode_filter %}Rekon dipilih{% else %}Rekon terakhir{% endif %}</span>
       <span class="ic {% if last_sel == 0 %}g{% elif last_sel < 10000000 %}a{% else %}r{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg></span></div>
-    {% if last %}
+    {% if mode_filter %}
+    {% if f_dari == f_sampai %}<div class="v">{{ f_dari|date:"d M" }}</div>{% else %}<div class="v">{{ f_dari|date:"j/n" }} – {{ f_sampai|date:"j/n" }}</div>{% endif %}
+    <div class="sub">{% if n_batch %}{{ n_batch }} batch · selisih {{ last_sel|floatformat:0|intcomma }}{% else %}tidak ada batch dalam rentang{% endif %}</div>
+    {% elif last %}
     <div class="v">{{ last.recon_date|date:"d M" }}</div>
     <div class="sub">Batch #{{ last_no }} · selisih {{ last_sel|floatformat:0|intcomma }}</div>
-    </a>
-    {% else %}<div class="v faint">—</div><div class="sub">belum ada rekonsiliasi</div></div>{% endif %}
+    {% else %}<div class="v faint">—</div><div class="sub">belum ada rekonsiliasi</div>{% endif %}
+  {% if n_batch == 1 %}</a>{% else %}</div>{% endif %}
   <a class="card stat click" href="{% url 'transactions' %}?carry=1">
     <div class="top"><span class="k">Menunggu settlement</span>
       <span class="ic a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span></div>
@@ -36,20 +51,27 @@
     <div class="v {% if pending_review_count %}a{% else %}g{% endif %}">{{ pending_review_count|intcomma }}</div>
     <div class="sub">hasil perlu mata manusia</div>
   </a>
-  {% if last %}<a class="card stat click" href="{% url 'batch_uang' last.pk %}?k=d">{% else %}<div class="card stat">{% endif %}
+  {% if n_batch == 1 %}<a class="card stat click" href="{% url 'batch_uang' last.pk %}?k=d">{% else %}<div class="card stat">{% endif %}
     <div class="top"><span class="k">Uang periksa (D)</span>
       <span class="ic {% if um_d.n %}r{% else %}g{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span></div>
     <div class="v {% if um_d.n %}r{% else %}g{% endif %}">{{ um_d.n|default:0|intcomma }}</div>
-    <div class="sub">{% if last %}uang tanpa catatan panel →{% else %}—{% endif %}</div>
-  {% if last %}</a>{% else %}</div>{% endif %}
+    <div class="sub">{% if n_batch == 1 %}uang tanpa catatan panel →{% elif n_batch %}total D di {{ n_batch }} batch rentang{% else %}—{% endif %}</div>
+  {% if n_batch == 1 %}</a>{% else %}</div>{% endif %}
 </div>
+
+{# ---- MODE FILTER TANPA BATCH: kabari, jangan biarkan halaman "kosong tanpa alasan" ---- #}
+{% if mode_filter and n_batch == 0 %}
+<div class="card reveal" style="margin-top:16px">
+  <p class="faint" style="margin:0">Tidak ada batch rekonsiliasi dalam rentang <b>{{ label_periode }}</b> — angka panel &amp; metode kosong. Kartu Bracket tetap tampil bila ada baris FR pada rentang ini.</p>
+</div>
+{% endif %}
 
 {# ---- RINGKASAN PANEL (trx & nilai DP/WD batch terakhir) ---- #}
 {# CSS .pstrip* kanonik ada di web/templates/web/app_base.html (dipakai juga dashboard_all.html). #}
 {% if panel_sum %}
 <div class="card reveal pstrip" style="margin-top:16px">
-  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Panel — {{ last.recon_date|date:"d M Y" }}</h3>
-    <span class="faint" style="font-size:11.5px">baris panel yang terkunci di batch #{{ last_no }}</span></div>
+  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Panel — {% if mode_filter %}{{ label_periode }}{% else %}{{ last.recon_date|date:"d M Y" }}{% endif %}</h3>
+    <span class="faint" style="font-size:11.5px">{% if mode_filter %}baris panel terkunci di {{ n_batch }} batch dalam rentang{% else %}baris panel yang terkunci di batch #{{ last_no }}{% endif %}</span></div>
   <div class="pstrip-grid">
     <div class="ps"><span class="ps-k dp">Deposit</span>
       <span class="ps-n">{{ panel_sum.dp.n|intcomma }} <small>trx</small></span>
@@ -78,9 +100,9 @@
 .bstrip .bs.tot{background:linear-gradient(135deg,rgba(37,99,235,.07),rgba(34,211,238,.07))}
 @media (max-width:700px){.bstrip-grid{grid-template-columns:1fr}}
 </style>
-<a class="card reveal bstrip click" href="{% url 'bracket_breakdown' %}?date={{ last.recon_date|date:'Y-m-d' }}" style="margin-top:16px">
-  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Bracket — {{ last.recon_date|date:"j M Y" }}</h3>
-    <span class="faint" style="font-size:11.5px">acuan baris FR/Bracket pada tanggal batch</span></div>
+<a class="card reveal bstrip click" href="{% if mode_filter %}{% url 'bracket_breakdown' %}?dari={{ f_dari|date:'Y-m-d' }}&amp;sampai={{ f_sampai|date:'Y-m-d' }}{% else %}{% url 'bracket_breakdown' %}?date={{ last.recon_date|date:'Y-m-d' }}{% endif %}" style="margin-top:16px">
+  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Bracket — {% if mode_filter %}{{ label_periode }}{% else %}{{ last.recon_date|date:"j M Y" }}{% endif %}</h3>
+    <span class="faint" style="font-size:11.5px">{% if mode_filter %}acuan baris FR/Bracket dalam rentang dipilih{% else %}acuan baris FR/Bracket pada tanggal batch{% endif %}</span></div>
   <div class="bstrip-grid">
     <div class="bs"><span class="bs-k dp">Deposit</span>
       <span class="bs-n">{{ bracket_sum.dp.n|intcomma }} <small>trx</small></span>
@@ -99,8 +121,8 @@
 {# CSS .mtd* kanonik ada di web/templates/web/app_base.html (dipakai juga dashboard_all.html). #}
 {% if metode %}
 <div class="card reveal mtd" style="margin-top:16px">
-  <div class="h-row" style="margin-bottom:10px"><h3>Metode Pembayaran — {{ last.recon_date|date:"d M Y" }}</h3>
-    <span class="faint" style="font-size:11.5px">acuan Bank Title panel · batch #{{ last_no }}</span></div>
+  <div class="h-row" style="margin-bottom:10px"><h3>Metode Pembayaran — {% if mode_filter %}{{ label_periode }}{% else %}{{ last.recon_date|date:"d M Y" }}{% endif %}</h3>
+    <span class="faint" style="font-size:11.5px">{% if mode_filter %}acuan Bank Title panel · {{ n_batch }} batch{% else %}acuan Bank Title panel · batch #{{ last_no }}{% endif %}</span></div>
   <div class="mtd-grid">
     <div class="mt"><span class="mt-k dp">Deposit</span>
       {% for r in metode.dp %}
@@ -138,12 +160,12 @@
     </div>
   </div>
   <div class="card reveal">
-    <div class="h-row"><h3>Tren selisih — 30 hari</h3>
+    <div class="h-row"><h3>{% if mode_filter %}Tren selisih — rentang dipilih{% else %}Tren selisih — 30 hari{% endif %}</h3>
       <span class="faint" style="font-size:11.5px"><span style="color:var(--brand)">■</span> DP · <span style="color:var(--warn)">■</span> WD · <span style="color:var(--ink)">━</span> total</span></div>
     {% if tren %}
     <svg class="spark" viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="Tren selisih DP, WD, dan total per batch harian 30 hari"></svg>
     <div id="tren-data" hidden>{% for t in tren %}{{ t.b.recon_date|date:"d/m" }}|{{ t.hdp }}|{{ t.hwd }}|{{ t.dp|floatformat:0 }}|{{ t.wd|floatformat:0 }}|{{ t.htot }}|{{ t.tot|floatformat:0 }};{% endfor %}</div>
-    {% else %}<p class="faint" style="margin:0">Belum ada batch harian — jalankan rekonsiliasi pertama.</p>{% endif %}
+    {% else %}<p class="faint" style="margin:0">{% if mode_filter %}Tidak ada batch dalam rentang dipilih.{% else %}Belum ada batch harian — jalankan rekonsiliasi pertama.{% endif %}</p>{% endif %}
   </div>
 </div>
 
@@ -199,7 +221,7 @@
     </table>
   </div>
   <div class="card pad0 reveal">
-    <div class="card-head"><h3>Rekonsiliasi Terkini</h3><a class="sub" href="{% url 'reconcile' %}">semua →</a></div>
+    <div class="card-head"><h3>{% if mode_filter %}Rekonsiliasi dalam Rentang{% else %}Rekonsiliasi Terkini{% endif %}</h3><a class="sub" href="{% url 'reconcile' %}">semua →</a></div>
     <table>
       <thead><tr><th>Relasi</th><th class="r">Cocok</th><th class="r">Tinjau</th><th class="r">Tidak</th></tr></thead>
       <tbody>
