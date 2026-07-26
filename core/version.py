@@ -119,6 +119,34 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.11.0",
+        tanggal=_dt.date(2026, 7, 26),
+        nama="Tiga Panel & Rekap Bulanan",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "Rekonsiliasi Panel↔Bracket kini berjalan untuk brand berpanel Vigor/TM Gaming yang "
+            "ekspornya tanpa nomor tiket — baris dicocokkan lewat username + nominal. Uji dengan data "
+            "nyata COR: 10.069 dari 10.072 baris (99,97%) cocok otomatis. Halaman hasil menampilkan "
+            "mode pencocokan yang dipakai, jadi selalu jelas aturan mana yang bekerja.",
+            "Halaman baru Rekap Bulanan meniru rekap Excel yang selama ini disusun manual: empat seksi "
+            "(Net Profit, Sisa Dana Member, Total Dana Lebih Web, Selisih beserta penyebabnya), angka "
+            "otomatis dihitung dari data harian, dan isian manual bisa menimpa angka otomatis dengan "
+            "jejak siapa-dan-kapan.",
+            "Mode “Semua Toko” untuk admin: dashboard gabungan seluruh toko sekali pandang — kalender "
+            "status, ringkasan Panel/Bracket/Metode gabungan, dan tabel per toko — plus filter ceklis "
+            "beberapa toko sekaligus di halaman Hutang/Piutang.",
+            "Gembok alamat IP untuk akun auditor & supervisor: hanya alamat internet yang terdaftar "
+            "yang bisa masuk; admin tidak pernah terkunci; selama daftar kosong fitur ini tidur. "
+            "Dikelola dari halaman admin sendiri dan setiap penolakan tercatat di jejak audit.",
+            "Penarikan berlabel bank “OTH” pada brand Vigor/TM kini menampilkan bank aslinya (dibaca "
+            "dari teks transaksi), dan nama penerima transfer BRI yang tadinya kosong kini terisi — "
+            "berlaku juga untuk data yang sudah terlanjur diimpor, tanpa unggah ulang.",
+            "Setiap toko kini dikelompokkan menurut panelnya (Nexus / Vigor / TM Gaming) di pemilih "
+            "toko, dan jenis panel wajib dipilih saat membuat toko baru.",
+        ),
+    ),
+    Rilis(
         versi="1.10.0",
         tanggal=_dt.date(2026, 7, 25),
         nama="Transparansi Versi",

@@ -3,11 +3,21 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.10.0** · 16 rilis (1 besar, 10 fitur, 1 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.11.0** · 17 rilis (1 besar, 11 fitur, 1 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.11.0 — Tiga Panel & Rekap Bulanan
+*Rilis fitur · 26 Juli 2026*
+
+- Rekonsiliasi Panel↔Bracket kini berjalan untuk brand berpanel Vigor/TM Gaming yang ekspornya tanpa nomor tiket — baris dicocokkan lewat username + nominal. Uji dengan data nyata COR: 10.069 dari 10.072 baris (99,97%) cocok otomatis. Halaman hasil menampilkan mode pencocokan yang dipakai, jadi selalu jelas aturan mana yang bekerja.
+- Halaman baru Rekap Bulanan meniru rekap Excel yang selama ini disusun manual: empat seksi (Net Profit, Sisa Dana Member, Total Dana Lebih Web, Selisih beserta penyebabnya), angka otomatis dihitung dari data harian, dan isian manual bisa menimpa angka otomatis dengan jejak siapa-dan-kapan.
+- Mode “Semua Toko” untuk admin: dashboard gabungan seluruh toko sekali pandang — kalender status, ringkasan Panel/Bracket/Metode gabungan, dan tabel per toko — plus filter ceklis beberapa toko sekaligus di halaman Hutang/Piutang.
+- Gembok alamat IP untuk akun auditor & supervisor: hanya alamat internet yang terdaftar yang bisa masuk; admin tidak pernah terkunci; selama daftar kosong fitur ini tidur. Dikelola dari halaman admin sendiri dan setiap penolakan tercatat di jejak audit.
+- Penarikan berlabel bank “OTH” pada brand Vigor/TM kini menampilkan bank aslinya (dibaca dari teks transaksi), dan nama penerima transfer BRI yang tadinya kosong kini terisi — berlaku juga untuk data yang sudah terlanjur diimpor, tanpa unggah ulang.
+- Setiap toko kini dikelompokkan menurut panelnya (Nexus / Vigor / TM Gaming) di pemilih toko, dan jenis panel wajib dipilih saat membuat toko baru.
 
 ## v1.10.0 — Transparansi Versi
 *Rilis fitur · 25 Juli 2026*
