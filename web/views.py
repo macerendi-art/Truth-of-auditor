@@ -1914,9 +1914,15 @@ def rekap_edit_simpan(request):
               nilai_asli=str(nilai_asli) if nilai_asli is not None else "",
               nilai_baru=str(nilai))
 
+    # Sama `data` (fresh, dihitung ULANG sesudah simpan/hapus) yang memberi
+    # #rekap-sections di bawah juga memberi `petunjuk` (kunci carry) —
+    # dipakai lagi di sini supaya banner "belum dikunci" ikut oob-swap dan
+    # tak pernah basi menunggu reload manual (lihat _rekap_peringatan.html).
     data = hitung_rekap_bulanan(active, periode.year, periode.month)
     html = render_to_string("web/_rekap_sections.html",
                             {"data": data, "sel_bulan": sel_bulan}, request=request)
+    html += render_to_string("web/_rekap_peringatan.html",
+                            {"peringatan_kunci": data["petunjuk"], "oob": True}, request=request)
     html += '<div id="rekapPop" hx-swap-oob="innerHTML"></div>'
     return HttpResponse(html)
 
@@ -1934,7 +1940,14 @@ def rekap_penyebab_simpan(request):
     tujuan = f"{reverse('rekap_bulanan')}?bulan={sel_bulan}"
 
     if request.POST.get("hapus"):
-        obj = get_object_or_404(RekapPenyebab, pk=request.POST.get("id"), toko=active)
+        id_mentah = (request.POST.get("id") or "").strip()
+        if not id_mentah.isdecimal():
+            messages.error(request, "ID penyebab tidak valid.")
+            return redirect(tujuan)
+        # `periode` ikut jadi filter — tanpa ini, id dari bulan LAIN pada toko
+        # yang sama tetap ketemu & terhapus, dan audit trail mencatat periode
+        # yang salah (baris ini sebetulnya milik bulan lain).
+        obj = get_object_or_404(RekapPenyebab, pk=id_mentah, toko=active, periode=periode)
         label, nilai = obj.label, obj.nilai
         obj.delete()
         catat(request.user, "rekap_penyebab_hapus", f"{label} {sel_bulan}", toko=active,

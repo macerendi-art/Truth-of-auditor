@@ -306,6 +306,41 @@ class PenyebabTests(_RekapPageData):
         self.assertEqual(r.status_code, 404)
         self.assertTrue(RekapPenyebab.objects.filter(pk=p_lain.id).exists())
 
+    def test_hapus_id_bukan_angka_tak_500(self):
+        # Regresi: pk=request.POST.get("id") non-numerik ("abc") dulu lolos
+        # sampai ke get_object_or_404 → ValueError tak tertangkap → 500.
+        p = self.penyebab("Mistake credit", "500")
+        r = self.client.post(reverse("rekap_penyebab_simpan"), {
+            "bulan": SEL_BULAN, "hapus": "1", "id": "abc"})
+        self.assertNotEqual(r.status_code, 500)
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(RekapPenyebab.objects.filter(pk=p.id).exists())
+
+    def test_hapus_id_kosong_tak_500(self):
+        p = self.penyebab("Mistake credit", "500")
+        r = self.client.post(reverse("rekap_penyebab_simpan"), {
+            "bulan": SEL_BULAN, "hapus": "1"})
+        self.assertNotEqual(r.status_code, 500)
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(RekapPenyebab.objects.filter(pk=p.id).exists())
+
+    def test_hapus_id_negatif_tak_500(self):
+        p = self.penyebab("Mistake credit", "500")
+        r = self.client.post(reverse("rekap_penyebab_simpan"), {
+            "bulan": SEL_BULAN, "hapus": "1", "id": "-1"})
+        self.assertNotEqual(r.status_code, 500)
+        self.assertTrue(RekapPenyebab.objects.filter(pk=p.id).exists())
+
+    def test_hapus_bulan_lain_tak_terhapus(self):
+        # Regresi: lookup hapus dulu tak di-scope `periode` — id dari BULAN
+        # LAIN toko yang sama tetap ketemu & terhapus, audit salah periode.
+        p = self.penyebab("Mistake credit", "500", bulan=6)  # bulan A (Juni)
+        r = self.client.post(reverse("rekap_penyebab_simpan"), {
+            "bulan": SEL_BULAN, "hapus": "1", "id": p.id})  # bulan B (Juli, default)
+        self.assertEqual(r.status_code, 404)
+        self.assertTrue(RekapPenyebab.objects.filter(pk=p.id).exists())
+        self.assertFalse(AuditLog.objects.filter(aksi="rekap_penyebab_hapus").exists())
+
     def test_datalist_saran_tampil(self):
         isi = self._get().content.decode()
         for saran in ("Auto Pulsa", "Delete transaksi deposit", "Mistake credit",
@@ -335,6 +370,53 @@ class CarryLockUiTests(_RekapPageData):
     def test_tanpa_data_bulan_lalu_tak_ada_banner(self):
         isi = self._get().content.decode()
         self.assertNotIn("belum dikunci", isi)
+
+
+class BannerOobTests(_RekapPageData):
+    """Regresi: banner peringatan-kunci dulu berdiri DI LUAR #rekap-sections,
+    jadi swap oob balasan HTMX rekap_edit_simpan tak pernah menyentuhnya —
+    banner basi sampai reload manual meski carry terakhir baru saja dikunci."""
+
+    def _mei_berisi(self):
+        self.manual("bank_dp", "999", bulan=6)
+        self.manual("wl", "100", bulan=6)
+
+    def _oob_isi(self, html):
+        """Potongan HTML wrapper #rekap-peringatan — dibatasi posisi, bukan
+        regex bersarang div, karena isinya sendiri BOLEH memuat <div> lain
+        (mis. `msg warning`). Wrapper selalu langsung diikuti #rekapPop di
+        respons `rekap_edit_simpan` (lihat web/views.py)."""
+        awal = html.index('<div id="rekap-peringatan"')
+        akhir = html.index('<div id="rekapPop"', awal)
+        self.assertGreater(akhir, awal)
+        return html[awal:akhir]
+
+    def test_halaman_awal_tampilkan_banner(self):
+        self._mei_berisi()
+        isi = self._get().content.decode()
+        self.assertIn('id="rekap-peringatan"', isi)
+        self.assertIn("belum dikunci", isi)
+
+    def test_oob_banner_kosong_setelah_carry_terakhir_dikunci(self):
+        self._mei_berisi()
+        self._edit_post(field="wallet_balance_lalu", nilai="100")
+        self._edit_post(field="akuran_lalu", nilai="0")
+        r = self._edit_post(field="dana_lebih_lalu", nilai="999")
+        isi = r.content.decode()
+        self.assertIn('id="rekap-peringatan"', isi)
+        self.assertIn("hx-swap-oob", isi)
+        potongan = self._oob_isi(isi)
+        self.assertNotIn("belum dikunci", potongan)
+        self.assertNotIn("msg warning", potongan)
+
+    def test_oob_banner_bertahan_saat_carry_lain_belum_dikunci(self):
+        self._mei_berisi()
+        # baru kunci SATU dari tiga baris carry — dua lagi masih kosong,
+        # jadi `data.petunjuk` mestinya masih menyala.
+        r = self._edit_post(field="wallet_balance_lalu", nilai="100")
+        isi = r.content.decode()
+        potongan = self._oob_isi(isi)
+        self.assertIn("belum dikunci", potongan)
 
 
 class BonusLainTooltipTests(_RekapPageData):
