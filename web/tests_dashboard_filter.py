@@ -203,6 +203,52 @@ class FilterTanggalTests(_Base):
         self.assertEqual(r.context["next_date"], D2 + timedelta(days=1))
 
 
+class KerjakanHariIniTests(_Base):
+    """Panel "Kerjakan hari ini" = daftar kerja HIDUP — tak boleh ikut jendela
+    filter. Badge D dan tombolnya harus selalu menunjuk batch terakhir toko,
+    kalau tidak angka jendela (jumlah lintas batch) tampil di sebelah tombol
+    yang cuma membuka satu batch."""
+
+    def test_acuan_hidup_bukan_jendela(self):
+        self.batch(D1, um_d=3)
+        b2 = self.batch(D2, um_d=7)
+        r = self.client.get(reverse("dashboard"),
+                            {"dari": D1.isoformat(), "sampai": D1.isoformat()})
+        # kartu status (ikut jendela) vs panel kerja (hidup) berbeda sumber
+        self.assertEqual(r.context["um_d"], {"n": 3})
+        self.assertEqual(r.context["um_d_live"], {"n": 7})
+        self.assertEqual(r.context["live_last"].pk, b2.pk)
+        # tombol panel kerja menunjuk batch TERAKHIR toko, bukan batch jendela
+        self.assertContains(r, reverse("batch_uang", args=[b2.pk]) + "?k=d")
+
+    def test_default_identik_dengan_kartu_status(self):
+        # tanpa filter: acuan hidup == acuan kartu (perilaku lama utuh)
+        self.batch(D1, um_d=3)
+        self.batch(D2, um_d=7)
+        r = self.client.get(reverse("dashboard"))
+        self.assertEqual(r.context["um_d_live"], r.context["um_d"])
+        self.assertEqual(r.context["live_last"].pk, r.context["last"].pk)
+
+    def test_tanpa_batch_sama_sekali_aman(self):
+        r = self.client.get(reverse("dashboard"),
+                            {"dari": D1.isoformat(), "sampai": D2.isoformat()})
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.context["live_last"])
+        self.assertEqual(r.context["um_d_live"], {})
+
+    def test_aria_label_tren_ikut_periode(self):
+        self.batch(D1)
+        r = self.client.get(reverse("dashboard"),
+                            {"dari": D1.isoformat(), "sampai": D2.isoformat()})
+        self.assertNotContains(r, "total per batch harian 30 hari")
+        self.assertContains(r, "total per batch harian pada 20 Jul – 23 Jul 2026")
+
+    def test_aria_label_default_tetap_30_hari(self):
+        self.batch(D1)
+        r = self.client.get(reverse("dashboard"))
+        self.assertContains(r, "total per batch harian 30 hari")
+
+
 class BracketRentangTests(_Base):
     def _seed_fr(self):
         # D1: deposit A 500rb, wd B -300rb; D2: deposit A 200rb, wd B -150rb

@@ -203,6 +203,32 @@ def _status_selisih(total):
     return "ok" if total == 0 else ("warn" if total < 10_000_000 else "bad")
 
 
+def _filter_rentang(request):
+    """Filter tanggal dashboard `?dari=&sampai=` → (dari, sampai) atau
+    (None, None) bila tak ada parameter sah = mode default (potret terakhir).
+
+    Ladder yang sama dengan /rekening/ dan /bracket/: satu sisi kosong = rentang
+    satu hari, urutan terbalik ditukar, tanggal tak sah diabaikan.
+    """
+    dari = _parse_date(request.GET.get("dari", ""))
+    sampai = _parse_date(request.GET.get("sampai", ""))
+    if dari is None and sampai is None:
+        return None, None
+    sampai = sampai or dari
+    dari = dari or sampai
+    return (sampai, dari) if dari > sampai else (dari, sampai)
+
+
+def _label_periode(dari, sampai):
+    """Label periode manusiawi utk judul kartu — ikut locale id ("23 Jul 2026",
+    "13 Jul – 20 Jul 2026", "28 Des 2025 – 3 Jan 2026")."""
+    if dari == sampai:
+        return date_filter(dari, "j M Y")
+    if dari.year != sampai.year:
+        return f"{date_filter(dari, 'j M Y')} – {date_filter(sampai, 'j M Y')}"
+    return f"{date_filter(dari, 'j M')} – {date_filter(sampai, 'j M Y')}"
+
+
 def _batch_terakhir_per_toko(tokos):
     """(batch terakhir per toko_id, semua batch) — SATU query untuk semua toko.
 
@@ -222,27 +248,44 @@ def _batch_terakhir_per_toko(tokos):
     return terakhir, semua
 
 
-def _ringkas_bracket_gabungan(pasangan):
-    """Ringkasan bracket DP/WD untuk himpunan pasangan `(toko_id, tanggal)`.
+def _ringkas_bracket_gabungan(pasangan=None, *, toko_ids=None, rentang=None):
+    """Ringkasan bracket DP/WD lintas toko — dua bentuk pemilihan baris:
 
-    Hasilnya PERSIS jumlah `ringkas_bracket_hari(toko, tanggal)` tiap pasangan —
-    termasuk overlay `FRKoreksi` dan aturan skip-akun-absen — tapi dengan DUA
-    query saja (agregat baris + koreksi), bukan dua query per toko. Pengelompokan
-    ikut menyertakan akun karena koreksi dikunci per akun; jumlah akun per toko
-    hanya belasan sehingga hasil agregatnya tetap kecil.
+    - `pasangan`: himpunan `(toko_id, tanggal)`. Hasilnya PERSIS jumlah
+      `ringkas_bracket_hari(toko, tanggal)` tiap pasangan — termasuk overlay
+      `FRKoreksi` dan aturan skip-akun-absen.
+    - `toko_ids` + `rentang=(dari, sampai)`: semua baris bracket toko tsb dalam
+      rentang (mode filter tanggal). Overlay `FRKoreksi` hanya ikut bila
+      rentangnya satu hari — aturan yang sama dengan halaman /bracket/.
+
+    Keduanya DUA query saja (agregat baris + koreksi), bukan dua query per toko.
+    Pengelompokan ikut menyertakan akun karena koreksi dikunci per akun; jumlah
+    akun per toko hanya belasan sehingga hasil agregatnya tetap kecil.
 
     `abs()` withdraw diterapkan per (toko, tanggal) — sama seperti versi satu
     toko — supaya penjumlahannya tie out apa adanya.
     """
-    if not pasangan:
-        return None
-    toko_ids = {t for t, _ in pasangan}
-    tanggal = {d for _, d in pasangan}
-    rows = (
-        Transaction.objects.filter(
+    if rentang is not None:
+        dari, sampai = rentang
+        if not toko_ids:
+            return None
+        toko_ids = set(toko_ids)
+        qs = Transaction.objects.filter(
+            toko_id__in=toko_ids, source_type__key="bracket",
+            posted_date__range=(dari, sampai),
+        )
+        # koreksi sel FR dikunci per tanggal → hanya sah pada tampilan 1 hari
+        tanggal = {dari} if dari == sampai else None
+    else:
+        if not pasangan:
+            return None
+        toko_ids = {t for t, _ in pasangan}
+        tanggal = {d for _, d in pasangan}
+        qs = Transaction.objects.filter(
             toko_id__in=toko_ids, source_type__key="bracket", posted_date__in=tanggal
         )
-        .annotate(
+    rows = (
+        qs.annotate(
             fr_bank=KeyTextTransform("Bank", "raw"),
             fr_kategori=KeyTextTransform("Kategori", "raw"),
         )
@@ -252,7 +295,7 @@ def _ringkas_bracket_gabungan(pasangan):
     per_acc = {}  # (toko_id, tanggal, account) → {slug: {"v", "n"}}
     for r in rows:
         hari = (r["toko_id"], r["posted_date"])
-        if hari not in pasangan:
+        if pasangan is not None and hari not in pasangan:
             continue  # silang toko×tanggal dari filter di atas — bukan hari toko ini
         sel = per_acc.setdefault(hari + (_norm_akun(r["fr_bank"]),), {})
         slug = _slug_kategori(r["fr_kategori"])
@@ -265,14 +308,15 @@ def _ringkas_bracket_gabungan(pasangan):
     if not per_acc:
         return None
 
-    for k in FRKoreksi.objects.filter(
-        toko_id__in=toko_ids, tanggal__in=tanggal, kolom__in=("deposit", "withdrawal")
-    ).values("toko_id", "tanggal", "account", "kolom", "nilai"):
-        sel = per_acc.get((k["toko_id"], k["tanggal"], k["account"]))
-        if sel is None:
-            continue  # akun tak hadir di hari itu → koreksi diabaikan
-        cur = sel.get(k["kolom"])
-        sel[k["kolom"]] = {"v": k["nilai"], "n": cur["n"] if cur else 0}
+    if tanggal is not None:  # None = rentang >1 hari → koreksi tak berlaku
+        for k in FRKoreksi.objects.filter(
+            toko_id__in=toko_ids, tanggal__in=tanggal, kolom__in=("deposit", "withdrawal")
+        ).values("toko_id", "tanggal", "account", "kolom", "nilai"):
+            sel = per_acc.get((k["toko_id"], k["tanggal"], k["account"]))
+            if sel is None:
+                continue  # akun tak hadir di hari itu → koreksi diabaikan
+            cur = sel.get(k["kolom"])
+            sel[k["kolom"]] = {"v": k["nilai"], "n": cur["n"] if cur else 0}
 
     per_hari = {}  # (toko_id, tanggal) → [dp_v, dp_n, wd_v, wd_n]
     for (tid, tgl, _akun), sel in per_acc.items():
@@ -299,7 +343,7 @@ def _ringkas_bracket_gabungan(pasangan):
     }
 
 
-def _dashboard_semua(request):
+def _dashboard_semua(request, f_dari=None, f_sampai=None):
     """Dashboard mode "Semua Toko" (khusus admin) — potret gabungan batch
     TERAKHIR masing-masing toko.
 
@@ -308,6 +352,10 @@ def _dashboard_semua(request):
     Semua angka lewat query AGREGAT lintas toko — pola yang sama dengan
     `toko_overview`, karena versi per-toko (24 toko × beberapa query) membuat
     halaman ini tak terpakai di produksi.
+
+    `f_dari`/`f_sampai` (filter tanggal): potret beralih ke SELURUH batch dalam
+    jendela itu, lintas toko — cerminan mode filter dashboard satu toko. Jumlah
+    query tetap konstan (tak bergantung banyaknya toko) di kedua mode.
     """
     from reconciliation.engine import pending_settlement_counts
 
@@ -315,8 +363,21 @@ def _dashboard_semua(request):
     if not tokos:
         return render(request, "web/no_toko.html")
 
+    mode_filter = f_dari is not None
     terakhir, semua_batch = _batch_terakhir_per_toko(tokos)
-    last_ids = [b["id"] for b in terakhir.values()]
+    if mode_filter:
+        # jendela: semua batch in-range; "terakhir" per toko = batch terakhirnya
+        # DI DALAM jendela (kolom tanggal tabel per toko).
+        batch_tampil = [b for b in semua_batch if f_dari <= b["recon_date"] <= f_sampai]
+        terakhir_tampil = {}
+        for b in batch_tampil:
+            cur = terakhir_tampil.get(b["toko_id"])
+            if cur is None or (b["recon_date"], b["id"]) > (cur["recon_date"], cur["id"]):
+                terakhir_tampil[b["toko_id"]] = b
+    else:
+        terakhir_tampil = terakhir
+        batch_tampil = list(terakhir.values())
+    last_ids = [b["id"] for b in batch_tampil]
 
     # --- strip Panel + kartu Metode: satu agregat, queryset yang sama ---
     panel_sum = metode = None
@@ -355,9 +416,15 @@ def _dashboard_semua(request):
         metode = breakdown_metode(pr)
 
     # --- strip Bracket: hari-terakhir tiap toko, dua query untuk semua toko ---
-    bracket_sum = _ringkas_bracket_gabungan(
-        {(tid, b["recon_date"]) for tid, b in terakhir.items()}
-    )
+    if mode_filter:
+        # baris FR hidup terlepas dari batch → ikut jendela apa adanya
+        bracket_sum = _ringkas_bracket_gabungan(
+            toko_ids=[t.id for t in tokos], rentang=(f_dari, f_sampai)
+        )
+    else:
+        bracket_sum = _ringkas_bracket_gabungan(
+            {(tid, b["recon_date"]) for tid, b in terakhir.items()}
+        )
 
     # --- antrean tinjau & menunggu settlement: satu agregat masing-masing ---
     tinjau_per_toko = dict(
@@ -370,7 +437,10 @@ def _dashboard_semua(request):
     # --- kalender 14 hari: status TERBURUK lintas toko per hari ---
     today = date_cls.today()
     tgl_terakhir = max((b["recon_date"] for b in semua_batch), default=None)
-    anchor = max(tgl_terakhir, today) if tgl_terakhir else today
+    if mode_filter:
+        anchor = f_sampai
+    else:
+        anchor = max(tgl_terakhir, today) if tgl_terakhir else today
     per_hari = {}
     for b in semua_batch:
         per_hari.setdefault(b["recon_date"], []).append(b)
@@ -386,11 +456,17 @@ def _dashboard_semua(request):
                 st = kandidat
         kal.append({"d": d, "st": st, "n": len(harian), "today": d == today})
 
-    # --- tabel per toko ---
+    # --- tabel per toko (mode filter: selisih = jumlah batch dalam jendela) ---
+    selisih_per_toko, n_batch_per_toko = {}, {}
+    for b in batch_tampil:
+        selisih_per_toko[b["toko_id"]] = (
+            selisih_per_toko.get(b["toko_id"], 0) + _selisih_summary(b["summary"])
+        )
+        n_batch_per_toko[b["toko_id"]] = n_batch_per_toko.get(b["toko_id"], 0) + 1
     rows, selisih_total = [], 0
     for t in tokos:
-        b = terakhir.get(t.id)
-        sel = _selisih_summary(b["summary"]) if b else 0
+        b = terakhir_tampil.get(t.id)
+        sel = selisih_per_toko.get(t.id, 0)
         selisih_total += sel
         ps = panel_per_toko.get(t.id) or {}
         rows.append({
@@ -400,14 +476,17 @@ def _dashboard_semua(request):
             "tinjau": tinjau_per_toko.get(t.id, 0),
             "pending": pending_per_toko.get(t.id, 0),
             "has_batch": b is not None,
+            "n_batch": n_batch_per_toko.get(t.id, 0),
         })
     rows.sort(key=lambda r: (r["has_batch"], r["selisih"]), reverse=True)
 
+    label_periode = _label_periode(f_dari, f_sampai) if mode_filter else None
+    bar_dari = f_dari if mode_filter else (tgl_terakhir or today)
     return render(request, "web/dashboard_all.html", {
         "semua_toko_page": True,
         "rows": rows,
         "n_toko": len(tokos),
-        "n_rekon": len(terakhir),
+        "n_rekon": len(terakhir_tampil),
         "selisih_total": selisih_total,
         "pending_total": sum(pending_per_toko.values()),
         "panel_sum": panel_sum,
@@ -415,6 +494,12 @@ def _dashboard_semua(request):
         "bracket_sum": bracket_sum,
         "kal": kal,
         "tgl_terakhir": tgl_terakhir,
+        "mode_filter": mode_filter,
+        "f_dari": f_dari, "f_sampai": f_sampai,
+        "n_batch": len(batch_tampil),
+        "label_periode": label_periode,
+        "bar_dari": bar_dari,
+        "bar_sampai": f_sampai if mode_filter else bar_dari,
     })
 
 
@@ -426,23 +511,17 @@ def dashboard(request):
 
     from reconciliation.engine import check_completeness, pending_settlement_count
 
-    if mode_semua(request):
-        return _dashboard_semua(request)
-    active = _active_toko(request)
-    if active is None:
-        return render(request, "web/no_toko.html")
-
     # --- filter tanggal (?dari=&sampai=) — tanpa parameter = perilaku lama:
     # potret batch TERAKHIR. Ladder resolusi tanggal sama dengan /rekening/
     # dan /bracket/ (satu sisi kosong = 1 hari, terbalik = ditukar).
-    f_dari = _parse_date(request.GET.get("dari", ""))
-    f_sampai = _parse_date(request.GET.get("sampai", ""))
-    mode_filter = f_dari is not None or f_sampai is not None
-    if mode_filter:
-        f_sampai = f_sampai or f_dari
-        f_dari = f_dari or f_sampai
-        if f_dari > f_sampai:
-            f_dari, f_sampai = f_sampai, f_dari
+    f_dari, f_sampai = _filter_rentang(request)
+    mode_filter = f_dari is not None
+
+    if mode_semua(request):
+        return _dashboard_semua(request, f_dari, f_sampai)
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
 
     tx = Transaction.objects.filter(toko=active)
     uploads = Upload.objects.filter(toko=active)
@@ -571,10 +650,15 @@ def dashboard(request):
         )}
 
     comp = check_completeness(active)
-    # "rekonsiliasi berikutnya" selalu live — mengacu batch terakhir toko,
-    # bukan batch terakhir jendela filter.
-    terakhir_semua = batches[-1] if batches else None
-    next_date = (terakhir_semua.recon_date + timedelta(days=1)) if terakhir_semua else today
+    # Panel "Kerjakan hari ini" TIDAK ikut jendela filter: ia daftar kerja hidup.
+    # Semua acuannya (batch terakhir toko, D-nya, tanggal berikutnya) diambil dari
+    # batch TERAKHIR toko — di mode default nilainya identik dengan `last`/`um_d`.
+    live_last = batches[-1] if batches else None
+    um_d_live = {}
+    if live_last is not None:
+        _um_live = (live_last.summary or {}).get("unmatched_money") or {}
+        um_d_live = _um_live.get("d") or {}
+    next_date = (live_last.recon_date + timedelta(days=1)) if live_last else today
 
     # tabel "Rekonsiliasi Terkini": mode filter menampilkan run milik jendela
     runs_tampil = runs.select_related("batch").order_by("-id")
@@ -584,14 +668,7 @@ def dashboard(request):
         )
 
     # label periode utk judul kartu (ikut locale, mis. "12 Jul – 23 Jul 2026")
-    label_periode = None
-    if mode_filter:
-        if f_dari == f_sampai:
-            label_periode = date_filter(f_dari, "j M Y")
-        elif f_dari.year != f_sampai.year:
-            label_periode = f"{date_filter(f_dari, 'j M Y')} – {date_filter(f_sampai, 'j M Y')}"
-        else:
-            label_periode = f"{date_filter(f_dari, 'j M')} – {date_filter(f_sampai, 'j M Y')}"
+    label_periode = _label_periode(f_dari, f_sampai) if mode_filter else None
     # prefill bar filter: mode default = tanggal batch terakhir (menekan
     # Terapkan mereproduksi tampilan yang sedang terlihat)
     bar_dari = f_dari if mode_filter else ((last.recon_date if last else None) or today)
@@ -613,6 +690,7 @@ def dashboard(request):
         "bracket_sum": bracket_sum,
         "pending": pending,
         "um_d": um_d,
+        "live_last": live_last, "um_d_live": um_d_live,
         "comp": comp,
         "next_date": next_date,
         "mode_filter": mode_filter,

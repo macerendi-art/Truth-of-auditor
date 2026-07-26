@@ -724,3 +724,110 @@ class DashboardSemuaQueryTests(_DataGabungan):
         self.assertEqual(
             len(before), len(after),
             f"query tumbuh {len(before)}→{len(after)} saat toko bertambah (N+1)")
+
+
+class DashboardSemuaFilterTests(_DataGabungan):
+    """Filter tanggal (?dari=&sampai=) juga berlaku di dashboard gabungan —
+    admin yang sedang di mode Semua Toko tak boleh kehilangan filter yang ada
+    di dashboard satu toko. Tanpa parameter, halaman ini WAJIB identik dengan
+    perilaku lama (potret rekon terakhir tiap toko)."""
+
+    def test_tanpa_param_tetap_potret_terakhir(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"))
+        self.assertFalse(r.context["mode_filter"])
+        baris = {b["toko"].key: b for b in r.context["rows"]}
+        self.assertEqual(baris["lbs"]["last"]["recon_date"], self.TGL_LBS)
+        self.assertEqual(baris["slo"]["last"]["recon_date"], self.TGL_SLO)
+        # batch lama 30/06 tetap diabaikan
+        self.assertEqual(r.context["panel_sum"]["dp"]["v"], 170000.0)
+
+    def test_rentang_menjumlah_lintas_toko_dan_lintas_hari(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"),
+                            {"dari": "2026-06-30", "sampai": "2026-07-03"})
+        self.assertTrue(r.context["mode_filter"])
+        # 30/06 (999.000) + 01/07 (100.000) + 03/07 (70.000) = 1.169.000
+        self.assertEqual(r.context["panel_sum"]["dp"]["v"], 1169000.0)
+        self.assertEqual(r.context["n_batch"], 3)
+        self.assertEqual(r.context["n_rekon"], 2)
+        baris = {b["toko"].key: b for b in r.context["rows"]}
+        self.assertEqual(baris["lbs"]["n_batch"], 2)
+        # kolom tanggal = batch TERAKHIR toko itu di dalam jendela
+        self.assertEqual(baris["lbs"]["last"]["recon_date"], self.TGL_LBS)
+
+    def test_hari_tunggal_hanya_batch_hari_itu(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"), {"dari": "2026-06-30"})
+        self.assertEqual(r.context["panel_sum"]["dp"]["v"], 999000.0)
+        self.assertEqual(r.context["n_batch"], 1)
+        self.assertEqual(r.context["n_rekon"], 1)
+        baris = {b["toko"].key: b for b in r.context["rows"]}
+        self.assertIsNone(baris["slo"]["last"])
+        self.assertEqual(baris["slo"]["n_batch"], 0)
+
+    def test_bracket_rentang_ikut_jendela_bukan_tanggal_batch(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"),
+                            {"dari": "2026-06-30", "sampai": "2026-07-03"})
+        # seluruh baris FR in-range: 100rb + 999rb (lbs) + 70rb (slo) deposit
+        self.assertEqual(r.context["bracket_sum"]["dp"]["v"], Decimal("1169000"))
+        self.assertEqual(r.context["bracket_sum"]["wd"]["v"], Decimal("40000"))
+
+    def test_koreksi_fr_hanya_pada_rentang_satu_hari(self):
+        self.seed()
+        FRKoreksi.objects.create(
+            toko=self.lbs, tanggal=self.TGL_LBS, account="BCA A",
+            kolom="deposit", nilai=Decimal("123000"), alasan="mistake_cs")
+        satu = self.client.get(reverse("dashboard"), {"dari": "2026-07-01"})
+        self.assertEqual(satu.context["bracket_sum"]["dp"]["v"], Decimal("123000"))
+        rentang = self.client.get(reverse("dashboard"),
+                                  {"dari": "2026-06-30", "sampai": "2026-07-03"})
+        # rentang >1 hari: nilai mentah (aturan yang sama dgn /bracket/)
+        self.assertEqual(rentang.context["bracket_sum"]["dp"]["v"], Decimal("1169000"))
+
+    def test_rentang_kosong_tetap_200(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"),
+                            {"dari": "2026-01-01", "sampai": "2026-01-05"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["n_batch"], 0)
+        self.assertIsNone(r.context["panel_sum"])
+        self.assertIsNone(r.context["bracket_sum"])
+        self.assertEqual(r.context["selisih_total"], 0)
+
+    def test_tanggal_terbalik_ditukar(self):
+        self.seed()
+        a = self.client.get(reverse("dashboard"),
+                            {"dari": "2026-07-03", "sampai": "2026-06-30"})
+        b = self.client.get(reverse("dashboard"),
+                            {"dari": "2026-06-30", "sampai": "2026-07-03"})
+        self.assertEqual(a.context["panel_sum"], b.context["panel_sum"])
+        self.assertEqual(a.context["f_dari"], date(2026, 6, 30))
+
+    def test_kalender_ber_anchor_sampai(self):
+        self.seed()
+        r = self.client.get(reverse("dashboard"),
+                            {"dari": "2026-06-30", "sampai": "2026-07-03"})
+        self.assertEqual(r.context["kal"][-1]["d"], date(2026, 7, 3))
+
+    def test_query_tetap_konstan_di_mode_filter(self):
+        """Jendela filter tak boleh menghidupkan loop query per toko."""
+        self.seed()
+        param = {"dari": "2026-06-30", "sampai": "2026-07-03"}
+        self.client.get(reverse("dashboard"), param)  # warm-up
+        with CaptureQueriesContext(connection) as before:
+            self.assertEqual(
+                self.client.get(reverse("dashboard"), param).status_code, 200)
+        for i in range(6):
+            t = Toko.objects.create(key=f"qf{i}", name=f"QF{i}", panel="nexus")
+            d = date(2026, 7, 2)
+            b = self.batch(t, d)
+            self.panel_tx(t, b, "depo", "10000")
+            self.fr(t, d, "BCA X", "Deposit", "10000")
+        with CaptureQueriesContext(connection) as after:
+            self.assertEqual(
+                self.client.get(reverse("dashboard"), param).status_code, 200)
+        self.assertEqual(
+            len(before), len(after),
+            f"query tumbuh {len(before)}→{len(after)} saat toko bertambah (N+1)")

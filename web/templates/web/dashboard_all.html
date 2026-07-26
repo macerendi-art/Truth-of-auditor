@@ -6,8 +6,13 @@
 <div class="page-head reveal">
   <div>
     <h1>Dashboard <span class="badge src" style="vertical-align:6px;font-size:11.5px">Semua Toko</span></h1>
+    {% if mode_filter %}
+    <p>Potret gabungan {{ n_toko|intcomma }} toko pada <b>{{ label_periode }}</b> — seluruh rekonsiliasi
+      dalam rentang itu dijumlahkan lintas toko.</p>
+    {% else %}
     <p>Potret gabungan {{ n_toko|intcomma }} toko — angka diambil dari rekonsiliasi <b>terakhir masing-masing toko</b>,
       jadi tanggalnya bisa berbeda antar baris.</p>
+    {% endif %}
   </div>
   <div class="actions">
     <a class="btn" href="{% url 'toko_overview' %}">Ringkasan Toko</a>
@@ -15,19 +20,31 @@
   </div>
 </div>
 
+{% comment %}---- FILTER TANGGAL (default = potret rekon terakhir tiap toko) ----{% endcomment %}
+<div class="card reveal" style="margin-bottom:16px">
+  <form method="get" class="row">
+    <div class="field"><label>Dari</label><input type="date" name="dari" value="{{ bar_dari|date:'Y-m-d' }}"></div>
+    <div class="field"><label>Sampai</label><input type="date" name="sampai" value="{{ bar_sampai|date:'Y-m-d' }}"></div>
+    <button class="btn primary" type="submit">Terapkan</button>
+    {% if mode_filter %}<a class="btn" href="{% url 'dashboard' %}">Terbaru ↺</a>{% endif %}
+    <span class="spacer"></span>
+    <span class="faint" style="font-size:12px">{% if mode_filter %}menampilkan {{ n_batch }} batch · {{ n_rekon }} dari {{ n_toko }} toko{% else %}tanpa filter — potret rekon terakhir tiap toko{% endif %}</span>
+  </form>
+</div>
+
 {% comment %}---- KARTU STATUS GABUNGAN ----{% endcomment %}
 <div class="grid cols-4 reveal">
   <div class="card stat">
-    <div class="top"><span class="k">Toko sudah direkon</span>
+    <div class="top"><span class="k">{% if mode_filter %}Toko direkon di rentang{% else %}Toko sudah direkon{% endif %}</span>
       <span class="ic {% if n_rekon == n_toko %}g{% else %}a{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M3 9h18"/></svg></span></div>
     <div class="v">{{ n_rekon|intcomma }}<span class="faint" style="font-size:16px"> / {{ n_toko|intcomma }}</span></div>
-    <div class="sub">{% if tgl_terakhir %}rekon terbaru {{ tgl_terakhir|date:"d M Y" }}{% else %}belum ada rekonsiliasi{% endif %}</div>
+    <div class="sub">{% if mode_filter %}{{ n_batch|intcomma }} batch · {{ label_periode }}{% elif tgl_terakhir %}rekon terbaru {{ tgl_terakhir|date:"d M Y" }}{% else %}belum ada rekonsiliasi{% endif %}</div>
   </div>
   <div class="card stat">
     <div class="top"><span class="k">Selisih gabungan</span>
       <span class="ic {% if selisih_total == 0 %}g{% elif selisih_total < 10000000 %}a{% else %}r{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span></div>
     <div class="v {% if selisih_total == 0 %}g{% elif selisih_total < 10000000 %}a{% else %}r{% endif %} mono">{{ selisih_total|floatformat:0|intcomma }}</div>
-    <div class="sub">jumlah selisih DP+WD rekon terakhir</div>
+    <div class="sub">jumlah selisih DP+WD {% if mode_filter %}seluruh batch rentang{% else %}rekon terakhir{% endif %}</div>
   </div>
   <a class="card stat click" href="{% url 'review_queue' %}"
      title="Jumlahnya lintas toko; antrean sendiri dibuka per toko — pilih satu toko di tabel di bawah">
@@ -48,8 +65,8 @@
 CSS .pstrip* kanonik ada di web/templates/web/app_base.html (dipakai juga dashboard.html).{% endcomment %}
 {% if panel_sum %}
 <div class="card reveal pstrip" style="margin-top:16px">
-  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Panel — gabungan</h3>
-    <span class="faint" style="font-size:11.5px">baris panel terkunci di rekon terakhir tiap toko</span></div>
+  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Panel — {% if mode_filter %}{{ label_periode }}{% else %}gabungan{% endif %}</h3>
+    <span class="faint" style="font-size:11.5px">{% if mode_filter %}baris panel terkunci di {{ n_batch }} batch dalam rentang · seluruh toko{% else %}baris panel terkunci di rekon terakhir tiap toko{% endif %}</span></div>
   <div class="pstrip-grid">
     <div class="ps"><span class="ps-k dp">Deposit</span>
       <span class="ps-n">{{ panel_sum.dp.n|intcomma }} <small>trx</small></span>
@@ -66,8 +83,8 @@ CSS .pstrip* kanonik ada di web/templates/web/app_base.html (dipakai juga dashbo
 
 {% if bracket_sum %}
 <div class="card reveal pstrip" style="margin-top:16px">
-  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Bracket — gabungan</h3>
-    <span class="faint" style="font-size:11.5px">baris FR/Bracket pada tanggal rekon terakhir tiap toko</span></div>
+  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Bracket — {% if mode_filter %}{{ label_periode }}{% else %}gabungan{% endif %}</h3>
+    <span class="faint" style="font-size:11.5px">{% if mode_filter %}baris FR/Bracket seluruh toko dalam rentang dipilih{% else %}baris FR/Bracket pada tanggal rekon terakhir tiap toko{% endif %}</span></div>
   <div class="pstrip-grid">
     <div class="ps"><span class="ps-k dp">Deposit</span>
       <span class="ps-n">{{ bracket_sum.dp.n|intcomma }} <small>trx</small></span>
@@ -86,8 +103,8 @@ CSS .pstrip* kanonik ada di web/templates/web/app_base.html (dipakai juga dashbo
 CSS .mtd* kanonik ada di web/templates/web/app_base.html (dipakai juga dashboard.html).{% endcomment %}
 {% if metode %}
 <div class="card reveal mtd" style="margin-top:16px">
-  <div class="h-row" style="margin-bottom:10px"><h3>Metode Pembayaran — gabungan</h3>
-    <span class="faint" style="font-size:11.5px">acuan Bank Title panel</span></div>
+  <div class="h-row" style="margin-bottom:10px"><h3>Metode Pembayaran — {% if mode_filter %}{{ label_periode }}{% else %}gabungan{% endif %}</h3>
+    <span class="faint" style="font-size:11.5px">acuan Bank Title panel{% if mode_filter %} · seluruh toko dalam rentang{% endif %}</span></div>
   <div class="mtd-grid">
     <div class="mt"><span class="mt-k dp">Deposit</span>
       {% for r in metode.dp %}
@@ -109,7 +126,7 @@ CSS .mtd* kanonik ada di web/templates/web/app_base.html (dipakai juga dashboard
 
 {% comment %}---- KALENDER LINTAS TOKO (status terburuk per hari) ----{% endcomment %}
 <div class="card reveal" style="margin-top:16px">
-  <div class="h-row"><h3>Kalender rekonsiliasi — 14 hari, seluruh toko</h3>
+  <div class="h-row"><h3>Kalender rekonsiliasi — 14 hari{% if mode_filter %} s/d {{ f_sampai|date:"j M" }}{% endif %}, seluruh toko</h3>
     <span class="faint" style="font-size:11.5px">warna mengikuti toko <b>terburuk</b> hari itu</span></div>
   <div class="cal">
     {% for k in kal %}
@@ -125,18 +142,18 @@ CSS .mtd* kanonik ada di web/templates/web/app_base.html (dipakai juga dashboard
 {% comment %}---- TABEL PER TOKO ----{% endcomment %}
 <div class="card pad0 reveal" style="margin-top:16px">
   <div class="card-head"><h3>Rincian per toko</h3>
-    <span class="sub">urut selisih terbesar · tanggal rekon bisa berbeda antar toko</span></div>
+    <span class="sub">urut selisih terbesar · {% if mode_filter %}Tinjau &amp; Settlement tetap angka hidup (bukan rentang){% else %}tanggal rekon bisa berbeda antar toko{% endif %}</span></div>
   <div class="table-wrap" style="border:none">
   <table class="selectable">
     <thead><tr>
-      <th>Toko</th><th>Rekon terakhir</th><th class="num">Deposit</th><th class="num">Withdraw</th>
+      <th>Toko</th><th>{% if mode_filter %}Rekon terakhir di rentang{% else %}Rekon terakhir{% endif %}</th><th class="num">Deposit</th><th class="num">Withdraw</th>
       <th class="num">Selisih</th><th class="num col-hide">Tinjau</th><th class="num col-hide">Settlement</th><th></th>
     </tr></thead>
     <tbody>
     {% for r in rows %}
     <tr>
       <td><b>{{ r.toko.name }}</b>{% if r.status %} <span class="badge {{ r.status }}"></span>{% endif %}</td>
-      <td class="mono">{% if r.last %}{{ r.last.recon_date|date:"d/m/Y" }}{% else %}<span class="faint">belum rekon</span>{% endif %}</td>
+      <td class="mono">{% if r.last %}{{ r.last.recon_date|date:"d/m/Y" }}{% if mode_filter and r.n_batch > 1 %} <span class="faint" style="font-size:11.5px">+{{ r.n_batch|add:"-1" }}</span>{% endif %}{% else %}<span class="faint">{% if mode_filter %}tak ada di rentang{% else %}belum rekon{% endif %}</span>{% endif %}</td>
       <td class="num mono">{{ r.dp|floatformat:0|intcomma }}</td>
       <td class="num mono">{{ r.wd|floatformat:0|intcomma }}</td>
       <td class="num mono" {% if r.selisih %}style="color:var(--bad);font-weight:700"{% endif %}>{{ r.selisih|floatformat:0|intcomma }}</td>

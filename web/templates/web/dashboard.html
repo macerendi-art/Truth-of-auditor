@@ -145,7 +145,7 @@
 {# ---- KALENDER + TREN ---- #}
 <div class="grid cols-2" style="margin-top:16px">
   <div class="card reveal">
-    <div class="h-row"><h3>Kalender rekonsiliasi — 14 hari</h3>
+    <div class="h-row"><h3>Kalender rekonsiliasi — 14 hari{% if mode_filter %} s/d {{ f_sampai|date:"j M" }}{% endif %}</h3>
       <span class="faint" style="font-size:11.5px">hijau seimbang · kuning kecil · merah besar</span></div>
     <div class="cal">
       {% for k in kal %}
@@ -163,7 +163,7 @@
     <div class="h-row"><h3>{% if mode_filter %}Tren selisih — rentang dipilih{% else %}Tren selisih — 30 hari{% endif %}</h3>
       <span class="faint" style="font-size:11.5px"><span style="color:var(--brand)">■</span> DP · <span style="color:var(--warn)">■</span> WD · <span style="color:var(--ink)">━</span> total</span></div>
     {% if tren %}
-    <svg class="spark" viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="Tren selisih DP, WD, dan total per batch harian 30 hari"></svg>
+    <svg class="spark" viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="Tren selisih DP, WD, dan total per batch harian {% if mode_filter %}pada {{ label_periode }}{% else %}30 hari{% endif %}"></svg>
     <div id="tren-data" hidden>{% for t in tren %}{{ t.b.recon_date|date:"d/m" }}|{{ t.hdp }}|{{ t.hwd }}|{{ t.dp|floatformat:0 }}|{{ t.wd|floatformat:0 }}|{{ t.htot }}|{{ t.tot|floatformat:0 }};{% endfor %}</div>
     {% else %}<p class="faint" style="margin:0">{% if mode_filter %}Tidak ada batch dalam rentang dipilih.{% else %}Belum ada batch harian — jalankan rekonsiliasi pertama.{% endif %}</p>{% endif %}
   </div>
@@ -182,10 +182,10 @@
         <td class="r"><a class="btn sm" href="{% url 'reconcile' %}">jalankan</a></td></tr>
       <tr><td><span class="badge {% if pending_review_count %}warn{% else %}ok{% endif %}">{% if pending_review_count %}{{ pending_review_count }}{% endif %}</span></td>
         <td>Tinjau hasil lemah</td>
-        <td class="r">{% if last %}<a class="btn sm" href="{% url 'batch_detail' last.pk %}">buka batch</a>{% else %}<span class="faint">—</span>{% endif %}</td></tr>
-      <tr><td><span class="badge {% if um_d.n %}bad{% else %}ok{% endif %}">{% if um_d.n %}{{ um_d.n }}{% endif %}</span></td>
+        <td class="r">{% if live_last %}<a class="btn sm" href="{% url 'batch_detail' live_last.pk %}">buka batch</a>{% else %}<span class="faint">—</span>{% endif %}</td></tr>
+      <tr><td><span class="badge {% if um_d_live.n %}bad{% else %}ok{% endif %}">{% if um_d_live.n %}{{ um_d_live.n }}{% endif %}</span></td>
         <td>Periksa uang tanpa pasangan (D)</td>
-        <td class="r">{% if last %}<a class="btn sm" href="{% url 'batch_uang' last.pk %}?k=d">periksa</a>{% else %}<span class="faint">—</span>{% endif %}</td></tr>
+        <td class="r">{% if live_last %}<a class="btn sm" href="{% url 'batch_uang' live_last.pk %}?k=d">periksa</a>{% else %}<span class="faint">—</span>{% endif %}</td></tr>
     </table>
   </div>
   <div class="card reveal">

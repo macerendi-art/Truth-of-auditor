@@ -119,6 +119,27 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.12.0",
+        tanggal=_dt.date(2026, 7, 26),
+        nama="Dashboard Bisa Menoleh ke Belakang",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "Dashboard kini punya filter tanggal: isi Dari–Sampai lalu Terapkan untuk melihat "
+            "potret hari yang sudah lewat, atau menjumlahkan seluruh rekonsiliasi dalam satu "
+            "rentang (mis. sepekan). Tombol “Terbaru” mengembalikan tampilan ke rekonsiliasi "
+            "terakhir. Tanpa mengisi filter, dashboard tetap seperti sebelumnya.",
+            "Dalam mode rentang, Ringkasan Panel, Metode Pembayaran, Ringkasan Bracket, tren "
+            "selisih, dan daftar rekonsiliasi semuanya mengikuti rentang yang dipilih; jumlah "
+            "batch yang tercakup ditulis apa adanya agar angkanya tak salah dibaca sebagai satu hari.",
+            "Filter yang sama tersedia di dashboard mode “Semua Toko” untuk admin — satu rentang, "
+            "seluruh toko, termasuk kolom rekon terakhir per toko di dalam rentang itu.",
+            "Panel “Kerjakan hari ini” sengaja TIDAK ikut filter: daftar kerja tetap menunjuk "
+            "rekonsiliasi terakhir yang sebenarnya, supaya menengok data lama tak pernah "
+            "mengubah apa yang harus dikerjakan hari ini.",
+        ),
+    ),
+    Rilis(
         versi="1.11.0",
         tanggal=_dt.date(2026, 7, 26),
         nama="Tiga Panel & Rekap Bulanan",

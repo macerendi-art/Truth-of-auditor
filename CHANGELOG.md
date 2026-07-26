@@ -3,11 +3,19 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.11.0** · 17 rilis (1 besar, 11 fitur, 1 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.12.0** · 18 rilis (1 besar, 12 fitur, 1 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.12.0 — Dashboard Bisa Menoleh ke Belakang
+*Rilis fitur · 26 Juli 2026*
+
+- Dashboard kini punya filter tanggal: isi Dari–Sampai lalu Terapkan untuk melihat potret hari yang sudah lewat, atau menjumlahkan seluruh rekonsiliasi dalam satu rentang (mis. sepekan). Tombol “Terbaru” mengembalikan tampilan ke rekonsiliasi terakhir. Tanpa mengisi filter, dashboard tetap seperti sebelumnya.
+- Dalam mode rentang, Ringkasan Panel, Metode Pembayaran, Ringkasan Bracket, tren selisih, dan daftar rekonsiliasi semuanya mengikuti rentang yang dipilih; jumlah batch yang tercakup ditulis apa adanya agar angkanya tak salah dibaca sebagai satu hari.
+- Filter yang sama tersedia di dashboard mode “Semua Toko” untuk admin — satu rentang, seluruh toko, termasuk kolom rekon terakhir per toko di dalam rentang itu.
+- Panel “Kerjakan hari ini” sengaja TIDAK ikut filter: daftar kerja tetap menunjuk rekonsiliasi terakhir yang sebenarnya, supaya menengok data lama tak pernah mengubah apa yang harus dikerjakan hari ini.
 
 ## v1.11.0 — Tiga Panel & Rekap Bulanan
 *Rilis fitur · 26 Juli 2026 · `1cff0a9`*
