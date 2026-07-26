@@ -29,7 +29,8 @@
     <div class="v {% if selisih_total == 0 %}g{% elif selisih_total < 10000000 %}a{% else %}r{% endif %} mono">{{ selisih_total|floatformat:0|intcomma }}</div>
     <div class="sub">jumlah selisih DP+WD rekon terakhir</div>
   </div>
-  <a class="card stat click" href="{% url 'review_queue' %}">
+  <a class="card stat click" href="{% url 'review_queue' %}"
+     title="Jumlahnya lintas toko; antrean sendiri dibuka per toko — pilih satu toko di tabel di bawah">
     <div class="top"><span class="k">Area Pengecekan</span>
       <span class="ic {% if pending_review_count %}a{% else %}g{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span></div>
     <div class="v {% if pending_review_count %}a{% else %}g{% endif %}">{{ pending_review_count|intcomma }}</div>
