@@ -6,8 +6,9 @@ tinggal di sini, template tidak pernah berhitung.
 Peta ke Excel end user (4 seksi, urutan baris = urutan kolom Excel):
 
   1. NET PROFIT        WL, AKURAN, BONUS HARIAN, LUCKY DRAW, BONUS MINGGUAN,
-                       PULSA, ADMIN, ADMIN QRIS, TOTAL COST, OTHER INCOME,
-                       MISTAKE  →  NET PROFIT
+                       BONUS LAINNYA, PULSA, ADMIN, ADMIN QRIS, BEBAN OTHER
+                       EXPENSE, TOTAL COST, OTHER INCOME, MISTAKE
+                       →  NET PROFIT
   2. SISA DANA MEMBER  WALLET BALANCE bulan lalu, DP, WD, BONUS, LUCKY DRAW,
                        WL  →  SISA DANA MEMBER
   3. TOTAL DANA LEBIH WEB  isian kas/bank + rujukan seksi 1-2  →  TOTAL DANA
@@ -27,6 +28,9 @@ angka asli laporan end user, seksi 2:
   --------------- +
     (284.859.870) SISA DANA MEMBER
 
+Oracle seksi 4 (kurung Excel = negatif): DANA LEBIH FNC (885.426.217) −
+TOTAL DANA LEBIH (888.276.217) = SELISIH FNC +2.850.000.
+
 Aturan turunannya: nilai disimpan APA ADANYA seperti terbaca di Excel (biaya
 negatif), dan SETIAP baris hasil hitung adalah jumlah LURUS anggotanya. Semua
 pembalikan tanda dikodekan sekali di registry `FIELDS` (`arah`), jadi tidak ada
@@ -40,13 +44,31 @@ tanda minus yang tersembunyi di dalam rumus:
 
 Sumber otomatis (satu query per sumber untuk SATU rentang bulan penuh, tanpa
 loop harian) memakai ulang modul yang sudah ada supaya angkanya tak pernah
-bercabang: `web.bonus.rekonsiliasi_bonus` (bonus harian/mingguan/lucky draw,
-sisi panel: cocok + panel_only), agregat kategori FR bracket (`beban admin
-bank`, `beban admin qris` + `beban other expense`, `pending dp`),
-`web.hutang.hutang_piutang` (hutang/piutang), dan Σ `Transaction` panel untuk
-DP/WD. DP/WD sengaja dihitung LANGSUNG dari transaksi panel, bukan dari
-`ReconBatch.summary`, karena rekap bulanan harus mencerminkan seluruh data yang
-sudah masuk — termasuk hari yang batch-nya belum dijalankan.
+bercabang: `web.bonus.rekonsiliasi_bonus` (bonus harian/mingguan/lucky draw +
+PENAMPUNG `bonus_lain`, sisi panel: cocok + panel_only), agregat kategori FR
+bracket (`beban admin bank`, `beban admin qris`, `beban other expense`,
+`pending dp`), `web.hutang.hutang_piutang` (hutang/piutang), dan Σ
+`Transaction` panel untuk DP/WD. DP/WD sengaja dihitung LANGSUNG dari transaksi
+panel, bukan dari `ReconBatch.summary`, karena rekap bulanan harus mencerminkan
+seluruh data yang sudah masuk — termasuk hari yang batch-nya belum dijalankan.
+
+Catatan sumber yang mudah salah baca:
+
+* `bonus_lain` ADA supaya tak ada rupiah bonus yang menguap: nama kategori
+  nyata mayoritas tak memuat kata "harian/mingguan/lucky" ("BONUS BOLA 10%",
+  "Redemption Coupon", "CRM", "NEW MEMBER"). Nama-nama yang masuk penampung
+  ini diekspos di `row["detail"]` supaya auditor bisa melihat isinya.
+* `beban other expense` PUNYA BARIS SENDIRI, tidak menempel ADMIN QRIS: baris
+  nyata "Cost Tagihan 28 Juni" (386.837.314) adalah penyelesaian biaya, bukan
+  fee QRIS (7,6 jt) — menggabungkannya menggelembungkan ADMIN QRIS ±30x.
+* `pdp_bulan_ini` = NET Σ kategori `pending dp` bulan berjalan (pengembalian
+  ikut mengurangi, bukan hanya penambahan) — semantik ini masih perlu
+  dikonfirmasi ke end user.
+* Kategori FR `biaya transaksi` SENGAJA bukan baris rekap: biaya itu sudah
+  tercakup baris manual TOTAL COST — memasukkannya = hitung ganda.
+* Overlay `web.models.FRKoreksi` TIDAK diterapkan di rekap (keterbatasan yang
+  disadari): kunci koreksinya per SATU tanggal, sedangkan rekap beragregat satu
+  bulan penuh. Selisih akibat koreksi harian diserap lewat baris manual.
 
 DEVIASI v1 — `dana_lebih_fnc` (DANA LEBIH FNC) sengaja `kind="manual"`:
 angkanya di Excel end user berasal dari export panel "Credit Mutation (net)"
@@ -59,6 +81,14 @@ tanpa mengubah kontrak halaman.
 Setiap baris `manual`/`auto`/`carry` bisa ditimpa `web.models.RekapManual`
 (pola `FRKoreksi`); baris `computed` TIDAK PERNAH bisa ditimpa — rumus tetap
 rumus. `sumber` pada tiap baris mencatat siapa yang menang.
+
+KUNCI BULANAN (wajib dibaca): carry antar-bulan hanya sedalam SATU tingkat,
+jadi **auditor wajib menyimpan nilai carry tiap bulan (kunci bulanan) — tanpa
+itu angka bulan ke-3 dan seterusnya menyimpang**. Bulan lalu dihitung ulang
+dengan `_carry=False`, sehingga warisan dari dua bulan sebelumnya hanya ikut
+bila sudah dikunci sebagai `RekapManual`. Tiap baris `carry` membawa
+`row["tersimpan"]` (sudah dikunci atau belum) dan `data["petunjuk"]` berisi
+peringatan bila ada carry yang belum dikunci padahal bulan lalu berisi data.
 """
 from calendar import monthrange
 from collections import namedtuple
@@ -106,8 +136,9 @@ def _jumlah(slugs):
 
 
 _S1_ANGGOTA = [
-    "wl", "akuran", "bonus_harian", "lucky_draw", "bonus_mingguan", "pulsa",
-    "admin", "admin_qris", "total_cost", "other_income", "mistake",
+    "wl", "akuran", "bonus_harian", "lucky_draw", "bonus_mingguan",
+    "bonus_lain", "pulsa", "admin", "admin_qris", "other_expense",
+    "total_cost", "other_income", "mistake",
 ]
 _S2_ANGGOTA = [
     "wallet_balance_lalu", "dp", "wd", "bonus", "lucky_draw2", "wl_ref",
@@ -127,9 +158,16 @@ FIELDS = [
     _f("bonus_harian", "BONUS HARIAN", 1, "auto", arah=-1),
     _f("lucky_draw", "LUCKY DRAW", 1, "auto", arah=-1),
     _f("bonus_mingguan", "BONUS MINGGUAN", 1, "auto", arah=-1),
+    # Penampung: semua kategori bonus di luar tiga kata kunci di atas. Tanpa
+    # baris ini nilainya hilang diam-diam dan NET PROFIT jadi terlalu besar.
+    _f("bonus_lain", "BONUS LAINNYA", 1, "auto", arah=-1,
+       catatan="kategori bonus di luar harian/mingguan/lucky draw"),
     _f("pulsa", "PULSA", 1, "manual"),
     _f("admin", "ADMIN", 1, "auto"),
     _f("admin_qris", "ADMIN QRIS", 1, "auto"),
+    # Dipisah dari ADMIN QRIS: "beban other expense" adalah penyelesaian biaya
+    # (mis. "Cost Tagihan 28 Juni" 386 jt), bukan fee QRIS (7,6 jt).
+    _f("other_expense", "BEBAN OTHER EXPENSE", 1, "auto"),
     _f("total_cost", "TOTAL COST", 1, "manual"),
     _f("other_income", "OTHER INCOME", 1, "manual"),
     _f("mistake", "MISTAKE", 1, "manual"),
@@ -163,8 +201,13 @@ FIELDS = [
     _f("mistake_belum_cost", "MISTAKE (JIKA BELUM MASUK COST)", 3, "manual"),
     _f("total_wallet_live", "TOTAL WALLET BALANCE (LIVE)", 3, "computed",
        sumber="sisa_dana_member"),
-    _f("hutang_web", "HUTANG WEB", 3, "auto"),
-    _f("piutang_web", "PIUTANG WEB", 3, "auto"),
+    # Tanda DIBALIK terhadap FR (satu-satunya tempat pembalikan ini dikodekan).
+    # Baris FR nyata: Kategori "Hutang", money_delta +30.000.000
+    # ("( HUTANG ) G25 PINJAM DANA K25 30,000,000") — Excel end user
+    # membukukannya (30.000.000) NEGATIF; piutang FR (uang keluar, negatif)
+    # tampil +130.003.000 POSITIF.
+    _f("hutang_web", "HUTANG WEB", 3, "auto", arah=-1),
+    _f("piutang_web", "PIUTANG WEB", 3, "auto", arah=-1),
     _f("akuran_lalu", "AKURAN BULAN LALU", 3, "carry"),
     _f("pdp_bulan_ini", "PDP BULAN INI", 3, "auto"),
     _f("pdp_klaim", "PDP KLAIM BULAN INI", 3, "manual"),
@@ -196,38 +239,66 @@ def rentang_bulan(year, month):
 
 
 def _q(nilai):
-    return (nilai or NOL).quantize(_KUANTUM)
+    # `+ NOL` menormalkan −0,00 (hasil kali `arah` atas nilai sub-sen) jadi 0,00
+    # supaya laporan tak pernah mencetak "-0".
+    return (nilai or NOL).quantize(_KUANTUM) + NOL
+
+
+# Klasifikasi nama kategori bonus → slug baris. Diperiksa BERURUTAN, yang
+# pertama cocok menang: nama gabungan ("Lucky Draw Mingguan") harus jatuh ke
+# lucky draw. Nama produksi kebanyakan memakai istilah Inggris ("… DAILY"),
+# jadi kata kunci id + en berdampingan.
+_BONUS_KUNCI = (
+    ("lucky_draw", ("lucky",)),
+    ("bonus_mingguan", ("mingguan", "weekly")),
+    ("bonus_harian", ("harian", "daily")),
+)
+# Penampung wajib: nama nyata seperti "BONUS BOLA 10%", "Redemption Coupon",
+# "CRM", "NEW MEMBER" tak memuat satu pun kata kunci di atas — tanpa penampung
+# ini nilainya hilang diam-diam dan NET PROFIT jadi terlalu besar.
+_BONUS_LAIN = "bonus_lain"
+
+
+def _slug_bonus(nama):
+    low = (nama or "").lower()
+    for slug, kunci in _BONUS_KUNCI:
+        if any(k in low for k in kunci):
+            return slug
+    return _BONUS_LAIN
 
 
 def _nilai_auto(toko, dari, sampai):
-    """Nilai mentah tiap baris `auto` (tanda apa adanya dari sumbernya).
+    """(nilai mentah tiap baris `auto`, detail penjelas) — tanda apa adanya.
 
     Pembalikan tanda TIDAK dilakukan di sini — itu tugas `arah` di `FIELDS`.
+    `detail` memetakan slug → daftar nama sumber yang menyusunnya (dipakai
+    `bonus_lain` supaya isi penampung terlihat auditor).
     """
-    hasil = {}
+    hasil, detail = {}, {}
 
     # 1. Bonus — sisi PANEL saja (cocok + panel_only): baris bracket tanpa
-    #    pasangan bukan beban panel bulan ini. Klasifikasi nama kategori
-    #    case-insensitive; "lucky" diperiksa lebih dulu agar nama gabungan
-    #    ("Lucky Draw Mingguan") tetap jatuh ke lucky draw.
-    harian = mingguan = lucky = NOL
+    #    pasangan bukan beban panel bulan ini. Setiap kategori PASTI masuk
+    #    salah satu dari empat baris (lihat `_slug_bonus`), jadi jumlah keempat
+    #    baris selalu sama dengan jumlah seluruh kategori — tak ada yang hilang.
+    per_bonus = {"bonus_harian": NOL, "bonus_mingguan": NOL,
+                 "lucky_draw": NOL, _BONUS_LAIN: NOL}
+    nama_lain = []
     kategori = rekonsiliasi_bonus(toko, dari, sampai)["ringkas"]["kategori"]
     for nama, d in kategori.items():
         total = (d["cocok_total"] or NOL) + (d["panel_only_total"] or NOL)
-        low = (nama or "").lower()
-        if "lucky" in low:
-            lucky += total
-        elif "mingguan" in low:
-            mingguan += total
-        elif "harian" in low:
-            harian += total
-    hasil["bonus_harian"] = harian
-    hasil["bonus_mingguan"] = mingguan
-    hasil["lucky_draw"] = lucky
-    hasil["bonus"] = harian + mingguan   # seksi 2: bonus harian + mingguan
+        slug = _slug_bonus(nama)
+        per_bonus[slug] += total
+        if slug == _BONUS_LAIN and total:
+            nama_lain.append(str(nama))
+    hasil.update(per_bonus)
+    detail[_BONUS_LAIN] = sorted(nama_lain)
+    # Seksi 2 "BONUS" = seluruh bonus NON-lucky (lucky draw punya barisnya
+    # sendiri di seksi 2, persis seperti Excel end user).
+    hasil["bonus"] = (per_bonus["bonus_harian"] + per_bonus["bonus_mingguan"]
+                      + per_bonus[_BONUS_LAIN])
 
     # 2. Kategori FR (bracket) — satu query grouped untuk seluruh bulan.
-    admin = admin_qris = pdp = NOL
+    admin = admin_qris = other_expense = pdp = NOL
     fr = (
         Transaction.objects.filter(
             toko=toko, source_type__key="bracket",
@@ -241,12 +312,15 @@ def _nilai_auto(toko, dari, sampai):
         total = baris["total"] or NOL
         if slug == "beban admin bank":
             admin += total
-        elif slug in ("beban admin qris", "beban other expense"):
+        elif slug == "beban admin qris":
             admin_qris += total
+        elif slug == "beban other expense":
+            other_expense += total
         elif slug == "pending dp":
             pdp += total
     hasil["admin"] = admin
     hasil["admin_qris"] = admin_qris
+    hasil["other_expense"] = other_expense
     hasil["pdp_bulan_ini"] = pdp
 
     # 3. DP/WD panel — satu query grouped (bukan ReconBatch.summary: rekap
@@ -268,12 +342,12 @@ def _nilai_auto(toko, dari, sampai):
     hasil["dp"] = dp
     hasil["wd"] = wd
 
-    # 4. Hutang/piutang — nilai lewat apa adanya (data FR sudah bertanda:
-    #    hutang negatif, piutang positif — lihat `hutang_piutang().netto`).
+    # 4. Hutang/piutang — nilai mentah FR; pembalikan tandanya dikodekan sekali
+    #    di registry (`arah=-1` pada `hutang_web`/`piutang_web`).
     hp = hutang_piutang(toko, dari, sampai)
     hasil["hutang_web"] = hp["total_hutang"]
     hasil["piutang_web"] = hp["total_piutang"]
-    return hasil
+    return hasil, detail
 
 
 def _nilai_carry(toko, year, month):
@@ -293,15 +367,28 @@ def _nilai_carry(toko, year, month):
     }
 
 
+def _rujuk(nilai, slug, f):
+    """Baca nilai baris lain — slug asing = salah tulis registry, bukan nol.
+
+    Diam-diam mengembalikan 0 untuk slug yang tak ada pernah menyembunyikan
+    baris yang lupa dihitung (angka laporan jadi salah tanpa gejala).
+    """
+    if slug not in nilai:
+        raise KeyError(
+            f"slug '{slug}' yang dirujuk baris '{f.slug}' tidak dikenal di "
+            f"registry FIELDS (salah tulis atau urutan rumus keliru)")
+    return nilai[slug]
+
+
 def _hitung(f, nilai):
     if f.rumus:
-        return sum((nilai.get(slug, NOL) * koef for slug, koef in f.rumus), NOL)
+        return sum((_rujuk(nilai, slug, f) * koef for slug, koef in f.rumus), NOL)
     if f.sumber:
-        return nilai.get(f.sumber, NOL) * f.arah
+        return _rujuk(nilai, f.sumber, f) * f.arah
     return NOL
 
 
-def _baris(f, nilai, sumber, auto, manual):
+def _baris(f, nilai, sumber, auto, manual, detail=()):
     return {
         "slug": f.slug,
         "label": f.label,
@@ -316,6 +403,11 @@ def _baris(f, nilai, sumber, auto, manual):
             "waktu": manual.updated_at,
         },
         "petunjuk": f.catatan,
+        # Nama sumber penyusun (mis. isi penampung BONUS LAINNYA) — halaman
+        # menampilkannya sebagai hover supaya isi baris tak jadi kotak hitam.
+        "detail": list(detail),
+        # Hanya bermakna untuk baris `carry`: sudah dikunci bulan ini atau belum.
+        "tersimpan": (manual is not None) if f.kind == "carry" else None,
     }
 
 
@@ -328,7 +420,7 @@ def rekap_bulanan(toko, year, month, _carry=True):
     periode = date(year, month, 1)
     dari, sampai = rentang_bulan(year, month)
 
-    auto = _nilai_auto(toko, dari, sampai)
+    auto, detail = _nilai_auto(toko, dari, sampai)
     carry = _nilai_carry(toko, year, month) if _carry else {}
     manual = {
         m.field: m for m in RekapManual.objects
@@ -355,7 +447,7 @@ def rekap_bulanan(toko, year, month, _carry=True):
         else:
             val, sumber = (asal if asal is not None else _q(NOL)), f.kind
         nilai[f.slug] = val
-        baris[f.slug] = _baris(f, val, sumber, asal, m)
+        baris[f.slug] = _baris(f, val, sumber, asal, m, detail.get(f.slug, ()))
     # Lintasan 2 — rumus, mengikuti urutan FIELDS (setiap rujukan sudah dihitung).
     for f in FIELDS:
         if f.kind != "computed":
@@ -364,10 +456,24 @@ def rekap_bulanan(toko, year, month, _carry=True):
         nilai[f.slug] = val
         baris[f.slug] = _baris(f, val, "computed", None, None)
 
+    # Peringatan kunci bulanan: carry hanya sedalam 1 bulan, jadi nilai carry
+    # yang belum disimpan akan MELESET mulai bulan ke-3. Hanya relevan bila
+    # bulan lalu memang berisi angka.
+    belum_dikunci = [f.label for f in FIELDS
+                     if f.kind == "carry" and baris[f.slug]["tersimpan"] is False]
+    petunjuk = ""
+    if belum_dikunci and any(carry.values()):
+        petunjuk = (
+            "Nilai carry bulan lalu belum dikunci: "
+            + ", ".join(belum_dikunci)
+            + ". Simpan (kunci) nilai carry setiap bulan — tanpa itu angka "
+              "bulan ke-3 dan seterusnya menyimpang.")
+
     return {
         "periode": periode,
         "dari": dari,
         "sampai": sampai,
+        "petunjuk": petunjuk,
         "sections": [
             {"no": no, "judul": judul,
              "rows": [baris[f.slug] for f in FIELDS if f.seksi == no]}
