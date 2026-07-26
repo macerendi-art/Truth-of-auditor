@@ -7,14 +7,14 @@ ini jaring robustness untuk baris fee-shifted / late-settled yang lolos dari
 reference join. Anchor: AccountNumber adalah kunci PEMAIN (bukan kunci
 transaksi) — hanya nominal PERSIS yang dipasangkan; selisih jatuh ke pass 1/2.
 """
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.test import TestCase
 
-from reconciliation.engine import _norm_acct_digits, _panel_phone, run_match
+from reconciliation.engine import _norm_acct_digits, _panel_phone, run_batch, run_match
 from reconciliation.models import MatchResult, ToleranceProfile
-from sources.models import SourceType, Upload
+from sources.models import SourceType, Toko, Upload
 from transactions.models import Transaction
 
 D = Decimal
@@ -50,14 +50,15 @@ def _panel_phone_from_segment(acct):
 
 class AccountJoinTests(TestCase):
     def setUp(self):
+        self.toko = Toko.objects.get(key="lbs")
         self.tol = ToleranceProfile.objects.get_or_create(
             name="Default", defaults={"date_window_days": 1, "fuzzy_threshold": 85})[0]
         self.panel = SourceType.objects.get_or_create(
             key="panel", defaults={"name": "Panel"})[0]
         self.gw = SourceType.objects.get_or_create(
             key="gateway", defaults={"name": "Gateway"})[0]
-        self.up_p = Upload.objects.create(source_type=self.panel)
-        self.up_g = Upload.objects.create(source_type=self.gw)
+        self.up_p = Upload.objects.create(source_type=self.panel, toko=self.toko)
+        self.up_g = Upload.objects.create(source_type=self.gw, toko=self.toko)
         self._n = 0
 
     def _rh(self):
@@ -66,7 +67,7 @@ class AccountJoinTests(TestCase):
 
     def panel_wd(self, amount, name, acct, dt, *, username="", ticket="", ref=""):
         return Transaction.objects.create(
-            upload=self.up_p, source_type=self.panel, jenis="wd",
+            upload=self.up_p, source_type=self.panel, toko=self.toko, jenis="wd",
             amount=D(abs(amount)), money_delta=D(-abs(amount)),
             counterparty=name, username=username, occurred_at=dt,
             ticket_no=ticket, reference=ref, row_hash=self._rh(),
@@ -75,7 +76,7 @@ class AccountJoinTests(TestCase):
 
     def gw_wd(self, amount, acct, dt, *, username="", ticket="", ref=""):
         return Transaction.objects.create(
-            upload=self.up_g, source_type=self.gw, jenis="wd",
+            upload=self.up_g, source_type=self.gw, toko=self.toko, jenis="wd",
             amount=D(abs(amount)), money_delta=D(-abs(amount)),
             username=username, occurred_at=dt,
             ticket_no=ticket, reference=ref, row_hash=self._rh(),
@@ -133,6 +134,9 @@ class AccountJoinTests(TestCase):
 
     # 5. klausa blocked: akun asing tak boleh dicuri fuzzy --------------------
     def test_akun_gateway_asing_tidak_dipasangkan_fuzzy(self):
+        """Diuji pada level run_batch: bukan cuma "tidak dipasangkan", tapi baris
+        uangnya harus MUNCUL sebagai uang tanpa jejak panel (no_panel, kategori
+        'd') supaya selisih batch selalu punya baris penjelas."""
         # p: identitas kuat (username persis) + rekening SENDIRI dikenal panel.
         p = self.panel_wd(200000, "Eko", "082250625228",
                           datetime(2026, 7, 20, 8, 0), username="eko99")
@@ -140,13 +144,93 @@ class AccountJoinTests(TestCase):
         # akan menang di pass 1 skor 100) tapi AccountNumber TAK dikenal panel.
         g = self.gw_wd(200000, "099999999999", datetime(2026, 7, 20, 8, 0),
                        username="eko99")
-        run = run_match("panel_bank", self.tol)
-        r = MatchResult.objects.get(run=run, left=p)
+        batch = run_batch(self.toko, self.tol, recon_date=date(2026, 7, 20))
+        r = MatchResult.objects.get(run__batch=batch, left=p)
         self.assertIsNone(r.right)
         self.assertEqual(r.bucket, MatchResult.Bucket.TIDAK)
         self.assertEqual(r.reason_code, "no_money")
-        # g tak pernah terpakai jadi pasangan siapa pun.
-        self.assertFalse(MatchResult.objects.filter(run=run, right=g).exists())
+        # g tak pernah jadi pasangan siapa pun — tampil sebagai no_panel.
+        rg = MatchResult.objects.get(run__batch=batch, right=g)
+        self.assertIsNone(rg.left)
+        self.assertEqual(rg.reason_code, "no_panel")
+        self.assertEqual(batch.summary["unmatched_money"]["d"]["n"], 1)
+
+    # 5b. guard panel_accts kosong: jangan blokir seluruh gateway ber-rekening -
+    def test_panel_tanpa_rekening_gateway_berrekening_tidak_diblokir(self):
+        """Sisi kredit tanpa satu pun rekening dikenal (mis. run bracket↔bank,
+        atau panel tanpa segmen Player Bank): klausa blocked account TIDAK boleh
+        aktif — kalau aktif, SEMUA baris gateway ber-AccountNumber lenyap dari
+        kandidat fuzzy (jurang match-rate senyap)."""
+        p = self.panel_wd(200000, "Eko", "", datetime(2026, 7, 20, 8, 0),
+                          username="eko99")
+        g = self.gw_wd(200000, "099999999999", datetime(2026, 7, 20, 8, 0),
+                       username="eko99")
+        run = run_match("panel_bank", self.tol)
+        r = MatchResult.objects.get(run=run, left=p)
+        self.assertEqual(r.right, g)  # tetap terjangkau pass 1
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.reason_code, "amount+date+name")
+
+    # 5c. assignment global urut delta (bukan urutan iterasi panel) -----------
+    def test_assignment_global_pilih_delta_terkecil_bukan_baris_pertama(self):
+        """Pemain & nominal sama pada dua hari (19 & 20) tapi HANYA satu baris
+        gateway tanggal 20: pasangan account harus jatuh ke panel tanggal 20
+        (delta 0), bukan ke panel tanggal 19 yang kebetulan lebih dulu dalam
+        urutan iterasi — di alur harian baris 19 itu carried, dan pasangan
+        salah-hari akan memicu flip late_settlement palsu ke batch 19 Juli."""
+        acct = "082250625228"
+        p19 = self.panel_wd(500000, "Budi", acct, datetime(2026, 7, 19, 9, 0))
+        p20 = self.panel_wd(500000, "Budi", acct, datetime(2026, 7, 20, 9, 0))
+        g20 = self.gw_wd(500000, acct, datetime(2026, 7, 20, 9, 5))
+        run = run_match("panel_bank", self.tol)
+        r20 = MatchResult.objects.get(run=run, left=p20)
+        self.assertEqual(r20.right, g20)
+        self.assertEqual(r20.reason_code, "account")
+        r19 = MatchResult.objects.get(run=run, left=p19)
+        self.assertIsNone(r19.right)
+        self.assertNotEqual(r19.reason_code, "account")
+
+    # 5d. jendela tanggal terarah --------------------------------------------
+    def test_uang_sebelum_tanggal_panel_tidak_dipasangkan_account(self):
+        """Uang tak boleh mendahului kredit: H-1 pun hanya boleh lewat pass 2
+        (perlu_tinjau), tidak pernah jadi 'account' cocok."""
+        acct = "082250625228"
+        p = self.panel_wd(500000, "Budi", acct, datetime(2026, 7, 20, 9, 0))
+        self.gw_wd(500000, acct, datetime(2026, 7, 18, 9, 0))
+        run = run_match("panel_bank", self.tol)
+        r = MatchResult.objects.get(run=run, left=p)
+        self.assertIsNone(r.right)
+        self.assertNotEqual(r.reason_code, "account")
+
+    def test_selisih_hari_di_luar_window_tidak_dipasangkan_account(self):
+        acct = "082250625228"
+        p = self.panel_wd(500000, "Budi", acct, datetime(2026, 7, 20, 9, 0))
+        self.gw_wd(500000, acct, datetime(2026, 7, 22, 9, 0))  # delta 2 > window 1
+        run = run_match("panel_bank", self.tol)
+        r = MatchResult.objects.get(run=run, left=p)
+        self.assertIsNone(r.right)
+        self.assertNotEqual(r.reason_code, "account")
+
+    # 5e. baris tanpa tanggal ---------------------------------------------------
+    def test_panel_tanpa_tanggal_tidak_dipasangkan_account(self):
+        """Tanpa occurred_at jendela tak bisa dihitung — jangan pasangkan
+        berdasarkan nominal semata."""
+        acct = "082250625228"
+        p = self.panel_wd(500000, "Budi", acct, None)
+        self.gw_wd(500000, acct, datetime(2026, 7, 20, 9, 0))
+        run = run_match("panel_bank", self.tol)
+        r = MatchResult.objects.get(run=run, left=p)
+        self.assertIsNone(r.right)
+        self.assertNotEqual(r.reason_code, "account")
+
+    def test_gateway_tanpa_tanggal_tidak_dipasangkan_account(self):
+        acct = "082250625228"
+        p = self.panel_wd(500000, "Budi", acct, datetime(2026, 7, 20, 9, 0))
+        self.gw_wd(500000, acct, None)
+        run = run_match("panel_bank", self.tol)
+        r = MatchResult.objects.get(run=run, left=p)
+        self.assertIsNone(r.right)
+        self.assertNotEqual(r.reason_code, "account")
 
     # 6. sub-6-digit tidak diindeks -------------------------------------------
     def test_akun_kurang_dari_6_digit_tidak_terindeks(self):

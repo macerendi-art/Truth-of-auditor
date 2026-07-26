@@ -331,6 +331,7 @@ class _MoneyMatcher:
     pass 0b reference-join gateway (kunci pasti non-ticket, mis. UUID QRIS),
     pass 0c account-join gateway (UNO QRIS WD): AccountNumber == rekening
             panel, HANYA nominal persis (kunci PEMAIN, bukan kunci transaksi),
+            jendela tanggal terarah + assignment GLOBAL urut selisih hari,
     pass 1  identitas kuat (skor >= threshold) di-assign GLOBAL urut skor —
             baris lemah tidak bisa mencuri kandidat milik baris kuat,
     pass 2  near-miss identitas kuat: nominal beda kecil (fee) / uang H-1,
@@ -458,31 +459,37 @@ class _MoneyMatcher:
         # --- pass 0c: account-join gateway (UNO QRIS WD) — jaring robustness ---
         # AccountNumber gateway adalah kunci PEMAIN (rekening tujuan), BUKAN kunci
         # transaksi seperti ticket/reference — satu pemain bisa WD berkali-kali ke
-        # rekening yang sama. Karena itu di sini HANYA nominal PERSIS (diff==0)
-        # yang dipasangkan; tidak ada cabang toleran seperti pass 0/0b. Selisih
-        # nominal (fee-shifted) sengaja dibiarkan jatuh ke pass 1/2 yang sudah
-        # menggerbangi lewat skor identitas, bukan lewat kesamaan akun semata.
+        # rekening yang sama. Dua konsekuensi:
+        #  1. HANYA nominal PERSIS (diff==0) yang dipasangkan; tak ada cabang
+        #     toleran seperti pass 0/0b. Selisih nominal (fee-shifted) sengaja
+        #     jatuh ke pass 1/2 yang menggerbangi lewat skor identitas.
+        #  2. Assignment GLOBAL urut selisih hari (idiom sama dgn pass 1/3):
+        #     pemain sama + nominal sama di dua hari dengan SATU baris uang harus
+        #     jatuh ke hari yang paling pas, bukan ke baris panel yang kebetulan
+        #     lebih dulu diiterasi (pasangan salah-hari = flip late_settlement
+        #     palsu ke batch kemarin).
+        # Jendela tanggal TERARAH seperti `kandidat`: uang tak boleh mendahului
+        # kredit, dan kedua sisi wajib bertanggal — tanpa tanggal tak ada anchor
+        # pendukung sama sekali, biarkan jatuh ke pass berikutnya.
+        acct_pairs = []
         for p in left:
-            if p.id in matched:
+            # p._phone sudah dihangatkan oleh loop panel_accts di atas.
+            if p.id in matched or not p._phone or p.occurred_at is None:
                 continue
-            pp = getattr(p, "_phone", None)
-            if pp is None:
-                pp = p._phone = _panel_phone(p)
-            if not pp or pp not in gw_acct:
-                continue
-            p_date = p.occurred_at.date() if p.occurred_at else None
-            cands = sorted(
-                gw_acct[pp],
-                key=lambda b: abs((b.occurred_at.date() - p_date).days)
-                if p_date and b.occurred_at else float("inf"),
-            )
-            for b in cands:
-                if b.id in used or (p.money_delta > 0) != (b.money_delta > 0):
+            p_date = p.occurred_at.date()
+            for b in gw_acct.get(p._phone, []):
+                if b.occurred_at is None or (p.money_delta > 0) != (b.money_delta > 0):
                     continue
-                diff = abs(int(abs(p.money_delta)) - int(abs(b.money_delta)))
-                if diff == 0:
-                    emit(p, b, MatchResult.Bucket.COCOK, 100, "account")
-                    break
+                if int(abs(p.money_delta)) != int(abs(b.money_delta)):
+                    continue
+                delta = (b.occurred_at.date() - p_date).days
+                if 0 <= delta <= tol.date_window_days:
+                    acct_pairs.append((delta, p.id, b.id, p, b))
+        acct_pairs.sort(key=lambda x: (x[0], x[1], x[2]))  # deterministik
+        for _delta, _pid, _bid, p, b in acct_pairs:
+            if p.id in matched or b.id in used:
+                continue
+            emit(p, b, MatchResult.Bucket.COCOK, 100, "account")
         # Gateway ber-ticket/ber-reference/ber-akun yang TAK dikenal panel bukan
         # kandidat fuzzy siapa pun (cermin semantik: uang identitasnya asing bagi
         # panel tampil sebagai uang tanpa pasangan, bukan dicuri fuzzy pass 1-3).
@@ -490,9 +497,17 @@ class _MoneyMatcher:
             b.id for t, lst in gw_ticket.items() if t not in panel_tickets for b in lst
         } | {
             b.id for ref, lst in gw_ref.items() if ref not in panel_refs for b in lst
-        } | {
-            b.id for acct, lst in gw_acct.items() if acct not in panel_accts for b in lst
         }
+        # Klausa akun HANYA berlaku bila sisi kredit memang punya rekening dikenal.
+        # Bila panel_accts kosong (mis. relasi bracket↔bank, atau panel tanpa
+        # segmen Player Bank) "tak dikenal" tidak bermakna apa pun — memblokir
+        # akan membuang SEMUA baris gateway ber-AccountNumber dari kandidat
+        # fuzzy sekaligus: jurang match-rate senyap.
+        if panel_accts:
+            blocked |= {
+                b.id for acct, lst in gw_acct.items() if acct not in panel_accts
+                for b in lst
+            }
 
         def kandidat(p, *, lo=0, hi=None, tol_amt=0):
             hi = tol.date_window_days if hi is None else hi
