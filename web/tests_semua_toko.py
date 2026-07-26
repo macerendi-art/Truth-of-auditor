@@ -107,13 +107,17 @@ class SetTokoSentinelTests(TestCase):
         self.assertIsNone(self.client.session.get("active_toko_id"))
 
     def test_id_kepanjangan_diabaikan_tanpa_menyentuh_db(self):
-        """String digit sangat panjang (mis. "9"*40) lolos `isdecimal()` tapi
+        """String digit >10 karakter lolos `isdecimal()` tapi berisiko
         meledak NumericValueOutOfRange/DataError di Postgres kalau dikirim ke
-        query (sqlite diam, jadi buktinya lewat query count bukan exception):
-        guard panjang harus menolak SEBELUM query DB Toko dijalankan."""
+        query pk. "9"*11 (bukan "9"*40!) sengaja dipilih: masih dalam
+        jangkauan BigAutoField (maks 19 digit), jadi TANPA guard panjang ORM
+        Django tetap mengirim 1 query nyata ke tabel Toko (baru EmptyResultSet
+        di angka yang lebih besar) — "9"*40 justru tautologis karena ORM
+        SUDAH menolaknya sendiri apa pun kode kita. Guard panjang harus
+        menolak SEBELUM query itu dijalankan: 0 query, bukan 1."""
         self._login("admin")
         with CaptureQueriesContext(connection) as ctx:
-            self.client.post(reverse("set_toko"), {"toko_id": "9" * 40})
+            self.client.post(reverse("set_toko"), {"toko_id": "9" * 11})
         self.assertIsNone(self.client.session.get("active_toko_id"))
         self.assertFalse(
             any("toko" in q["sql"].lower() for q in ctx),
