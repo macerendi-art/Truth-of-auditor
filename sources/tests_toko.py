@@ -142,3 +142,25 @@ class TokoPanelKelolaViewTests(TestCase):
         self.assertEqual(t.panel, Toko.PANEL_NEXUS)
         self.assertEqual(
             AuditLog.objects.filter(aksi="ubah_panel_toko").count(), n_sebelum)
+
+    def test_toko_id_kepanjangan_ditolak_sebelum_query(self):
+        """`isdecimal()` saja meloloskan "9"*11 ke query pk — di Postgres itu
+        NumericValueOutOfRange/DataError (500), bukan 404 rapi. Batas panjang
+        sama dengan `set_toko` (≤10 digit) menolaknya SEBELUM menyentuh DB:
+        0 query ke tabel Toko. Berlaku utk ketiga aksi ber-toko_id di sini —
+        panel, toggle, dan rename — karena celahnya identik."""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        for action, extra in (("panel", {"panel": Toko.PANEL_VIGOR}),
+                              ("toggle", {}),
+                              ("rename", {"nama_baru": "Ngawur"})):
+            with self.subTest(action=action):
+                with CaptureQueriesContext(connection) as ctx:
+                    r = self.client.post(reverse("kelola_toko"), {
+                        "action": action, "toko_id": "9" * 11, **extra})
+                self.assertEqual(r.status_code, 302)  # redirect + pesan galat
+                self.assertFalse(
+                    any('"sources_toko"' in q["sql"] for q in ctx),
+                    f"id kepanjangan masih mencapai query Toko: "
+                    f"{[q['sql'] for q in ctx]}")

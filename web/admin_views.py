@@ -62,6 +62,17 @@ VALID_ROLES = ("admin", "supervisor", "auditor")
 PANEL_LABELS = dict(Toko.PANEL_CHOICES)
 
 
+def _toko_id_sah(tid):
+    """id Toko kiriman form yang aman dikirim ke query pk.
+
+    `isdecimal()` saja tidak cukup: "9"*11 lolos, lalu Postgres membalas
+    NumericValueOutOfRange/DataError (500) alih-alih 404 yang rapi. Batas
+    panjangnya sama dengan `web.views.set_toko` (≤10 digit) — sebanyak itu
+    sudah jauh di luar akal untuk pk Toko.
+    """
+    return tid.isdecimal() and len(tid) <= 10
+
+
 def _password_error(password, user=None):
     """Pesan gabungan validator password Django (terlokalisasi id) — None bila lolos.
     Mencakup panjang minimum, password umum, semua-angka, mirip atribut user."""
@@ -90,7 +101,7 @@ def kelola_toko(request):
         return redirect("kelola_toko")
     if request.method == "POST" and request.POST.get("action") == "toggle":
         tid = request.POST.get("toko_id", "")
-        if not tid.isdecimal():
+        if not _toko_id_sah(tid):
             messages.error(request, "ID toko tidak valid.")
             return redirect("kelola_toko")
         t = get_object_or_404(Toko, pk=tid)
@@ -103,7 +114,7 @@ def kelola_toko(request):
     if request.method == "POST" and request.POST.get("action") == "rename":
         tid = request.POST.get("toko_id", "")
         nama_baru = (request.POST.get("nama_baru") or "").strip()[:100]
-        if not tid.isdecimal():
+        if not _toko_id_sah(tid):
             messages.error(request, "ID toko tidak valid.")
             return redirect("kelola_toko")
         if not nama_baru:
@@ -121,7 +132,7 @@ def kelola_toko(request):
     if request.method == "POST" and request.POST.get("action") == "panel":
         tid = request.POST.get("toko_id", "")
         panel_baru = request.POST.get("panel", "")
-        if not tid.isdecimal():
+        if not _toko_id_sah(tid):
             messages.error(request, "ID toko tidak valid.")
             return redirect("kelola_toko")
         if panel_baru not in PANEL_LABELS:
