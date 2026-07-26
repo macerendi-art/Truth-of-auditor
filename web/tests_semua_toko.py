@@ -507,6 +507,24 @@ class HutangCeklisViewTests(TestCase):
         self.assertContains(r, 'name="toko"')          # ceklis toko di filter
         self.assertContains(r, self.slo.name)
 
+    def test_default_tanpa_param_semua_kotak_tercentang(self):
+        """Ceklis kosong (default) = semua toko — UI harus jujur: SEMUA kotak
+        tercentang, bukan tak satu pun (yang terbaca sebagai 'tak ada dipilih')."""
+        self.fr(self.lbs, "Hutang", "-500000")
+        self.fr(self.slo, "Piutang", "250000")
+        _sesi_semua(self.client)
+        r = self._get()
+        self.assertEqual(r.context["toko_dipilih"], [])
+        n_toko = len(r.context["daftar_toko"])
+        self.assertContains(r, "checked onchange", count=n_toko)
+
+    def test_subset_ceklis_hanya_yang_dipilih_tercentang(self):
+        self.fr(self.lbs, "Hutang", "-500000")
+        self.fr(self.slo, "Piutang", "250000")
+        _sesi_semua(self.client)
+        r = self._get(toko=str(self.slo.id))
+        self.assertContains(r, "checked onchange", count=1)
+
     def test_pager_mempertahankan_ceklis(self):
         """Ceklis harus ikut di tautan halaman — kalau tidak, halaman 2 diam-diam
         kembali ke semua toko."""

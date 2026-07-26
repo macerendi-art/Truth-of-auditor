@@ -34,7 +34,7 @@
       <div class="toko-ceklis">
         {% for t in daftar_toko %}
         <label><input type="checkbox" name="toko" value="{{ t.id }}"
-          {% if t.id in toko_dipilih %}checked{% endif %} onchange="this.form.submit()">{{ t.name }}</label>
+          {% if not toko_dipilih or t.id in toko_dipilih %}checked{% endif %} onchange="this.form.submit()">{{ t.name }}</label>
         {% endfor %}
       </div>
     </div>
