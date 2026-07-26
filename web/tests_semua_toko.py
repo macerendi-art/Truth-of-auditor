@@ -596,9 +596,8 @@ class HutangCeklisViewTests(TestCase):
         self.assertEqual(r.context["data"]["count"], 1)   # jatuh ke default semua
 
     def test_toko_di_luar_hak_tak_bisa_diminta(self):
-        """Ceklis bukan pintu belakang RBAC — id di luar `tokos_for` dibuang."""
-        u = User.objects.create_user("sup", password="pw12345", role="admin")
-        u.save()
+        """Ceklis bukan pintu belakang RBAC — id di luar `tokos_for` dibuang
+        (di sini: toko nonaktif, disaring `tokos_for`)."""
         rahasia = Toko.objects.create(key="zzz", name="ZZZ", is_active=False,
                                       panel="nexus")
         self.fr(rahasia, "Hutang", "-777000")
