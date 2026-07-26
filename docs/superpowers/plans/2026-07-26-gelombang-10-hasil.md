@@ -61,6 +61,16 @@ Verifikasi akhir gelombang, dijalankan setelah Task 11 mendarat (sebelum commit 
 - **SISTEM** — sweep browser end-to-end: dashboard gabungan (mode Semua Toko) dan dashboard single-toko K25 dengan tie-out visual antara keduanya, halaman Rekap Bulanan, Hutang/Piutang dengan ceklis, halaman Upload (bar peringatan mode Semua Toko baru), Kelola IP, dan Breakdown Bracket; termasuk pengecekan tampilan mobile (lebar 375px) untuk dashboard gabungan dan Rekap Bulanan. **0 error konsol browser, 0 error server** di seluruh sweep.
 - **ACCEPTANCE** — matriks fitur A–I (§1) seluruhnya terpenuhi dengan bukti (detail per fitur ada di laporan task masing-masing, dirangkum di §1 dokumen ini).
 
+### 3b. Review final whole-branch + ronde fix (pasca-QA, HEAD akhir `caa8fa3`)
+
+Gerbang terakhir sebelum push: review whole-branch atas seluruh 35 commit gelombang (model terkuat, probe adversarial). Temuan & penanganannya:
+
+- **C1 (blocker, selesai `a2adb2e`)** — nama rilis "Tiga Panel **&** Rekap Bulanan" meledakkan bug laten dua tes lama halaman `/versi/` yang membandingkan nama rilis tanpa `escape()`. Halaman tampil benar bagi pengguna; hanya tesnya yang keliru. Diperbaiki di tes (membunuh kelas bug ini permanen — 6 dari 16 nama rilis lama juga mengandung `&`).
+- **I1 (selesai `aba5a13`)** — probe reviewer membuktikan klausa *blocked* rekening di pass 0c bisa merampas pasangan sah (nama identik + nominal persis + hari sama → `no_money`) saat sebagian baris panel tak membawa segmen rekening. Keputusan: klausa blocked untuk kunci rekening DIHAPUS (rekening = kunci *pemain*, bukan *transaksi*; pairing exact-account pass 0c tetap). Tes pin ditulis ulang sadar + tes regresi skenario probe. **Gerbang kalibrasi ulang: angka identik baseline** (10.069 + 9.553/507/12, violations 0) — nol pergeseran pada data COR; nilai perbaikan ada di populasi campuran yang belum terwakili dataset ini.
+- **I2 (selesai `caa8fa3`)** — CLAUDE.md diperbarui: mode username, pass 0c (semantik pasca-I1), IPAllowlistMiddleware + urutan rantai, sentinel "Semua Toko" + guard `_active_toko`, Rekap Bulanan & kartu Ringkasan Bracket, koreksi baris geo-block Envoy yang basi.
+- **Minor baru (selesai)** — `unseed` migrasi panel terfilter key seed (`09e18b6`); bar peringatan mode Semua Toko diperluas ke halaman tulis `/rekap-bulanan/` & `/bracket/` + bar disenyapkan di 5 halaman admin global bebas-toko (`4764c64`); cap panjang id di aksi kelola toko (`1cff0a9`); sorotan rilis dipresisikan + anchor commit (`caa8fa3`).
+- Suite penuh pasca-fix: **1.352 tes OK** (di worktree verifikasi bersih; diulang di HEAD akhir).
+
 ---
 
 ## 4. Template jawaban BRI (siap kirim ke end user)
