@@ -7,17 +7,45 @@
 <div class="page-head reveal">
   <div>
     <h1>Hutang/Piutang</h1>
+    {% if semua_toko_page %}
+    <p>Baris FR berkategori Hutang &amp; Piutang untuk <b>toko terpilih</b> — otomatis dari data bracket, lintas tanggal.</p>
+    {% else %}
     <p>Baris FR berkategori Hutang &amp; Piutang untuk <b>{{ active_toko.name }}</b> — otomatis dari data bracket, lintas tanggal.</p>
+    {% endif %}
   </div>
 </div>
 
+{% if semua_toko_page %}
+<style>
+.toko-ceklis{display:flex;flex-wrap:wrap;gap:7px;margin:2px 0 4px}
+.toko-ceklis label{display:inline-flex;align-items:center;gap:7px;margin:0;padding:5px 11px;border:1px solid var(--line-2);
+  border-radius:999px;background:var(--panel-2);font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;
+  transition:border-color .14s,color .14s,background .14s}
+.toko-ceklis label:hover{color:var(--ink);border-color:var(--line-2)}
+.toko-ceklis label:has(input:checked){color:var(--brand);border-color:var(--brand);background:var(--info-bg)}
+.toko-ceklis input{margin:0}
+</style>
+{% endif %}
 <div class="card reveal" style="margin-bottom:18px">
-  <form method="get" class="row">
-    <div class="field"><label>Dari</label><input type="date" name="dari" value="{{ dari|date:'Y-m-d' }}"></div>
-    <div class="field"><label>Sampai</label><input type="date" name="sampai" value="{{ sampai|date:'Y-m-d' }}"></div>
-    <button class="btn primary" type="submit">Terapkan</button>
-    <span class="spacer"></span>
-    <span class="faint" style="font-size:12px">{{ data.count|intcomma }} baris</span>
+  <form method="get">
+    {% if semua_toko_page %}
+    <div class="field">
+      <label>Toko <span class="faint" style="font-weight:400;text-transform:none">— tanpa centang berarti semua toko</span></label>
+      <div class="toko-ceklis">
+        {% for t in daftar_toko %}
+        <label><input type="checkbox" name="toko" value="{{ t.id }}"
+          {% if t.id in toko_dipilih %}checked{% endif %} onchange="this.form.submit()">{{ t.name }}</label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    <div class="row">
+      <div class="field"><label>Dari</label><input type="date" name="dari" value="{{ dari|date:'Y-m-d' }}"></div>
+      <div class="field"><label>Sampai</label><input type="date" name="sampai" value="{{ sampai|date:'Y-m-d' }}"></div>
+      <button class="btn primary" type="submit">Terapkan</button>
+      <span class="spacer"></span>
+      <span class="faint" style="font-size:12px">{{ data.count|intcomma }} baris</span>
+    </div>
   </form>
 </div>
 
@@ -36,7 +64,7 @@
   <div class="table-wrap" style="border:none">
   <table class="selectable">
     <thead><tr>
-      <th>Tanggal</th><th>Jam</th><th>FR Account</th><th>Kategori</th>
+      <th>Tanggal</th><th>Jam</th>{% if semua_toko_page %}<th>Toko</th>{% endif %}<th>FR Account</th><th>Kategori</th>
       <th>Member</th><th>Keterangan</th><th class="num">Nominal</th>
     </tr></thead>
     <tbody>
@@ -44,6 +72,7 @@
     <tr>
       <td class="mono">{{ r.tanggal|date:"d/m/Y" }}</td>
       <td class="mono faint">{{ r.jam }}</td>
+      {% if semua_toko_page %}<td><b>{{ r.toko }}</b></td>{% endif %}
       <td style="font-size:12.5px">{{ r.account }}</td>
       <td>{% if r.kategori == "hutang" %}<span class="badge bad">Hutang</span>{% else %}<span class="badge ok">Piutang</span>{% endif %}</td>
       <td>{{ r.member|default:"—" }}</td>

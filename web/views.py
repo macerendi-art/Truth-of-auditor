@@ -1872,18 +1872,47 @@ def fr_koreksi_simpan(request):
     return HttpResponse(html)
 
 
+def _toko_scope(request):
+    """Lingkup toko halaman multi-toko → `(target, daftar, dipilih)`.
+
+    - mode biasa: `target` = objek Toko aktif, `daftar`/`dipilih` kosong;
+    - mode Semua Toko: `target` = LIST toko terpilih, `daftar` = seluruh toko
+      yang boleh diakses (bahan ceklis), `dipilih` = id yang tercentang.
+
+    Id dari querystring selalu disaring lewat `tokos_for` — ceklis bukan pintu
+    belakang RBAC. Tanpa centang yang sah = semua toko (perilaku default), jadi
+    pengguna tak pernah terjebak di tampilan kosong tanpa jalan kembali.
+    """
+    if not mode_semua(request):
+        return _active_toko(request), [], []
+    daftar = list(tokos_for(request.user))
+    sah = {t.id for t in daftar}
+    dipilih = [
+        int(v) for v in request.GET.getlist("toko")
+        if v.isdecimal() and int(v) in sah
+    ]
+    target = [t for t in daftar if t.id in dipilih] if dipilih else daftar
+    return target, daftar, dipilih
+
+
 @login_required
 def hutang_piutang(request):
-    """Daftar hutang/piutang FR lintas tanggal (otomatis dari data bracket)."""
-    active = _active_toko(request)
-    if active is None:
+    """Daftar hutang/piutang FR lintas tanggal (otomatis dari data bracket).
+
+    Mode Semua Toko menambahkan ceklis toko (multi-pilih) dan kolom Toko;
+    apa pun pilihannya tetap SATU query `toko__in`.
+    """
+    target, daftar_toko, dipilih = _toko_scope(request)
+    if target is None:
         return render(request, "web/no_toko.html")
     sampai = _parse_date(request.GET.get("sampai", "")) or date_cls.today()
     dari = _parse_date(request.GET.get("dari", "")) or sampai - timedelta(days=30)
-    data = hitung_hutang_piutang(active, dari=dari, sampai=sampai)
+    data = hitung_hutang_piutang(target, dari=dari, sampai=sampai)
     page = Paginator(data["rows"], 40).get_page(request.GET.get("page"))
     return render(request, "web/hutang_piutang.html", {
         "page": page, "data": data, "dari": dari, "sampai": sampai,
+        "semua_toko_page": bool(daftar_toko),
+        "daftar_toko": daftar_toko, "toko_dipilih": dipilih,
     })
 
 

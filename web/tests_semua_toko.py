@@ -404,6 +404,168 @@ class DashboardSemuaTests(_DataGabungan):
         self.assertIsNone(r.context["panel_sum"])
 
 
+class HutangMultiTokoTests(TestCase):
+    """`web.hutang.hutang_piutang` menerima list toko; jalur satu toko TAK BOLEH
+    berubah sedikit pun (halaman lama memakai kunci baris yang persis ini)."""
+
+    KUNCI_TUNGGAL = {"id", "tanggal", "jam", "account", "kategori", "member",
+                     "keterangan", "nominal"}
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.slo = Toko.objects.get(key="slo")
+        self.bracket = SourceType.objects.get_or_create(
+            key="bracket", defaults={"name": "Bracket"})[0]
+        self._n = 0
+
+    def fr(self, toko, kategori, total, tanggal=date(2026, 7, 1)):
+        self._n += 1
+        up = Upload.objects.create(source_type=self.bracket, toko=toko)
+        return Transaction.objects.create(
+            upload=up, source_type=self.bracket, toko=toko, jenis="lainnya",
+            amount=abs(Decimal(total)), money_delta=Decimal(total),
+            posted_date=tanggal, occurred_at=datetime(2026, 7, 1, 10, 0),
+            row_hash=f"hp{self._n}",
+            raw={"Bank": "BANK BCA", "Kategori": kategori, "Jam": "10:00",
+                 "Member": "BUDI"})
+
+    def test_jalur_satu_toko_tak_berubah(self):
+        from web.hutang import hutang_piutang as hitung
+
+        self.fr(self.lbs, "Hutang", "-500000")
+        self.fr(self.slo, "Hutang", "-900000")   # toko lain tak boleh bocor
+        data = hitung(self.lbs)
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(data["total_hutang"], Decimal("-500000"))
+        self.assertEqual(set(data["rows"][0]), self.KUNCI_TUNGGAL)
+
+    def test_list_menggabung_dua_toko(self):
+        from web.hutang import hutang_piutang as hitung
+
+        self.fr(self.lbs, "Hutang", "-500000")
+        self.fr(self.slo, "Piutang", "250000")
+        data = hitung([self.lbs, self.slo])
+        self.assertEqual(data["count"], 2)
+        self.assertEqual(data["total_hutang"], Decimal("-500000"))
+        self.assertEqual(data["total_piutang"], Decimal("250000"))
+        self.assertEqual({r["toko"] for r in data["rows"]},
+                         {self.lbs.name, self.slo.name})
+
+    def test_list_satu_toko_setara_jalur_tunggal(self):
+        from web.hutang import hutang_piutang as hitung
+
+        self.fr(self.lbs, "Hutang", "-500000")
+        satu, banyak = hitung(self.lbs), hitung([self.lbs])
+        for k in ("count", "total_hutang", "total_piutang", "netto"):
+            self.assertEqual(satu[k], banyak[k])
+        # hanya kolom Toko yang bertambah di mode banyak
+        self.assertEqual(set(banyak["rows"][0]) - set(satu["rows"][0]), {"toko"})
+
+    def test_list_kosong_tanpa_baris(self):
+        from web.hutang import hutang_piutang as hitung
+
+        self.fr(self.lbs, "Hutang", "-500000")
+        self.assertEqual(hitung([])["count"], 0)
+
+
+class HutangCeklisViewTests(TestCase):
+    """Halaman /hutang-piutang/ di mode Semua Toko: ceklis toko + kolom Toko."""
+
+    def setUp(self):
+        self.lbs = Toko.objects.get(key="lbs")
+        self.slo = Toko.objects.get(key="slo")
+        self.bracket = SourceType.objects.get_or_create(
+            key="bracket", defaults={"name": "Bracket"})[0]
+        self._n = 0
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+
+    def fr(self, toko, kategori, total):
+        self._n += 1
+        up = Upload.objects.create(source_type=self.bracket, toko=toko)
+        return Transaction.objects.create(
+            upload=up, source_type=self.bracket, toko=toko, jenis="lainnya",
+            amount=abs(Decimal(total)), money_delta=Decimal(total),
+            posted_date=date.today(), occurred_at=datetime(2026, 7, 1, 10, 0),
+            row_hash=f"hv{self._n}",
+            raw={"Bank": "BANK BCA", "Kategori": kategori, "Jam": "10:00",
+                 "Member": "BUDI"})
+
+    def _get(self, **params):
+        return self.client.get(reverse("hutang_piutang"),
+                               dict({"dari": "2026-01-01",
+                                     "sampai": date.today().isoformat()}, **params))
+
+    def test_default_semua_toko(self):
+        self.fr(self.lbs, "Hutang", "-500000")
+        self.fr(self.slo, "Piutang", "250000")
+        _sesi_semua(self.client)
+        r = self._get()
+        self.assertTrue(r.context["semua_toko_page"])
+        self.assertEqual(r.context["data"]["count"], 2)
+        self.assertContains(r, "<th>Toko</th>")        # kolom Toko di tabel
+        self.assertContains(r, 'name="toko"')          # ceklis toko di filter
+        self.assertContains(r, self.slo.name)
+
+    def test_pager_mempertahankan_ceklis(self):
+        """Ceklis harus ikut di tautan halaman — kalau tidak, halaman 2 diam-diam
+        kembali ke semua toko."""
+        self.fr(self.lbs, "Hutang", "-500000")
+        _sesi_semua(self.client)
+        r = self._get(toko=str(self.lbs.id))
+        self.assertIn("toko=%d" % self.lbs.id, r.context["base_qs"])
+
+    def test_subset_lewat_ceklis(self):
+        self.fr(self.lbs, "Hutang", "-500000")
+        self.fr(self.slo, "Piutang", "250000")
+        _sesi_semua(self.client)
+        r = self._get(toko=str(self.slo.id))
+        self.assertEqual(r.context["data"]["count"], 1)
+        self.assertEqual(r.context["data"]["total_piutang"], Decimal("250000"))
+        self.assertEqual(r.context["toko_dipilih"], [self.slo.id])
+
+    def test_id_ngawur_diabaikan(self):
+        self.fr(self.lbs, "Hutang", "-500000")
+        _sesi_semua(self.client)
+        r = self._get(toko="bukan-angka")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["data"]["count"], 1)   # jatuh ke default semua
+
+    def test_toko_di_luar_hak_tak_bisa_diminta(self):
+        """Ceklis bukan pintu belakang RBAC — id di luar `tokos_for` dibuang."""
+        u = User.objects.create_user("sup", password="pw12345", role="admin")
+        u.save()
+        rahasia = Toko.objects.create(key="zzz", name="ZZZ", is_active=False,
+                                      panel="nexus")
+        self.fr(rahasia, "Hutang", "-777000")
+        _sesi_semua(self.client)
+        r = self._get(toko=str(rahasia.id))
+        self.assertEqual(r.context["toko_dipilih"], [])
+        self.assertNotContains(r, "777.000")
+
+    def test_mode_tunggal_tanpa_ceklis(self):
+        self.fr(self.lbs, "Hutang", "-500000")
+        self.fr(self.slo, "Piutang", "250000")
+        s = self.client.session
+        s["active_toko_id"] = self.lbs.id
+        s.save()
+        r = self._get()
+        self.assertFalse(r.context.get("semua_toko_page"))
+        self.assertEqual(r.context["data"]["count"], 1)
+        self.assertNotContains(r, 'name="toko"')
+
+    def test_non_admin_tak_dapat_ceklis(self):
+        u = User.objects.create_user("a2", password="pw12345", role="auditor")
+        u.allowed_tokos.set([self.lbs])
+        self.fr(self.lbs, "Hutang", "-500000")
+        self.client.logout()
+        self.client.login(username="a2", password="pw12345")
+        _sesi_semua(self.client)   # sentinel warisan tak boleh membuka mode
+        r = self._get()
+        self.assertNotContains(r, 'name="toko"')
+        self.assertEqual(r.context["data"]["count"], 1)
+
+
 class DashboardSemuaQueryTests(_DataGabungan):
     """Jumlah query dashboard gabungan harus KONSTAN terhadap jumlah toko —
     di prod ada 24 toko; satu query per toko = dashboard yang tak terpakai."""
