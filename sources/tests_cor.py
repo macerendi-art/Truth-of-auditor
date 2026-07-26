@@ -1,4 +1,5 @@
 import os, tempfile
+from datetime import date, datetime
 from decimal import Decimal
 from io import StringIO
 
@@ -6,7 +7,8 @@ from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 from openpyxl import Workbook
 from sources.models import SourceType, Toko, Upload
-from sources.parsers.base import parse_bank_triplet
+from sources.parsers.base import extract_ticket, parse_bank_triplet
+from sources.parsers.bracket import BracketParser
 from sources.parsers.cor import CORPanelBankParser
 from sources.parsers.cor import CORPanelQRISParser
 from sources.parsers.cor import CORQRISGatewayParser
@@ -400,3 +402,94 @@ class IngestBankFieldsTests(TestCase):
         t = Transaction.objects.get()
         self.assertEqual(t.player_bank, "DANA")
         self.assertEqual(t.bank_title, "BCA")
+
+
+class FRBracketCORTests(SimpleTestCase):
+    """Pin-down: file FR (Finance Report) COR/Gacor25 dilayani parser Bracket
+    GENERIK apa adanya — tidak perlu parser khusus. Bentuk kolomnya sama persis
+    dengan FR Nexus; yang berbeda hanya isinya (Description kosong, jadi tidak
+    ada Ticket Number). Tes ini memaku asumsi yang dipakai matcher Panel↔Bracket
+    mode username: jenis dari Kategori, nominal bertanda seperti di file,
+    ticket_no kosong, dan raw kolom asli utuh."""
+
+    HEADER = ["Tanggal", "Jam", "Asset Bank", "ID", "Description", "Member",
+              "Username", "Product", "Expense", "No. Rek Bank Member", "Bank",
+              "Total", "Saldo Akhir", "Credit Awal", "Credit Akhir", "Kategori",
+              "Status", "OP", "Transaction ID", "Transaction Date",
+              "Status Backdated"]
+
+    ROWS = [
+        # Deposit backdated: Tanggal (posting FR) 23/07 tapi Transaction Date 22/07.
+        ["23/07/2026", "00:00", "Gacor25", "1878", None, "KUSNAMA", "tutupboto",
+         "Vigor", None, "UNOPAY 000000003", "QRIS UNOPAY | DEPOSIT / WITHDRAW",
+         150000.0, 850159180.0, 128863315.81, 128713315.81, "Deposit", None,
+         "gcr25autobracket", "DP38162049", "2026-07-22 23:59:33", "Backdated"],
+        ["23/07/2026", "00:02", "Gacor25", "1869", None, "IGNATIUS IVAN",
+         "lendhut18", "Vigor", None, "BCA 4840394374",
+         "BANK BCA | IGNATIUS IVAN | WITHDRAW", -200000.0, 2840258.79, 500000.0,
+         700000.0, "Withdrawal", None, "NICKY", "WD7422265",
+         "2026-07-23 00:02:17", None],
+        ["23/07/2026", "00:05", "Gacor25", "1869", "BIAYA TRANSFER WD SEABANK ID",
+         None, None, None, "Expense", "BRI 714401016406504",
+         "BANK BRI | SUPARDI | WITHDRAW", -2500.0, 3394423.0, 0.0, 0.0,
+         "BEBAN ADMIN BANK", None, "NICKY", "EX3234134", "2026-07-23 00:05:44",
+         None],
+    ]
+
+    def _parse(self):
+        path = _xlsx([self.HEADER] + self.ROWS)
+        try:
+            return BracketParser().parse(path)
+        finally:
+            os.remove(path)
+
+    def test_kategori_dipetakan_ke_jenis(self):
+        dp, wd, adm = self._parse()
+        self.assertEqual(dp["jenis"], "depo")
+        self.assertEqual(wd["jenis"], "wd")
+        self.assertEqual(adm["jenis"], "admin")
+
+    def test_nominal_bertanda_seperti_di_file(self):
+        dp, wd, adm = self._parse()
+        self.assertEqual(dp["money_delta"], Decimal("150000"))    # DP uang masuk
+        self.assertEqual(dp["amount"], Decimal("150000"))
+        self.assertEqual(wd["money_delta"], Decimal("-200000"))   # WD uang keluar
+        self.assertEqual(wd["amount"], Decimal("200000"))
+        self.assertEqual(adm["money_delta"], Decimal("-2500"))
+
+    def test_ticket_no_kosong(self):
+        # Description FR COR kosong → tak ada ticket. Transaction ID juga BUKAN
+        # ticket (dan memang tak pernah dibaca sebagai ticket).
+        for row in self._parse():
+            self.assertEqual(row["ticket_no"], "")
+
+    def test_transaction_id_bukan_pola_ticket(self):
+        # TICKET_RE = [DW]\d{6,9}: 'DP38162049'/'WD7422265' punya HURUF di posisi
+        # kedua, jadi tak pernah lolos — bentuk Nexus 'D1234567' tetap lolos.
+        self.assertEqual(extract_ticket("DP38162049"), "")
+        self.assertEqual(extract_ticket("WD7422265"), "")
+        self.assertEqual(extract_ticket("D1234567"), "D1234567")
+
+    def test_username_member_dan_tanggal(self):
+        dp, wd, adm = self._parse()
+        self.assertEqual(dp["username"], "tutupboto")
+        self.assertEqual(dp["counterparty"], "KUSNAMA")
+        # Baris backdated: posted_date (kolom Tanggal, dayfirst) ≠ tanggal transaksi.
+        self.assertEqual(dp["posted_date"], date(2026, 7, 23))
+        self.assertEqual(dp["occurred_at"], datetime(2026, 7, 22, 23, 59, 33))
+        self.assertEqual(wd["username"], "lendhut18")
+        self.assertEqual(adm["username"], "")   # baris beban tak punya pemain
+
+    def test_raw_kolom_asli_utuh(self):
+        dp = self._parse()[0]
+        self.assertEqual(dp["raw"]["Bank"], "QRIS UNOPAY | DEPOSIT / WITHDRAW")
+        self.assertEqual(dp["raw"]["Kategori"], "Deposit")
+        self.assertEqual(dp["raw"]["Jam"], "00:00")
+        self.assertEqual(dp["raw"]["Transaction ID"], "DP38162049")
+        self.assertEqual(dp["bank_title"], "QRIS UNOPAY")
+
+    def test_row_hash_stabil_antar_parse(self):
+        # Idempotensi ingest: file yang sama di-upload dua kali tak boleh
+        # menghasilkan hash baru (baris duplikat akan dilewati).
+        self.assertEqual([r["row_hash"] for r in self._parse()],
+                         [r["row_hash"] for r in self._parse()])

@@ -252,6 +252,29 @@ def _active(qs):
     return qs.filter(consumed_by_batch__isnull=True)
 
 
+def _tanggal_baris(t):
+    """Tanggal acuan pembukuan satu baris: `posted_date` (tanggal 'masuk'
+    statement/FR) dengan cadangan tanggal transaksi. None bila tak bertanggal —
+    baris begitu tidak punya anchor PENDUKUNG sama sekali."""
+    if t.posted_date:
+        return t.posted_date
+    return t.occurred_at.date() if t.occurred_at else None
+
+
+def _kunci_username(t):
+    """Kunci join Panel↔Bracket mode username: (username, |nominal|, arah).
+
+    None bila baris tak bisa di-anchor: tanpa username, atau bukan DP/WD (baris
+    FR bonus/beban admin/adjustment bukan transaksi panel). Nominal memakai
+    `money_delta` (bertanda, sudah rupiah penuh di kedua sisi) dan jatuh ke
+    `amount` bila deltanya nol."""
+    u = (t.username or "").strip().lower()
+    if not u or t.jenis not in ("depo", "wd"):
+        return None
+    nominal = t.money_delta or t.amount
+    return (u, int(abs(nominal)), t.jenis)
+
+
 def check_completeness(toko, date_from=None, date_to=None):
     qs = _active(_toko_filter(Transaction.objects.filter(is_duplicate=False), toko))
     qs = _date_filter(qs, date_from, date_to)
@@ -272,7 +295,24 @@ def check_completeness(toko, date_from=None, date_to=None):
 
 
 class PanelBracketMatcher:
-    """Join via Ticket Number (kuat). Cek kecocokan nominal."""
+    """Join Panel↔Bracket — DUA MODE, dipilih otomatis dari isi data:
+
+    * mode "ticket" (Nexus): join via Ticket Number, kunci TRANSAKSI yang kuat.
+      Perilaku lama, tidak berubah sedikit pun.
+    * mode "username" (Vigor / TM Gaming, mis. COR): panelnya sama sekali TIDAK
+      mengekspor Ticket Number, jadi join memakai anchor identitas UTAMA lain
+      yang dimiliki kedua sisi — username PERSIS (preseden: anchor
+      `Customer Username` RafflesPay). Nominal, arah uang, dan tanggal tetap
+      hanya anchor PENDUKUNG: tanpa username sama TIDAK ada pasangan.
+
+    Mode ditentukan per-run oleh `match()` dan dilaporkan lewat `summary["mode"]`.
+    """
+
+    #: diisi ulang tiap `match()`; dibaca run_match untuk `summary["mode"]`.
+    join_mode = "ticket"
+    #: jumlah baris bracket yang RELEVAN dengan mode terpilih — dipakai run_match
+    #: sebagai `summary["right"]` (penyebut `_bracket_overlap_warning`).
+    right_relevant = None
 
     def sides(self, dfrom, dto, toko=None, include=None):
         left = Transaction.objects.filter(source_type__key="panel", is_duplicate=False)
@@ -283,15 +323,32 @@ class PanelBracketMatcher:
             if not include.get("panel_wd", True):
                 left = left.exclude(jenis="wd")
         left = _date_filter(_active(_toko_filter(left, toko)), dfrom, dto)
+        # Sisi bracket diambil UTUH (tanpa .exclude(ticket_no="")): FR Vigor/TMG
+        # tak punya ticket. Penyaringan per-mode dilakukan di `match()` — mode
+        # ticket menyaring ulang baris ber-ticket saja, jadi populasi masukannya
+        # identik dengan versi lama.
         right = _date_filter(
             _active(_toko_filter(
-                Transaction.objects.filter(source_type__key="bracket", is_duplicate=False).exclude(ticket_no=""), toko
+                Transaction.objects.filter(source_type__key="bracket", is_duplicate=False), toko
             )),
             dfrom, dto,
         )
         return list(left), list(right)
 
     def match(self, run, left, right):
+        # Mode ticket dipakai selama sisi Panel MASIH membawa ticket, juga saat
+        # salah satu sisi kosong (tak ada yang bisa di-join — perilaku lama).
+        if any(p.ticket_no for p in left) or not right or not left:
+            self.join_mode = "ticket"
+            return self._match_ticket(run, left, right)
+        self.join_mode = "username"
+        return self._match_username(run, left, right)
+
+    def _match_ticket(self, run, left, right):
+        # Baris bracket TANPA ticket tak pernah terlihat di mode ini (bonus,
+        # beban admin, dst) — memulihkan populasi masukan versi lama persis.
+        right = [b for b in right if b.ticket_no]
+        self.right_relevant = len(right)
         tol = run.tolerance
         bidx = {}
         for b in right:
@@ -320,6 +377,71 @@ class PanelBracketMatcher:
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=None, right=b,
                                        score=0, reason_code="no_panel",
                                        reason_detail="Ticket Bracket tidak ada di Panel"))
+        return out
+
+    def _match_username(self, run, left, right):
+        """Panel tanpa ticket: pasangkan lewat (username, |nominal|, arah).
+
+        Hanya baris FR ber-kategori Deposit/Withdrawal yang ikut — baris bonus,
+        beban admin, 'Sesama CM', adjustment, dst BUKAN transaksi panel; kalau
+        ikut, mereka melahirkan no_panel palsu sekaligus bisa mencuri pasangan.
+        """
+        tol = run.tolerance
+        kandidat_b = [b for b in right if b.jenis in ("depo", "wd")]
+        self.right_relevant = len(kandidat_b)
+
+        bidx = defaultdict(list)
+        for b in kandidat_b:
+            k = _kunci_username(b)
+            if k:
+                bidx[k].append(b)
+
+        # Assignment GLOBAL urut selisih hari (idiom pass 0c/1/3 money-matcher):
+        # pemain yang setor nominal SAMA di dua hari dengan satu baris FR harus
+        # jatuh ke hari yang paling pas, bukan ke baris panel yang kebetulan
+        # lebih dulu diiterasi. Jendela tanggal SIMETRIS (|selisih|): posting FR
+        # bisa mendahului maupun tertinggal dari approval panel (baris backdated
+        # / transaksi yang melewati tengah malam).
+        pairs = []
+        for p in left:
+            kp = _kunci_username(p)
+            if kp is None:
+                continue
+            pd = _tanggal_baris(p)
+            if pd is None:
+                continue
+            for b in bidx.get(kp, []):
+                bd = _tanggal_baris(b)
+                if bd is None:
+                    continue
+                delta = abs((bd - pd).days)
+                if delta <= tol.date_window_days:
+                    pairs.append((delta, p.id, b.id, p, b))
+        pairs.sort(key=lambda x: (x[0], x[1], x[2]))   # deterministik
+
+        out, used, matched = [], set(), set()
+        for _delta, _pid, _bid, p, b in pairs:
+            if p.id in matched or b.id in used:
+                continue
+            matched.add(p.id)
+            used.add(b.id)
+            out.append(MatchResult(
+                run=run, bucket=MatchResult.Bucket.COCOK, left=p, right=b, score=100,
+                reason_code="username_amount",
+                reason_detail=f"username '{p.username.strip()}' + nominal sama"))
+        for p in left:
+            if p.id in matched:
+                continue
+            detail = ("Baris Panel tanpa username — tak ada anchor ke Bracket"
+                      if not (p.username or "").strip()
+                      else "Tidak ada baris Bracket dgn username+nominal sama")
+            out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=p, right=None,
+                                   score=0, reason_code="no_bracket", reason_detail=detail))
+        for b in kandidat_b:
+            if b.id not in used:
+                out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=None, right=b,
+                                       score=0, reason_code="no_panel",
+                                       reason_detail="Tidak ada baris Panel dgn username+nominal sama"))
         return out
 
 
@@ -681,12 +803,26 @@ def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None,
         1 for t in left
         if (carried and t.id in carried) or (retro and t.id in retro)
     )
+    # Sisi kanan yang DILAPORKAN = baris yang relevan dengan mode join matcher
+    # (Panel↔Bracket mode ticket: baris ber-ticket; mode username: baris DP/WD).
+    # Penyebut `_bracket_overlap_warning` ikut angka ini supaya rasio cocok tetap
+    # bermakna — kalau memakai panjang mentah, baris FR bonus/beban admin akan
+    # menggelembungkan penyebut dan memicu peringatan palsu. Matcher yang tak
+    # punya mode (money-matcher) mengembalikan None → panjang mentah.
+    n_right = getattr(matcher, "right_relevant", None)
     run.summary = {
-        "left": len(left) - n_excluded_left, "right": len(right),
+        "left": len(left) - n_excluded_left,
+        "right": len(right) if n_right is None else n_right,
         "cocok": c.get("cocok", 0),
         "perlu_tinjau": c.get("perlu_tinjau", 0),
         "tidak_cocok": c.get("tidak_cocok", 0),
     }
+    # Mode join dari instance matcher (di-set saat match()) — hanya Panel↔Bracket
+    # yang punya; disimpan di summary run agar UI/laporan bisa menjelaskan cara
+    # baris dipasangkan tanpa menebak dari data.
+    mode = getattr(matcher, "join_mode", None)
+    if mode:
+        run.summary["mode"] = mode
     if carried:
         run.summary["late_settled"] = len(late_pairs)
     if retro:
@@ -1104,21 +1240,31 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
         created_by=user, completeness=comp, recon_date=recon_date,
     )
     carried = _carried_results(toko) if recon_date else {}
-    relations, skipped = [], []
-    # PANEL_BRACKET hanya jika bracket ADA, dicentang, DAN ada panel ber-ticket
-    # DALAM SCOPE tanggal run (panel tanpa ticket—mis. COR—tak bisa di-join baris
-    # demi baris ke bracket). Baris CARRIED dikecualikan: run_batches_auto
-    # melebarkan date_from ke baris carried, dan PANEL_BRACKET toh mengecualikan
-    # carried dari pencocokan — ticket lama itu cuma akan menghasilkan noise no_panel.
-    panel_has_ticket = _date_filter(
+    relations, skipped, skipped_detail = [], [], {}
+    # PANEL_BRACKET jalan bila bracket ADA, dicentang, DAN ada baris panel DALAM
+    # SCOPE tanggal run. Panel TANPA ticket (Vigor/TM Gaming, mis. COR) tidak lagi
+    # memblokir relasi: matcher punya mode username. Baris CARRIED tetap
+    # dikecualikan — run_batches_auto melebarkan date_from ke baris carried, dan
+    # PANEL_BRACKET toh mengecualikan carried dari pencocokan, jadi baris itu
+    # hanya akan menghasilkan noise.
+    panel_in_scope = _date_filter(
         _active(_toko_filter(Transaction.objects.filter(
             source_type__key="panel", is_duplicate=False), toko)),
         date_from, date_to,
-    ).exclude(ticket_no="").exclude(id__in=set(carried)).exists()
-    if comp["bracket"] and _inc(include, "bracket") and panel_has_ticket:
+    ).exclude(id__in=set(carried)).exists()
+    if comp["bracket"] and _inc(include, "bracket") and panel_in_scope:
         relations.append(MatchRun.Relation.PANEL_BRACKET)
     else:
         skipped.append(MatchRun.Relation.PANEL_BRACKET.value)
+        # Alasan SPESIFIK (dipakai halaman batch): "data tidak ada" saja pernah
+        # menyesatkan — file FR sudah masuk, yang kurang justru sisi lain.
+        if not _inc(include, "bracket"):
+            alasan = "sumber Bracket tidak diikutkan dalam run ini"
+        elif not comp["bracket"]:
+            alasan = "tidak ada baris Bracket (FR) dalam rentang tanggal"
+        else:
+            alasan = "tidak ada baris Panel dalam rentang tanggal"
+        skipped_detail[MatchRun.Relation.PANEL_BRACKET.value] = alasan
     # PANEL_BANK jalan bila ada uang (bank/gateway) yang ADA & dicentang, ATAU —
     # jaring senyap — uang DIINGINKAN (dicentang) tapi kosong di scope sementara
     # ada panel DP/WD: matcher menghasilkan no_money per baris panel sehingga
@@ -1146,6 +1292,10 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
     retro_homes = _writeback_retro(batch, retro, retro_results, tolerance, user)
     summary = _aggregate_batch(toko, date_from, date_to, runs, skipped, include=include,
                                exclude_tx_ids=set(carried) | set(retro))
+    if skipped_detail:
+        # `skipped` (daftar kode) dipertahankan apa adanya untuk kompatibilitas;
+        # detail dipisah agar batch LAMA tanpa kunci ini tetap render copy lama.
+        summary.setdefault("skipped_detail", {}).update(skipped_detail)
     if recon_date:
         summary["late_settlement"] = _late_settlement_summary(resolved)
         summary["retro"] = {"count": len(retro)}

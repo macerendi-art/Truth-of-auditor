@@ -1,5 +1,6 @@
 {% extends "web/app_base.html" %}
 {% load humanize %}
+{% load web_extras %}
 {% block title %}Batch #{{ batch_no }} · Rekonsiliasi{% endblock %}
 {% block crumb %}Rekonsiliasi · Batch #{{ batch_no }}{% endblock %}
 {% block content %}
@@ -158,7 +159,9 @@
     <span class="badge warn">{{ s.buckets.perlu_tinjau|default:0|intcomma }} tinjau</span>
     <span class="badge bad">{{ s.buckets.tidak_cocok|default:0|intcomma }} tidak cocok</span>
   </div>
-  {% if s.skipped %}<p class="faint" style="margin:10px 0 0">Dilewati (data tidak ada): {{ s.skipped|join:", " }}</p>{% endif %}
+  {% comment %}Batch baru membawa alasan spesifik per relasi (skipped_detail);
+  batch lama tanpa kunci itu tetap memakai kalimat lama.{% endcomment %}
+  {% if s.skipped %}{% if s.skipped_detail %}<p class="faint" style="margin:10px 0 0">Dilewati: {% for rel in s.skipped %}{{ rel }}{% with alasan=s.skipped_detail|raw_get:rel %}{% if alasan %} ({{ alasan }}){% endif %}{% endwith %}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% else %}<p class="faint" style="margin:10px 0 0">Dilewati (data tidak ada): {{ s.skipped|join:", " }}</p>{% endif %}{% endif %}
 </div>
 
 <div class="card pad0 reveal">

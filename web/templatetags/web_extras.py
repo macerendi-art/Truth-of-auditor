@@ -18,6 +18,7 @@ REASON_LABELS = {
     "ticket+amount":    ("Ticket & nominal sama",    "ok"),
     "ticket":           ("Ticket sama",              "ok"),
     "account":          ("Rekening sama",            "ok"),
+    "username_amount":  ("Username & nominal sama",  "ok"),
     "kode_unik":        ("Kode unik",                "ok"),
     "amount+date+name": ("Nominal · tanggal · nama", "ok"),
     # perlu tinjau
