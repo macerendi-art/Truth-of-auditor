@@ -15,7 +15,9 @@ memaku perilaku BARU, bukan dihapus diam-diam.
 """
 from datetime import date, datetime
 from decimal import Decimal
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 from reconciliation.engine import run_batch, run_match
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ToleranceProfile
 from sources.models import SourceType, Toko, Upload
@@ -362,6 +364,9 @@ class PanelBracketGerbangBatchTests(_Base):
                       batch.summary["skipped"])
         detail = batch.summary["skipped_detail"]["panel_bracket"]
         self.assertIn("Panel", detail)
+        # Baris panel bisa ADA tapi semuanya carried (dikecualikan gerbang) —
+        # kalimatnya tidak boleh menuduh filenya kosong.
+        self.assertIn("menunggu settlement", detail)
 
     def test_skip_bila_bracket_tak_diikutkan(self):
         self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 10),
@@ -399,6 +404,35 @@ class PanelBracketGerbangBatchTests(_Base):
         self.assertEqual(pb.summary["left"], 1)   # hanya baris hari 28
         self.assertEqual(pb.summary["cocok"], 1)
 
+    def test_fr_backdated_cocok_di_run_harian_berscope(self):
+        """Baris FR 'Backdated' lewat run HARIAN yang berscope tanggal.
+
+        Tanggal (posted) = 2/7 tapi Transaction Date = 1/7 23:59 — persis baris
+        FR yang dientri lewat tengah malam. Scope run mengikuti run_batches_auto
+        (`date_from=lo … date_to=D`), jadi baris itu ikut terjaring, dan
+        pencocokan yang mengutamakan posted_date menaruhnya di hari 2/7 —
+        bukan menyeretnya ke baris panel hari 1/7."""
+        # Hari 1/7 punya panel sendiri (username lain) supaya ada dua hari nyata.
+        self.tx(self.panel, self.up_p, "50000", datetime(2026, 7, 1, 9),
+                username="andi")
+        self.tx(self.bracket, self.up_b, "50000", datetime(2026, 7, 1, 9, 5),
+                username="andi", posted=date(2026, 7, 1))
+        run_batch(self.toko, self.tol, date_from=date(2026, 7, 1),
+                  date_to=date(2026, 7, 1), recon_date=date(2026, 7, 1))
+        p = self.tx(self.panel, self.up_p, "150000", datetime(2026, 7, 2, 10),
+                    username="tutupboto")
+        b = self.tx(self.bracket, self.up_b, "150000", datetime(2026, 7, 1, 23, 59),
+                    username="tutupboto", posted=date(2026, 7, 2))
+        batch = run_batch(self.toko, self.tol, date_from=date(2026, 7, 1),
+                          date_to=date(2026, 7, 2), recon_date=date(2026, 7, 2))
+        pb = batch.runs.get(relation=MatchRun.Relation.PANEL_BRACKET)
+        self.assertEqual(pb.summary["mode"], "username")
+        self.assertEqual(pb.summary["cocok"], 1)
+        self.assertEqual(pb.summary["tidak_cocok"], 0)
+        res = MatchResult.objects.get(run=pb)
+        self.assertEqual((res.left_id, res.right_id), (p.id, b.id))
+        self.assertEqual(res.reason_code, "username_amount")
+
 
 class PanelBracketAggregateTests(_Base):
     """Cross-check AGREGAT Panel vs Bracket (`_panel_bracket_total_warning`) —
@@ -423,3 +457,180 @@ class PanelBracketAggregateTests(_Base):
                           date_to=date(2026, 7, 1), recon_date=date(2026, 7, 1))
         joined = " ".join(batch.summary.get("warnings", []))
         self.assertNotIn("Panel↔Bracket", joined)
+
+
+class PanelBracketModeRasioTests(_Base):
+    """Mode dipilih dari RASIO baris panel ber-ticket, BUKAN dari ada/tidaknya
+    satu baris ber-ticket.
+
+    Kenapa penting: satu file salah unggah (ekspor bergaya Nexus masuk ke toko
+    COR) menyisipkan segelintir baris ber-ticket. Dengan aturan 'ada satu ticket
+    → mode ticket', seluruh hari jadi SENYAP — sisi kanan menyusut ke 0 baris
+    ber-ticket, tak ada pasangan, tak ada peringatan, dan tak seorang pun tahu
+    rekonsiliasi hari itu tidak pernah benar-benar jalan."""
+
+    def _panel_bracket_pair(self, username, amount, hari=1):
+        self.tx(self.panel, self.up_p, amount, datetime(2026, 7, hari, 10),
+                username=username)
+        self.tx(self.bracket, self.up_b, amount, datetime(2026, 7, hari, 10, 5),
+                username=username)
+
+    def test_satu_ticket_nyasar_tak_memaksa_mode_ticket(self):
+        nyasar = self.tx(self.panel, self.up_p, "10000", datetime(2026, 7, 1, 9),
+                         ticket="D999999", username="nyasar")
+        for i, u in enumerate(("budi88", "siti99", "andi")):
+            self._panel_bracket_pair(u, f"{50000 + i}")
+        run = self._run()
+        self.assertEqual(run.summary["mode"], "username")
+        self.assertEqual(run.summary["cocok"], 3)
+        # Baris nyasar tetap DINILAI (punya username) — tak boleh hilang senyap.
+        self.assertEqual(MatchResult.objects.get(left=nyasar).reason_code, "no_bracket")
+
+    def test_baris_minoritas_ber_ticket_tetap_dipasangkan_lewat_username(self):
+        """Di mode username baris panel yang KEBETULAN ber-ticket tidak dikucilkan:
+        anchornya username, ticket cuma ikut menumpang."""
+        p = self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 9),
+                    ticket="D999999", username="budi88")
+        b = self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 9, 5),
+                    username="budi88")
+        for i, u in enumerate(("siti99", "andi", "rina7")):
+            self._panel_bracket_pair(u, f"{50000 + i}")
+        run = self._run()
+        self.assertEqual(run.summary["mode"], "username")
+        res = MatchResult.objects.get(left=p)
+        self.assertEqual(res.right_id, b.id)
+        self.assertEqual(res.bucket, MatchResult.Bucket.COCOK)
+
+    def test_mayoritas_ber_ticket_tetap_mode_ticket(self):
+        """3 dari 4 baris panel ber-ticket = populasi Nexus asli → mode ticket."""
+        for i in range(3):
+            self.tx(self.panel, self.up_p, "50000", datetime(2026, 7, 1, 10),
+                    ticket=f"D10000{i}", username="budi88")
+            self.tx(self.bracket, self.up_b, "50000", datetime(2026, 7, 1, 10, 5),
+                    ticket=f"D10000{i}", username="budi88")
+        self.tx(self.panel, self.up_p, "50000", datetime(2026, 7, 1, 11),
+                username="andi")
+        run = self._run()
+        self.assertEqual(run.summary["mode"], "ticket")
+        self.assertEqual(run.summary["cocok"], 3)
+
+    def test_tepat_separuh_ber_ticket_mode_ticket(self):
+        """Ambang 50% INKLUSIF — seri dimenangkan mode ticket (perilaku lama)."""
+        self.tx(self.panel, self.up_p, "50000", datetime(2026, 7, 1, 10),
+                ticket="D111111", username="budi88")
+        self.tx(self.panel, self.up_p, "70000", datetime(2026, 7, 1, 12),
+                username="andi")
+        self.tx(self.bracket, self.up_b, "50000", datetime(2026, 7, 1, 10, 5),
+                ticket="D111111", username="budi88")
+        self.assertEqual(self._run().summary["mode"], "ticket")
+
+
+class PanelBracketPeringatanPopulasiTests(_Base):
+    """Peringatan batch untuk populasi yang TIDAK ternilai relasi ini."""
+
+    def _batch(self):
+        return run_batch(self.toko, self.tol, date_from=date(2026, 7, 1),
+                         date_to=date(2026, 7, 1), recon_date=date(2026, 7, 1))
+
+    def _warnings(self):
+        return " ".join(self._batch().summary.get("warnings", []))
+
+    def test_peringatan_saat_ada_panel_tanpa_ticket_di_mode_ticket(self):
+        for i in range(3):
+            self.tx(self.panel, self.up_p, "50000", datetime(2026, 7, 1, 10),
+                    ticket=f"D10000{i}", username="budi88")
+            self.tx(self.bracket, self.up_b, "50000", datetime(2026, 7, 1, 10, 5),
+                    ticket=f"D10000{i}", username="budi88")
+        self.tx(self.panel, self.up_p, "50000", datetime(2026, 7, 1, 11),
+                username="andi")   # tak dinilai sama sekali di mode ticket
+        joined = self._warnings()
+        self.assertIn("1 baris Panel tanpa ticket", joined)
+
+    def test_tak_ada_peringatan_bila_semua_panel_ber_ticket(self):
+        self.tx(self.panel, self.up_p, "50000", datetime(2026, 7, 1, 10),
+                ticket="D111111", username="budi88")
+        self.tx(self.bracket, self.up_b, "50000", datetime(2026, 7, 1, 10, 5),
+                ticket="D111111", username="budi88")
+        self.assertNotIn("tanpa ticket", self._warnings())
+
+    def test_tak_ada_peringatan_ticket_di_mode_username(self):
+        """Mode username menilai SEMUA baris panel — tak ada populasi terbuang."""
+        self.tx(self.panel, self.up_p, "50000", datetime(2026, 7, 1, 10),
+                username="budi88")
+        self.tx(self.bracket, self.up_b, "50000", datetime(2026, 7, 1, 10, 5),
+                username="budi88")
+        self.assertNotIn("tanpa ticket", self._warnings())
+
+    def test_peringatan_saat_fr_tak_punya_baris_dp_wd(self):
+        """Hari RUSAK: file FR hanya berisi beban admin/kategori lain, jadi tak ada
+        satu pun kandidat. Peringatan overlap lama mati total di kasus ini (syaratnya
+        `right` > 0), padahal justru inilah hari yang perlu diteriakkan."""
+        self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 10),
+                username="budi88")
+        self.tx(self.bracket, self.up_b, "1000", datetime(2026, 7, 1, 10),
+                username="budi88", jenis="admin")
+        self.tx(self.bracket, self.up_b, "5000", datetime(2026, 7, 1, 11),
+                jenis="lainnya")
+        joined = self._warnings()
+        self.assertIn("Deposit/Withdraw", joined)
+        self.assertIn("periksa file FR", joined)
+
+    def test_tak_ada_peringatan_fr_kosong_bila_ada_kandidat(self):
+        self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 10),
+                username="budi88")
+        self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 10, 5),
+                username="budi88")
+        self.assertNotIn("periksa file FR", self._warnings())
+
+
+class PanelBracketDetailAlasanTests(_Base):
+    """Alasan sisi kiri & sisi kanan harus SIMETRIS: baris tanpa anchor diberi
+    tahu bahwa ia tak punya anchor, bukan dituduh 'tak ada pasangannya'."""
+
+    def test_bracket_tanpa_username_punya_alasan_sendiri(self):
+        b = self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 10),
+                    username="")
+        self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 10),
+                username="budi88")
+        self._run()
+        res = MatchResult.objects.get(right=b)
+        self.assertIsNone(res.left_id)
+        self.assertEqual(res.reason_code, "no_panel")
+        self.assertIn("tanpa username", res.reason_detail.lower())
+
+    def test_bracket_ber_username_tetap_alasan_lama(self):
+        b = self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 10),
+                    username="siti99")
+        self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 10),
+                username="budi88")
+        self._run()
+        res = MatchResult.objects.get(right=b)
+        self.assertIn("Tidak ada baris Panel", res.reason_detail)
+
+
+class PanelBracketModeDiUITests(_Base):
+    """`summary["mode"]` harus terbaca pengguna, bukan hanya tersimpan."""
+
+    def setUp(self):
+        super().setUp()
+        get_user_model().objects.create_user("adm", password="pw123456", role="admin")
+        self.client.login(username="adm", password="pw123456")
+
+    def _batch_html(self):
+        batch = run_batch(self.toko, self.tol, date_from=date(2026, 7, 1),
+                          date_to=date(2026, 7, 1), recon_date=date(2026, 7, 1))
+        return self.client.get(reverse("batch_detail", args=[batch.pk]))
+
+    def test_mode_username_dijelaskan_di_tabel_relasi(self):
+        self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 10),
+                username="budi88")
+        self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 10, 5),
+                username="budi88")
+        self.assertContains(self._batch_html(), "join username+nominal")
+
+    def test_mode_ticket_tanpa_catatan(self):
+        self.tx(self.panel, self.up_p, "85000", datetime(2026, 7, 1, 10),
+                ticket="D111111", username="budi88")
+        self.tx(self.bracket, self.up_b, "85000", datetime(2026, 7, 1, 10, 5),
+                ticket="D111111", username="budi88")
+        self.assertNotContains(self._batch_html(), "join username+nominal")

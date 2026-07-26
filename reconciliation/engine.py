@@ -313,6 +313,13 @@ class PanelBracketMatcher:
     #: jumlah baris bracket yang RELEVAN dengan mode terpilih — dipakai run_match
     #: sebagai `summary["right"]` (penyebut `_bracket_overlap_warning`).
     right_relevant = None
+    #: jumlah baris Panel TANPA ticket pada run terakhir — di mode ticket baris
+    #: itu tidak dinilai sama sekali, jadi angkanya dilaporkan sebagai peringatan.
+    left_tanpa_ticket = 0
+
+    #: ambang RASIO baris panel ber-ticket untuk memilih mode ticket (inklusif:
+    #: seri 50/50 jatuh ke mode ticket = perilaku lama).
+    TICKET_RATIO = 0.5
 
     def sides(self, dfrom, dto, toko=None, include=None):
         left = Transaction.objects.filter(source_type__key="panel", is_duplicate=False)
@@ -336,9 +343,16 @@ class PanelBracketMatcher:
         return list(left), list(right)
 
     def match(self, run, left, right):
-        # Mode ticket dipakai selama sisi Panel MASIH membawa ticket, juga saat
-        # salah satu sisi kosong (tak ada yang bisa di-join — perilaku lama).
-        if any(p.ticket_no for p in left) or not right or not left:
+        # Mode dipilih dari RASIO, bukan dari ADA/TIDAKNYA satu baris ber-ticket.
+        # Aturan "ada satu ticket → mode ticket" adalah pembunuh-hari senyap: satu
+        # baris nyasar (ekspor bergaya Nexus salah unggah ke toko COR) cukup untuk
+        # memaksa mode ticket, sisi kanan menyusut ke 0 baris ber-ticket, dan
+        # SELURUH hari lewat tanpa pasangan sekaligus tanpa peringatan.
+        # Kedua populasi nyata tak berubah: Nexus ~100% ber-ticket → ticket,
+        # COR/Vigor/TMG 0% → username. Sisi kosong tetap mode ticket (perilaku lama).
+        ber_ticket = sum(1 for p in left if p.ticket_no)
+        self.left_tanpa_ticket = len(left) - ber_ticket
+        if not right or not left or ber_ticket >= len(left) * self.TICKET_RATIO:
             self.join_mode = "ticket"
             return self._match_ticket(run, left, right)
         self.join_mode = "username"
@@ -439,9 +453,15 @@ class PanelBracketMatcher:
                                    score=0, reason_code="no_bracket", reason_detail=detail))
         for b in kandidat_b:
             if b.id not in used:
+                # Simetris dengan sisi Panel di atas: baris tanpa username sama
+                # sekali TIDAK punya anchor — menuduhnya "tak ada pasangannya"
+                # mengarahkan auditor mencari baris yang memang mustahil dicari.
+                detail = ("Baris Bracket tanpa username — tidak bisa dijangkarkan"
+                          if not (b.username or "").strip()
+                          else "Tidak ada baris Panel dgn username+nominal sama")
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=None, right=b,
                                        score=0, reason_code="no_panel",
-                                       reason_detail="Tidak ada baris Panel dgn username+nominal sama"))
+                                       reason_detail=detail))
         return out
 
 
@@ -823,6 +843,12 @@ def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None,
     mode = getattr(matcher, "join_mode", None)
     if mode:
         run.summary["mode"] = mode
+        # Populasi yang KALAH oleh pilihan mode: di mode ticket, baris panel tanpa
+        # ticket tidak dinilai sama sekali (tak cocok, tak gagal — senyap). Dicatat
+        # agar `_mode_ticket_warning` bisa menyebut angkanya di halaman batch.
+        tanpa = getattr(matcher, "left_tanpa_ticket", 0) or 0
+        if mode == "ticket" and tanpa:
+            run.summary["panel_tanpa_ticket"] = tanpa
     if carried:
         run.summary["late_settled"] = len(late_pairs)
     if retro:
@@ -1109,6 +1135,15 @@ def _bracket_overlap_warning(runs):
         s = r.summary or {}
         left, right = s.get("left", 0), s.get("right", 0)
         cocok = s.get("cocok", 0)
+        if left and not right:
+            # Justru kasus PALING rusak, dan dulu paling sunyi: syarat lama
+            # `left and right` mematikan peringatan tepat saat sisi kanan nol —
+            # mis. file FR yang cuma berisi beban admin/kategori lain, sehingga
+            # tiap baris panel jadi no_bracket tanpa satu pun penjelasan.
+            apa = ("baris Bracket Deposit/Withdraw" if s.get("mode") == "username"
+                   else "baris Bracket ber-ticket")
+            return (f"Panel↔Bracket tanpa satu pun kandidat: tidak ada {apa} "
+                    "dalam rentang — periksa file FR yang diunggah.")
         if left and right:  # kedua sisi punya baris
             # Pakai sisi TERBESAR sebagai penyebut: file beda periode membuat salah
             # satu sisi (mis. bracket setelah filter tanggal) menyusut jadi ~0 baris,
@@ -1120,6 +1155,23 @@ def _bracket_overlap_warning(runs):
                     "kemungkinan file Panel & Bracket beda periode/tidak sepasang. "
                     "Cek tanggal file."
                 )
+    return None
+
+
+def _mode_ticket_warning(runs):
+    """Mode ticket terpilih PADAHAL sebagian baris Panel tak punya ticket.
+
+    Baris itu tidak dinilai relasi ini sama sekali — tidak cocok, tidak gagal,
+    tidak muncul di mana pun. Tanpa jejak ini, satu file salah unggah bisa
+    membuat sehari penuh lolos senyap."""
+    for r in runs:
+        if r.relation != MatchRun.Relation.PANEL_BRACKET:
+            continue
+        s = r.summary or {}
+        n = s.get("panel_tanpa_ticket", 0)
+        if s.get("mode") == "ticket" and n:
+            return (f"{n} baris Panel tanpa ticket tidak dinilai relasi "
+                    "Panel↔Bracket (mode ticket). Periksa file Panel yang diunggah.")
     return None
 
 
@@ -1176,12 +1228,13 @@ def _aggregate_batch(toko, date_from, date_to, runs, skipped, include=None, excl
             buckets[k] += (r.summary or {}).get(k, 0)
 
     warnings = []
-    w = _bracket_overlap_warning(runs)
-    if w:
-        warnings.append(w)
-    w2 = _panel_bracket_total_warning(toko, date_from, date_to, include)
-    if w2:
-        warnings.append(w2)
+    for w in (
+        _bracket_overlap_warning(runs),
+        _mode_ticket_warning(runs),
+        _panel_bracket_total_warning(toko, date_from, date_to, include),
+    ):
+        if w:
+            warnings.append(w)
 
     return {
         # money_matched = uang yang berpasangan ke Panel; selisih = panel - matched.
@@ -1263,7 +1316,10 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
         elif not comp["bracket"]:
             alasan = "tidak ada baris Bracket (FR) dalam rentang tanggal"
         else:
-            alasan = "tidak ada baris Panel dalam rentang tanggal"
+            # Baris panel bisa ADA tapi seluruhnya carried (gerbang mengecualikan
+            # baris carried) — kalimat lama menuduh file panelnya kosong.
+            alasan = ("tidak ada baris Panel dalam rentang tanggal "
+                      "(atau semuanya masih menunggu settlement)")
         skipped_detail[MatchRun.Relation.PANEL_BRACKET.value] = alasan
     # PANEL_BANK jalan bila ada uang (bank/gateway) yang ADA & dicentang, ATAU —
     # jaring senyap — uang DIINGINKAN (dicentang) tapi kosong di scope sementara
