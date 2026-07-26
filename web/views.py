@@ -1886,6 +1886,8 @@ def _toko_scope(request):
     if not mode_semua(request):
         return _active_toko(request), [], []
     daftar = list(tokos_for(request.user))
+    if not daftar:
+        return None, [], []  # tak punya toko sama sekali → halaman no_toko
     sah = {t.id for t in daftar}
     dipilih = [
         int(v) for v in request.GET.getlist("toko")

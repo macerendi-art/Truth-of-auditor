@@ -554,6 +554,13 @@ class HutangCeklisViewTests(TestCase):
         self.assertEqual(r.context["data"]["count"], 1)
         self.assertNotContains(r, 'name="toko"')
 
+    def test_tanpa_toko_aktif_jatuh_ke_halaman_no_toko(self):
+        """Instalasi tanpa toko aktif: jangan tampilkan tabel kosong tanpa
+        konteks — halaman no_toko yang menjelaskan keadaannya."""
+        Toko.objects.update(is_active=False)
+        _sesi_semua(self.client)
+        self.assertIn("web/no_toko.html", [t.name for t in self._get().templates])
+
     def test_non_admin_tak_dapat_ceklis(self):
         u = User.objects.create_user("a2", password="pw12345", role="auditor")
         u.allowed_tokos.set([self.lbs])
