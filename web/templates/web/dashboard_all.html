@@ -34,7 +34,7 @@
     <div class="top"><span class="k">Area Pengecekan</span>
       <span class="ic {% if pending_review_count %}a{% else %}g{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span></div>
     <div class="v {% if pending_review_count %}a{% else %}g{% endif %}">{{ pending_review_count|intcomma }}</div>
-    <div class="sub">hasil perlu mata manusia · seluruh toko</div>
+    <div class="sub">hasil perlu mata manusia · seluruh toko — tautan buka antrean toko aktif saja</div>
   </a>
   <div class="card stat">
     <div class="top"><span class="k">Menunggu settlement</span>
@@ -183,7 +183,7 @@
 
 <p class="faint reveal" style="margin:16px 2px 0;font-size:12.5px;line-height:1.7">
   Beberapa panel harian — grafik pergerakan, daftar kerja, dan pemeriksaan uang tanpa pasangan —
-  belum tersedia di mode gabungan karena keduanya terikat pada satu toko.
+  belum tersedia di mode gabungan karena ketiganya terikat pada satu toko.
   Pilih satu toko lewat tombol <b>Buka</b> di tabel untuk membukanya.
 </p>
 {% endblock %}

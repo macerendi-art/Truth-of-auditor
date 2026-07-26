@@ -1,4 +1,4 @@
-from web.access import SEMUA_TOKO, is_admin, tokos_for
+from web.access import is_admin, mode_semua, tokos_for
 
 
 def toko(request):
@@ -18,7 +18,7 @@ def toko(request):
     # Mode "Semua Toko": sentinel string, khusus admin. `active_toko` TETAP toko
     # nyata (fallback pertama) — puluhan template lama memakainya tanpa guard,
     # dan halaman single-toko memang menampilkan toko itu.
-    semua = admin and active_id == SEMUA_TOKO
+    semua = mode_semua(request)
     active = next((t for t in tokos if t.id == active_id), tokos[0] if tokos else None)
     # Picker toko berkelompok per panel client (Nexus/Vigor/TM Gaming) — dibangun
     # dari `tokos` yang SUDAH difetch di atas (list, bukan queryset baru), jadi
