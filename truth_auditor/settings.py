@@ -78,6 +78,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'web.middleware.GeoBlockMiddleware',
     'web.middleware.ForcePasswordChangeMiddleware',
+    'web.middleware.IPAllowlistMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]

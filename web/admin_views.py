@@ -1,4 +1,6 @@
 """Panel admin: kelola pengguna & toko, hapus data. Semua view digate admin_required."""
+import ipaddress
+
 from django.contrib import messages
 from django.contrib.auth import get_user_model, update_session_auth_hash
 from django.contrib.auth.password_validation import validate_password
@@ -16,6 +18,7 @@ from reconciliation.models import MatchResult, ReconBatch
 from sources.models import Toko, Upload
 from transactions.models import Transaction
 from web.access import admin_required
+from web.models import AllowedIP
 from web.views import _active_toko, _parse_date
 
 
@@ -409,3 +412,52 @@ def delete_user(request, pk):
             catat(request.user, "hapus_user", username)
             messages.success(request, f"Pengguna {username} dihapus permanen.")
     return redirect("kelola_user")
+
+
+@admin_required
+def kelola_ip(request):
+    """Kelola allowlist IP (`web.middleware.IPAllowlistMiddleware`) — hanya
+    menggerbang auditor & supervisor; admin tidak pernah terkunci dari sini."""
+    if request.method == "POST" and request.POST.get("action") == "create":
+        label = (request.POST.get("label") or "").strip()[:100]
+        cidr = (request.POST.get("cidr") or "").strip()
+        if not label:
+            messages.error(request, "Label wajib diisi.")
+        elif not cidr:
+            messages.error(request, "IP/CIDR wajib diisi.")
+        else:
+            try:
+                ipaddress.ip_network(cidr, strict=False)
+            except ValueError:
+                messages.error(request, f"'{cidr}' bukan IP atau CIDR yang valid.")
+            else:
+                entri = AllowedIP.objects.create(label=label, cidr=cidr, dibuat_oleh=request.user)
+                catat(request.user, "buat_ip_allow", entri.label, label=label, cidr=cidr)
+                messages.success(request, f"IP {cidr} ({label}) ditambahkan ke allowlist.")
+        return redirect("kelola_ip")
+    if request.method == "POST" and request.POST.get("action") == "toggle":
+        eid = request.POST.get("ip_id", "")
+        if not eid.isdecimal():
+            messages.error(request, "ID entri tidak valid.")
+            return redirect("kelola_ip")
+        entri = get_object_or_404(AllowedIP, pk=eid)
+        entri.aktif = not entri.aktif
+        entri.save(update_fields=["aktif"])
+        catat(request.user, "toggle_ip_allow", entri.label, label=entri.label, cidr=entri.cidr,
+              aktif=entri.aktif)
+        messages.success(
+            request, f"IP {entri.cidr} ({entri.label}) {'diaktifkan' if entri.aktif else 'dinonaktifkan'}.")
+        return redirect("kelola_ip")
+    if request.method == "POST" and request.POST.get("action") == "delete":
+        eid = request.POST.get("ip_id", "")
+        if not eid.isdecimal():
+            messages.error(request, "ID entri tidak valid.")
+            return redirect("kelola_ip")
+        entri = get_object_or_404(AllowedIP, pk=eid)
+        label, cidr = entri.label, entri.cidr
+        entri.delete()
+        catat(request.user, "hapus_ip_allow", label, label=label, cidr=cidr)
+        messages.success(request, f"IP {cidr} ({label}) dihapus dari allowlist.")
+        return redirect("kelola_ip")
+    entries = AllowedIP.objects.select_related("dibuat_oleh").order_by("-aktif", "label")
+    return render(request, "web/kelola/ip.html", {"entries": entries})

@@ -1,0 +1,60 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% block title %}Akses IP · Truth of Auditor{% endblock %}
+{% block crumb %}Admin · Akses IP{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Akses IP</h1>
+    <p>Allowlist IP untuk akun auditor &amp; supervisor. Admin tidak pernah digerbang oleh daftar ini.
+       Selama daftar kosong, fitur ini dorman — tidak ada yang terkunci.</p>
+  </div>
+</div>
+
+<div class="card reveal" style="max-width:430px">
+  <h3>Tambah IP</h3>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create">
+    <div class="field"><label>Label (mis. Kantor Jakarta)</label>
+      <input name="label" maxlength="100" required></div>
+    <div class="field"><label>IP atau CIDR (mis. 203.0.113.7 atau 198.51.100.0/24)</label>
+      <input name="cidr" maxlength="64" required></div>
+    <button class="btn primary" type="submit">+ Tambah</button>
+  </form>
+</div>
+
+<div class="card reveal pad0" style="margin-top:16px">
+  <div class="card-head"><h3>Daftar IP <span class="faint" style="font-weight:500">({{ entries|length }})</span></h3></div>
+  <div class="twrap selectable" style="border:none">
+  <table class="selectable">
+    <thead><tr><th>Label</th><th>IP/CIDR</th><th>Status</th><th>Dibuat oleh</th><th class="r">Aksi</th></tr></thead>
+    <tbody>
+    {% for e in entries %}
+      <tr>
+        <td><b>{{ e.label }}</b></td>
+        <td class="mono">{{ e.cidr }}</td>
+        <td>{% if e.aktif %}<span class="badge ok">aktif</span>{% else %}<span class="badge bad">nonaktif</span>{% endif %}</td>
+        <td>{{ e.dibuat_oleh.username|default:"—" }}</td>
+        <td class="r" style="white-space:nowrap">
+          <form method="post" style="display:inline">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="toggle">
+            <input type="hidden" name="ip_id" value="{{ e.id }}">
+            <button class="btn sm" type="submit">{% if e.aktif %}Nonaktifkan{% else %}Aktifkan{% endif %}</button>
+          </form>
+          <form method="post" style="display:inline"
+                onsubmit="return confirm('Hapus entri IP {{ e.cidr }} ({{ e.label }}) dari allowlist?')">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="ip_id" value="{{ e.id }}">
+            <button class="btn sm ghost danger" type="submit">Hapus</button>
+          </form>
+        </td>
+      </tr>
+    {% empty %}<tr><td colspan="5" class="cell-empty">Belum ada entri IP — allowlist dorman, semua auditor/supervisor bebas masuk.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

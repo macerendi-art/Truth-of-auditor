@@ -34,6 +34,7 @@ urlpatterns = [
     path("versi/", views.riwayat_versi, name="riwayat_versi"),
     path("kelola/toko/", admin_views.kelola_toko, name="kelola_toko"),
     path("kelola/toko/<int:pk>/delete/", admin_views.delete_toko, name="delete_toko"),
+    path("kelola/ip/", admin_views.kelola_ip, name="kelola_ip"),
     path("kelola/user/", admin_views.kelola_user, name="kelola_user"),
     path("kelola/user/<int:pk>/", admin_views.kelola_user_edit, name="kelola_user_edit"),
     path("kelola/user/<int:pk>/delete/", admin_views.delete_user, name="delete_user"),

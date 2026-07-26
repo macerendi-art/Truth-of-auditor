@@ -12,6 +12,20 @@ def is_admin(user) -> bool:
     return bool(user.is_authenticated and (user.is_superuser or user.role == "admin"))
 
 
+def is_ip_gated(user) -> bool:
+    """True bila user tunduk pada gerbang IP allowlist (`IPAllowlistMiddleware`).
+
+    Hanya auditor & supervisor — admin/superuser SELALU dikecualikan (break-glass
+    alami: admin harus selalu bisa masuk untuk membetulkan daftar allowlist itu
+    sendiri, sekalipun sedang salah/kosong/mengunci semua orang lain).
+    """
+    return bool(
+        user.is_authenticated
+        and not is_admin(user)
+        and getattr(user, "role", "") in ("auditor", "supervisor")
+    )
+
+
 def tokos_for(user):
     """Queryset Toko aktif yang boleh diakses user — satu-satunya sumber kebenaran RBAC."""
     qs = Toko.objects.filter(is_active=True).order_by("name")

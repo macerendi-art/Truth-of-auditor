@@ -1,4 +1,5 @@
-"""Middleware gerbang: paksa ganti password + kunci wilayah (geo-block)."""
+"""Middleware gerbang: paksa ganti password + kunci wilayah (geo-block) +
+allowlist IP (auditor/supervisor)."""
 import ipaddress
 
 from django.conf import settings
@@ -6,6 +7,9 @@ from django.http import HttpResponseForbidden
 from django.shortcuts import redirect
 from django.template.loader import render_to_string
 from django.urls import reverse
+
+from core.audit import catat
+from web.access import is_ip_gated
 
 
 class ForcePasswordChangeMiddleware:
@@ -215,3 +219,73 @@ class GeoBlockMiddleware:
         # (9) negara dalam daftar yang diizinkan → lolos; else BLOK.
         allowed = getattr(settings, "GEO_BLOCK_COUNTRIES", {"ID"})
         return country not in allowed
+
+
+# --- Allowlist IP (auditor & supervisor) ------------------------------------
+# Klien minta auditor & supervisor hanya bisa masuk dari IP terdaftar; admin
+# TIDAK PERNAH digerbang (break-glass — admin harus selalu bisa masuk untuk
+# membetulkan daftar allowlist-nya sendiri, sekalipun sedang kosong/salah).
+# DEFAULT DORMAN: tanpa entri `AllowedIP` aktif, middleware ini no-op total —
+# menyalakan fitur (menambah entri pertama) tidak boleh mengunci siapa pun
+# yang belum terdaftar sampai admin sadar dan mendaftarkan IP mereka.
+
+_SESSION_FLAG = "ip_block_logged"
+
+
+class IPAllowlistMiddleware:
+    """Gerbang IP untuk auditor & supervisor — reuse penuh helper anti-spoof
+    `GeoBlockMiddleware` (`_client_ip` via XFF paling kiri, `_via_cloudflare`,
+    `_real_client_ip`): allowlist TIDAK PERNAH diuji terhadap IP edge
+    Cloudflare, selalu terhadap IP pengguna asli (`_real_client_ip`).
+
+    Dipasang SETELAH `ForcePasswordChangeMiddleware` (Auth → GeoBlock →
+    ForcePassword → IPAllowlist, butuh `request.user`). Konsekuensi yang
+    disengaja: seorang auditor berflag `must_change_password` yang mengakses
+    dari IP tak dipercaya TETAP kena 403 di sini, bahkan saat dialihkan ke
+    halaman ganti password — ganti password dari IP asing sengaja tetap
+    digerbang, bukan celah untuk melewati allowlist.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        user = getattr(request, "user", None)
+        if user is None or not is_ip_gated(user):
+            return self.get_response(request)
+
+        # Aset statis/media + logout selalu lolos: user yang terblokir harus
+        # tetap bisa keluar, dan halaman blokir sendiri tak boleh 500 karena
+        # CSS/font gagal termuat. (Catatan lstrip: lihat ForcePasswordChangeMiddleware —
+        # STATIC_URL/MEDIA_URL dinormalisasi Django jadi berawalan "/" saat
+        # runtime sama seperti request.path, jadi dibandingkan apa adanya.)
+        path = request.path
+        asset_prefixes = tuple(p for p in (settings.STATIC_URL, settings.MEDIA_URL) if p)
+        if (asset_prefixes and path.startswith(asset_prefixes)) or path == reverse("logout"):
+            return self.get_response(request)
+
+        from web.models import AllowedIP  # impor lokal: model, hindari siklus saat startup
+
+        entries = list(AllowedIP.objects.filter(aktif=True).values_list("cidr", flat=True))
+        if not entries:
+            # DORMAN: belum ada entri aktif → jangan kunci siapa pun.
+            return self.get_response(request)
+
+        peer = _client_ip(request)
+        if _ip_is_internal(peer):  # dev / health-check internal → selalu lolos
+            return self.get_response(request)
+
+        via_cf = _via_cloudflare(peer)
+        ip = _real_client_ip(request, via_cf)
+
+        if _ip_in_allowlist(ip, entries):
+            # Reset flag sesi: blokir berikutnya (mis. IP berubah lagi) dicatat lagi.
+            request.session.pop(_SESSION_FLAG, None)
+            return self.get_response(request)
+
+        if not request.session.get(_SESSION_FLAG):
+            catat(user, "ip_blokir", ip)
+            request.session[_SESSION_FLAG] = True
+
+        html = render_to_string("web/ip_block.html", {"ip": ip}, request=request)
+        return HttpResponseForbidden(html)

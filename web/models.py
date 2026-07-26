@@ -106,3 +106,25 @@ class RekapPenyebab(TimeStampedModel):
 
     def __str__(self):
         return f"{self.periode:%Y-%m} {self.label} = {self.nilai}"
+
+
+class AllowedIP(TimeStampedModel):
+    """Satu entri allowlist IP untuk gerbang `IPAllowlistMiddleware`.
+
+    Auditor & supervisor hanya boleh masuk dari IP/CIDR yang terdaftar di sini
+    dan `aktif=True`; admin/superuser SELALU bebas — itulah break-glass-nya:
+    admin harus selalu bisa masuk untuk memperbaiki daftar ini sendiri.
+    Allowlist KOSONG = fitur dorman (semua orang lolos apa adanya) — deploy
+    awal fitur ini tidak mengunci siapa pun. `cidr` menerima IP tunggal
+    maupun notasi CIDR (divalidasi di view dengan `ipaddress.ip_network`).
+    """
+
+    label = models.CharField(max_length=100)
+    cidr = models.CharField(max_length=64, help_text="IP tunggal atau CIDR, mis. 203.0.113.7 atau 198.51.100.0/24")
+    aktif = models.BooleanField(default=True)
+    dibuat_oleh = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="allowed_ips")
+
+    def __str__(self):
+        return f"{self.label} ({self.cidr})"
