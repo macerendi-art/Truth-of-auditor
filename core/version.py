@@ -123,12 +123,18 @@ RILIS: tuple[Rilis, ...] = (
         tanggal=_dt.date(2026, 7, 26),
         nama="Tiga Panel & Rekap Bulanan",
         jenis=MINOR,
-        commit="",
+        commit="1cff0a9",
         sorotan=(
             "Rekonsiliasi Panel↔Bracket kini berjalan untuk brand berpanel Vigor/TM Gaming yang "
             "ekspornya tanpa nomor tiket — baris dicocokkan lewat username + nominal. Uji dengan data "
-            "nyata COR: 10.069 dari 10.072 baris (99,97%) cocok otomatis. Halaman hasil menampilkan "
-            "mode pencocokan yang dipakai, jadi selalu jelas aturan mana yang bekerja.",
+            "nyata COR: 10.069 dari 10.072 baris (99,97%) cocok otomatis. Saat aturan baru ini yang "
+            "bekerja, halaman hasil mencantumkan mode pencocokannya.",
+            "Pencocokan sisi uang mengenal jangkar baru: nomor rekening tujuan dari laporan gateway "
+            "(UNO) yang sama persis dengan rekening pemain di panel — pelengkap kunci UUID yang sudah "
+            "ada, hanya dipakai bila nominalnya juga sama persis.",
+            "Dashboard menampilkan kartu Ringkasan Bracket — total deposit, penarikan, dan bersih "
+            "menurut catatan FR/Bracket hari itu — berdampingan dengan Ringkasan Panel, dan angkanya "
+            "selalu klop dengan halaman Breakdown (termasuk koreksi sel yang pernah disimpan).",
             "Halaman baru Rekap Bulanan meniru rekap Excel yang selama ini disusun manual: empat seksi "
             "(Net Profit, Sisa Dana Member, Total Dana Lebih Web, Selisih beserta penyebabnya), angka "
             "otomatis dihitung dari data harian, dan isian manual bisa menimpa angka otomatis dengan "
@@ -138,10 +144,12 @@ RILIS: tuple[Rilis, ...] = (
             "beberapa toko sekaligus di halaman Hutang/Piutang.",
             "Gembok alamat IP untuk akun auditor & supervisor: hanya alamat internet yang terdaftar "
             "yang bisa masuk; admin tidak pernah terkunci; selama daftar kosong fitur ini tidur. "
-            "Dikelola dari halaman admin sendiri dan setiap penolakan tercatat di jejak audit.",
+            "Dikelola dari halaman admin sendiri; penolakan tercatat di jejak audit (satu catatan "
+            "per sesi per alamat).",
             "Penarikan berlabel bank “OTH” pada brand Vigor/TM kini menampilkan bank aslinya (dibaca "
             "dari teks transaksi), dan nama penerima transfer BRI yang tadinya kosong kini terisi — "
-            "berlaku juga untuk data yang sudah terlanjur diimpor, tanpa unggah ulang.",
+            "untuk nama BRI berlaku otomatis termasuk data lama; untuk label OTH data lama tersedia "
+            "perintah perapihan sekali jalan, tanpa perlu unggah ulang berkas.",
             "Setiap toko kini dikelompokkan menurut panelnya (Nexus / Vigor / TM Gaming) di pemilih "
             "toko, dan jenis panel wajib dipilih saat membuat toko baru.",
         ),
