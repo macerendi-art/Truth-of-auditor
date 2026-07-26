@@ -50,9 +50,11 @@ from web.breakdown import (
 from web.channels import breakdown_metode
 from web.forms import GantiPasswordForm
 from web.hutang import hutang_piutang as hitung_hutang_piutang
-from web.models import FRKoreksi
+from web.models import FRKoreksi, RekapManual, RekapPenyebab
 from web.monthly import monthly_summary
 from web.quotes import random_login_tagline
+from web.rekap import FIELDS as REKAP_FIELDS
+from web.rekap import rekap_bulanan as hitung_rekap_bulanan
 from web.rekening import rekening_breakdown as hitung_rekening_breakdown
 from web.settlement import pending_settlement_rows
 from web.templatetags.web_extras import reason_label
@@ -1761,6 +1763,197 @@ def monthly_overview(request):
         "months": [date_cls(y, m, 1) for y, m in months],
         "sel_month": f"{year:04d}-{month:02d}",
     })
+
+
+# ---- Rekap Bulanan (Task 9) ------------------------------------------------
+# Halaman HANYA merender `web.rekap.rekap_bulanan()` — semua rumus/tanda hidup
+# di sana. Edit manual meniru pola fr_koreksi_form/simpan (popup HTMX, ladder
+# validasi desimal identik).
+
+_REKAP_FIELDS_BY_SLUG = {f.slug: f for f in REKAP_FIELDS}
+_REKAP_KIND_EDITABLE = {"manual", "auto", "carry"}  # "computed" = rumus, kunci
+
+
+def _rekap_bulan_pilihan():
+    """12 bulan terakhir (termasuk bulan ini) untuk dropdown — tak bergantung data,
+    supaya bulan berjalan yang belum ada apa pun tetap bisa dibuka & diisi."""
+    today = date_cls.today()
+    y, m = today.year, today.month
+    hasil = []
+    for _ in range(12):
+        hasil.append(date_cls(y, m, 1))
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    return hasil
+
+
+def _rekap_periode_dari(sel):
+    """'YYYY-MM' → tanggal 1 bulan itu, atau None bila rusak/kosong."""
+    sel = (sel or "").strip()
+    if len(sel) != 7 or sel[4] != "-":
+        return None
+    try:
+        year, month = int(sel[:4]), int(sel[5:7])
+    except ValueError:
+        return None
+    if not (1 <= month <= 12):
+        return None
+    return date_cls(year, month, 1)
+
+
+def _rekap_field_editable(slug):
+    """Field registry utk `slug`, HANYA bila kind-nya boleh ditimpa manual.
+
+    Baris `computed` (rumus) sengaja TIDAK PERNAH lolos di sini — menimpanya
+    akan merusak konsistensi total, jadi endpoint edit harus menolaknya (400).
+    """
+    f = _REKAP_FIELDS_BY_SLUG.get((slug or "").strip())
+    if f is None or f.kind not in _REKAP_KIND_EDITABLE:
+        return None
+    return f
+
+
+def _rekap_nilai_form(request):
+    """Ladder validasi desimal — SALINAN PERSIS `fr_koreksi_simpan` (views.py):
+    format id (titik ribuan/koma desimal) diterima, NaN/Infinity/eksponen
+    raksasa/magnitude di luar kolom DB ditolak. Kembalikan (Decimal, None) atau
+    (None, HttpResponseBadRequest)."""
+    mentah = (request.POST.get("nilai") or "").strip().replace(" ", "")
+    try:
+        nilai = Decimal(mentah.replace(".", "").replace(",", "."))
+    except InvalidOperation:
+        return None, HttpResponseBadRequest("nilai tidak valid")
+    if not nilai.is_finite():
+        return None, HttpResponseBadRequest("nilai tidak valid")
+    try:
+        nilai = nilai.quantize(Decimal("0.01"))
+    except InvalidOperation:
+        return None, HttpResponseBadRequest("nilai tidak valid")
+    if abs(nilai) > Decimal("9999999999999999.99"):
+        return None, HttpResponseBadRequest("nilai tidak valid")
+    return nilai, None
+
+
+@login_required
+def rekap_bulanan_page(request):
+    """Rekap Bulanan (Net Profit & Dana Lebih) — 4 seksi ala Excel end user,
+    edit manual + Penyebab Selisih via popup HTMX."""
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    periode = _rekap_periode_dari(request.GET.get("bulan", "")) or date_cls.today().replace(day=1)
+    data = hitung_rekap_bulanan(active, periode.year, periode.month)
+    sel_bulan = f"{periode.year:04d}-{periode.month:02d}"
+    return render(request, "web/rekap_bulanan.html", {
+        "data": data,
+        "bulan": periode,
+        "months": _rekap_bulan_pilihan(),
+        "sel_bulan": sel_bulan,
+        # Nama BEDA sengaja dari `data.petunjuk` (peringatan kunci carry,
+        # top-level) — jangan disamakan dgn `row.petunjuk` (hint per baris di
+        # registry FIELDS) supaya template tak pernah tertukar keduanya.
+        "peringatan_kunci": data["petunjuk"],
+    })
+
+
+@login_required
+def rekap_edit_form(request):
+    """Popup kecil edit satu baris Rekap Bulanan (GET, HTMX) — klon fr_koreksi_form."""
+    active = _active_toko(request)
+    periode = _rekap_periode_dari(request.GET.get("bulan", ""))
+    f = _rekap_field_editable(request.GET.get("field", ""))
+    if active is None or periode is None or f is None:
+        return HttpResponseBadRequest("parameter kurang atau field tidak dikenal")
+    data = hitung_rekap_bulanan(active, periode.year, periode.month)
+    baris = next((r for s in data["sections"] for r in s["rows"] if r["slug"] == f.slug), None)
+    if baris is None:
+        return HttpResponseBadRequest("field tidak dikenal")
+    return render(request, "web/_rekap_edit_form.html", {
+        "field": f, "periode": periode, "baris": baris,
+        "sel_bulan": f"{periode.year:04d}-{periode.month:02d}",
+    })
+
+
+@login_required
+def rekap_edit_simpan(request):
+    """Simpan/hapus RekapManual satu baris lalu render ulang 4 seksi (POST, HTMX).
+
+    Menyimpan baris `carry` ADALAH aksi mengunci nilai carry bulan ini — tanpa
+    ini, `web.rekap.rekap_bulanan` memperingatkan lewat `petunjuk` (lihat
+    docstring KUNCI BULANAN di web/rekap.py)."""
+    if request.method != "POST":
+        return HttpResponseBadRequest("POST saja")
+    active = _active_toko(request)
+    periode = _rekap_periode_dari(request.POST.get("bulan", ""))
+    f = _rekap_field_editable(request.POST.get("field", ""))
+    if active is None or periode is None or f is None:
+        return HttpResponseBadRequest("parameter kurang atau field tidak dikenal")
+
+    existing = RekapManual.objects.filter(toko=active, periode=periode, field=f.slug).first()
+    nilai_asli = existing.nilai if existing else None
+    sel_bulan = f"{periode.year:04d}-{periode.month:02d}"
+
+    if request.POST.get("hapus"):
+        if existing:
+            existing.delete()
+        catat(request.user, "rekap_manual_hapus", f"{f.slug} {sel_bulan}", toko=active,
+              periode=sel_bulan, field=f.slug,
+              nilai_asli=str(nilai_asli) if nilai_asli is not None else "")
+    else:
+        nilai, gagal = _rekap_nilai_form(request)
+        if gagal is not None:
+            return gagal
+        RekapManual.objects.update_or_create(
+            toko=active, periode=periode, field=f.slug,
+            defaults={"nilai": nilai,
+                      "catatan": (request.POST.get("catatan") or "").strip(),
+                      "dibuat_oleh": request.user})
+        catat(request.user, "rekap_manual", f"{f.slug} {sel_bulan}", toko=active,
+              periode=sel_bulan, field=f.slug,
+              nilai_asli=str(nilai_asli) if nilai_asli is not None else "",
+              nilai_baru=str(nilai))
+
+    data = hitung_rekap_bulanan(active, periode.year, periode.month)
+    html = render_to_string("web/_rekap_sections.html",
+                            {"data": data, "sel_bulan": sel_bulan}, request=request)
+    html += '<div id="rekapPop" hx-swap-oob="innerHTML"></div>'
+    return HttpResponse(html)
+
+
+@login_required
+def rekap_penyebab_simpan(request):
+    """Tambah/hapus satu baris Penyebab Selisih (POST biasa + redirect)."""
+    if request.method != "POST":
+        return HttpResponseBadRequest("POST saja")
+    active = _active_toko(request)
+    periode = _rekap_periode_dari(request.POST.get("bulan", ""))
+    if active is None or periode is None:
+        return HttpResponseBadRequest("parameter kurang")
+    sel_bulan = f"{periode.year:04d}-{periode.month:02d}"
+    tujuan = f"{reverse('rekap_bulanan')}?bulan={sel_bulan}"
+
+    if request.POST.get("hapus"):
+        obj = get_object_or_404(RekapPenyebab, pk=request.POST.get("id"), toko=active)
+        label, nilai = obj.label, obj.nilai
+        obj.delete()
+        catat(request.user, "rekap_penyebab_hapus", f"{label} {sel_bulan}", toko=active,
+              periode=sel_bulan, label=label, nilai=str(nilai))
+    else:
+        label = (request.POST.get("label") or "").strip()[:100]
+        if not label:
+            return HttpResponseBadRequest("label wajib diisi")
+        nilai, gagal = _rekap_nilai_form(request)
+        if gagal is not None:
+            return gagal
+        urutan = (RekapPenyebab.objects.filter(toko=active, periode=periode)
+                  .aggregate(m=Max("urutan"))["m"] or 0) + 1
+        RekapPenyebab.objects.create(
+            toko=active, periode=periode, label=label, nilai=nilai, urutan=urutan)
+        catat(request.user, "rekap_penyebab", f"{label} {sel_bulan}", toko=active,
+              periode=sel_bulan, label=label, nilai=str(nilai))
+
+    return redirect(tujuan)
 
 
 @login_required

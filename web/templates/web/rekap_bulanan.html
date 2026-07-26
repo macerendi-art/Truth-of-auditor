@@ -1,0 +1,48 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% load web_extras %}
+{% block title %}Rekap Bulanan · Truth of Auditor{% endblock %}
+{% block crumb %}Laporan · Rekap Bulanan{% endblock %}
+{% block content_class %}wide{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Rekap Bulanan</h1>
+    <p>Net Profit &amp; Dana Lebih Web <b>{{ active_toko.name }}</b> — {{ bulan|date:"F Y" }}, meniru rekap Excel end user (4 seksi, isian manual bisa menimpa angka otomatis).</p>
+  </div>
+</div>
+
+<div class="card reveal" style="margin-bottom:18px">
+  <form method="get" class="row">
+    <div class="field"><label>Bulan</label>
+      <select name="bulan" onchange="this.form.submit()">
+      {% for m in months %}<option value="{{ m|date:'Y-m' }}" {% if m|date:'Y-m' == sel_bulan %}selected{% endif %}>{{ m|date:"F Y" }}</option>{% endfor %}
+      </select></div>
+    <noscript><button class="btn primary" type="submit">Terapkan</button></noscript>
+  </form>
+</div>
+
+{% if peringatan_kunci %}
+<div class="msg warning reveal" style="margin-bottom:18px">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+  <span>{{ peringatan_kunci }}</span>
+</div>
+{% endif %}
+
+{% include "web/_rekap_sections.html" with data=data sel_bulan=sel_bulan %}
+
+<p class="faint" style="font-size:11.5px;margin:0 0 4px">
+  Koreksi sel FR (menu Control Bracket) tidak diterapkan di rekap — gunakan nilai manual di sini bila perlu.
+</p>
+
+<div id="rekapPop"></div>
+<style>
+  .rk-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--brand);margin-right:6px;cursor:help;vertical-align:middle}
+  .rk-hint{color:var(--faint);cursor:help;margin-left:5px;font-size:11px}
+  .neg{color:var(--bad)}
+  tr.rk-total td{font-weight:700;background:var(--panel-2)}
+  #rekapPop:not(:empty){position:fixed;inset:0;z-index:80;
+    background:rgba(8,10,17,.45);display:flex;align-items:center;justify-content:center}
+  .pop-mini{width:min(380px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.25)}
+</style>
+{% endblock %}

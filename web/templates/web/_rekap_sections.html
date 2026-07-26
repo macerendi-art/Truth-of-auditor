@@ -1,0 +1,86 @@
+{% load humanize %}
+{% comment %}
+4 kartu seksi + kartu Penyebab Selisih. Dipakai DUA tempat: langsung di
+rekap_bulanan.html (render awal) dan sebagai fragmen balik HTMX dari
+rekap_edit_simpan (oob outerHTML) — makanya wrapper #rekap-sections berdiri
+sendiri, tidak bergantung markup di luar dirinya.
+
+RENDER 100% DINAMIS dari `data.sections`/`data.penyebab` — JANGAN hardcode
+daftar baris di sini: registry `web.rekap.FIELDS` boleh bertambah kapan saja
+(mis. `bonus_lain`/`other_expense`), dan setiap baris baru harus otomatis
+muncul tanpa sentuh template.
+{% endcomment %}
+<div id="rekap-sections">
+{% for s in data.sections %}
+<div class="card pad0 reveal" style="margin-bottom:18px">
+  <div class="card-head"><h3>{{ s.no }}. {{ s.judul }}</h3></div>
+  <div class="table-wrap" style="border:none">
+  <table class="selectable">
+    <thead><tr>
+      <th>Baris</th><th class="num" style="width:160px">Nilai</th>
+      <th style="width:110px">Sumber</th><th class="num" style="width:64px">Aksi</th>
+    </tr></thead>
+    <tbody>
+    {% for r in s.rows %}
+    <tr class="{% if r.kind == 'computed' %}rk-total{% endif %}">
+      <td>
+        {% if r.manual %}<span class="rk-dot" title="Manual oleh {{ r.manual.oleh|default:"—" }} · {{ r.manual.waktu|date:"d/m/Y H:i" }}{% if r.manual.catatan %} · {{ r.manual.catatan }}{% endif %} · nilai asli {% if r.auto is not None %}{{ r.auto|floatformat:0|intcomma }}{% else %}—{% endif %}"></span>{% endif %}
+        {% with hint_baris=r.petunjuk %}
+        <span{% if r.detail %} title="Isi {{ r.label }}: {{ r.detail|join:", " }}"{% endif %}>{{ r.label }}</span>
+        {% if hint_baris %}<span class="rk-hint" title="{{ hint_baris }}" aria-hidden="true">ⓘ</span>{% endif %}
+        {% endwith %}
+        {% if r.kind == "carry" and r.tersimpan == False and data.petunjuk %}<span class="badge warn" style="margin-left:6px;font-size:10px" title="Nilai carry belum dikunci bulan ini — buka Edit lalu Simpan utk mengunci">belum dikunci</span>{% endif %}
+      </td>
+      <td class="num mono{% if r.nilai < 0 %} neg{% endif %}"{% if r.kind == 'computed' %} style="font-weight:700"{% endif %}>{{ r.nilai|floatformat:0|intcomma }}</td>
+      <td><span class="badge plain {% if r.sumber == 'manual' %}src{% elif r.sumber == 'computed' %}muted{% else %}ok{% endif %}" style="font-size:10.5px">{{ r.sumber }}</span></td>
+      <td class="num">{% if r.kind != "computed" %}<a href="#" class="btn sm" hx-get="{% url 'rekap_edit_form' %}?bulan={{ sel_bulan }}&field={{ r.slug }}" hx-target="#rekapPop" hx-swap="innerHTML">Edit</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endfor %}
+
+<div class="card pad0 reveal" style="margin-bottom:18px">
+  <div class="card-head"><h3>Penyebab Selisih</h3><span class="sub">{{ data.penyebab|length }} baris</span></div>
+  <div class="table-wrap" style="border:none">
+  <table class="selectable">
+    <thead><tr><th>Label</th><th class="num" style="width:160px">Nilai</th><th class="num" style="width:64px">Aksi</th></tr></thead>
+    <tbody>
+    {% for p in data.penyebab %}
+    <tr>
+      <td>{{ p.label }}</td>
+      <td class="num mono{% if p.nilai < 0 %} neg{% endif %}">{{ p.nilai|floatformat:0|intcomma }}</td>
+      <td class="num">
+        <form method="post" action="{% url 'rekap_penyebab_simpan' %}" style="display:inline" onsubmit="return confirm('Hapus baris penyebab ini?')">{% csrf_token %}
+          <input type="hidden" name="bulan" value="{{ sel_bulan }}">
+          <input type="hidden" name="id" value="{{ p.id }}">
+          <button class="btn sm danger" type="submit" name="hapus" value="1">Hapus</button>
+        </form>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="3" class="cell-empty">Belum ada baris penyebab.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <form method="post" action="{% url 'rekap_penyebab_simpan' %}" class="row" style="padding:14px 18px;margin:0">
+    {% csrf_token %}
+    <input type="hidden" name="bulan" value="{{ sel_bulan }}">
+    <div class="field"><label>Label</label>
+      <input name="label" list="penyebab-saran" required autocomplete="off" placeholder="mis. Auto Pulsa">
+      <datalist id="penyebab-saran">
+        <option value="Auto Pulsa"></option>
+        <option value="Delete transaksi deposit"></option>
+        <option value="Mistake credit"></option>
+        <option value="Salah tujuan bank"></option>
+      </datalist>
+    </div>
+    <div class="field"><label>Nilai</label>
+      <input name="nilai" required autocomplete="off" placeholder="tanpa titik ribuan, minus boleh"></div>
+    <button class="btn primary" type="submit">Tambah</button>
+  </form>
+</div>
+</div>

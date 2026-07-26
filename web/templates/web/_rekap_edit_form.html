@@ -1,0 +1,29 @@
+{% load humanize %}
+<div class="card pop-mini">
+  <h3 style="margin:0 0 2px;font-size:14px">Edit {{ field.label }}</h3>
+  <p class="faint" style="margin:0 0 10px;font-size:12px">
+    {{ periode|date:"F Y" }}
+    {% if baris.auto is not None %} · Nilai otomatis: <b class="mono">{{ baris.auto|floatformat:0|intcomma }}</b>{% endif %}
+    {% if baris.manual %} · manual aktif oleh <b>{{ baris.manual.oleh|default:"—" }}</b>{% endif %}
+  </p>
+  {% if field.kind == "carry" %}
+  <p class="faint" style="margin:0 0 10px;font-size:12px;color:var(--warn)">
+    Baris carry dari bulan lalu — <b>Simpan = mengunci nilai carry bulan ini</b>. Tanpa dikunci, angka bulan berikutnya bisa menyimpang.
+  </p>
+  {% endif %}
+  <form hx-post="{% url 'rekap_edit_simpan' %}" hx-target="#rekap-sections" hx-swap="outerHTML">
+    {% csrf_token %}
+    <input type="hidden" name="bulan" value="{{ sel_bulan }}">
+    <input type="hidden" name="field" value="{{ field.slug }}">
+    <div class="field"><label>Nilai baru</label>
+      <input name="nilai" required autocomplete="off" placeholder="tanpa titik ribuan, minus boleh"
+             value="{% if baris.manual %}{{ baris.manual.nilai|floatformat:0 }}{% endif %}"></div>
+    <div class="field"><label>Catatan</label>
+      <textarea name="catatan" rows="2">{% if baris.manual %}{{ baris.manual.catatan }}{% endif %}</textarea></div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:6px">
+      {% if baris.manual %}<button class="btn danger" name="hapus" value="1">Hapus nilai manual</button>{% endif %}
+      <button type="button" class="btn" onclick="document.getElementById('rekapPop').innerHTML=''">Batal</button>
+      <button class="btn primary" type="submit">Simpan</button>
+    </div>
+  </form>
+</div>
