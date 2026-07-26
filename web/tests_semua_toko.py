@@ -106,6 +106,19 @@ class SetTokoSentinelTests(TestCase):
         self.client.post(reverse("set_toko"), {"toko_id": "semua"})
         self.assertIsNone(self.client.session.get("active_toko_id"))
 
+    def test_id_kepanjangan_diabaikan_tanpa_menyentuh_db(self):
+        """String digit sangat panjang (mis. "9"*40) lolos `isdecimal()` tapi
+        meledak NumericValueOutOfRange/DataError di Postgres kalau dikirim ke
+        query (sqlite diam, jadi buktinya lewat query count bukan exception):
+        guard panjang harus menolak SEBELUM query DB Toko dijalankan."""
+        self._login("admin")
+        with CaptureQueriesContext(connection) as ctx:
+            self.client.post(reverse("set_toko"), {"toko_id": "9" * 40})
+        self.assertIsNone(self.client.session.get("active_toko_id"))
+        self.assertFalse(
+            any("toko" in q["sql"].lower() for q in ctx),
+            f"id kepanjangan masih mencapai query DB Toko: {[q['sql'] for q in ctx]}")
+
 
 class ContextProcessorTests(TestCase):
     """Flag `semua_toko` + `active_toko` fallback + badge tinjau lintas toko."""

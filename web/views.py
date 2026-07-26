@@ -151,7 +151,14 @@ def set_toko(request):
             # (nilai kiriman tak dipercaya; sesi lama tetap utuh).
             if is_admin(request.user):
                 request.session["active_toko_id"] = SEMUA_TOKO
-        elif tid.isdecimal() and tokos_for(request.user).filter(id=tid).exists():
+        # len <= 10: sama batas yang dipakai rekap_penyebab_simpan — digit
+        # sebanyak ini sudah tak masuk akal utk pk Toko, tolak diam-diam
+        # (pola sama dengan nilai kiriman tak sah lain di view ini) sebelum
+        # jadi query DB.
+        elif (
+            tid.isdecimal() and len(tid) <= 10
+            and tokos_for(request.user).filter(id=tid).exists()
+        ):
             request.session["active_toko_id"] = int(tid)
     nxt = request.POST.get("next")
     if nxt and url_has_allowed_host_and_scheme(
@@ -2218,7 +2225,10 @@ def rekap_penyebab_simpan(request):
 
     if request.POST.get("hapus"):
         id_mentah = (request.POST.get("id") or "").strip()
-        if not id_mentah.isdecimal():
+        # len > 10: digit sebanyak ini sudah lolos filter/lookup pk paling
+        # besar yang masuk akal (>9,9 milyar baris) — tolak di sini, jangan
+        # sampai jadi query DB (aman terhadap NumericValueOutOfRange).
+        if not id_mentah.isdecimal() or len(id_mentah) > 10:
             messages.error(request, "ID penyebab tidak valid.")
             return redirect(tujuan)
         # `periode` ikut jadi filter — tanpa ini, id dari bulan LAIN pada toko

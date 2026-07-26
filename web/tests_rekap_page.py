@@ -9,6 +9,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.contrib.messages import get_messages
 from django.test import TestCase
 from django.urls import reverse
 
@@ -330,6 +331,20 @@ class PenyebabTests(_RekapPageData):
             "bulan": SEL_BULAN, "hapus": "1", "id": "-1"})
         self.assertNotEqual(r.status_code, 500)
         self.assertTrue(RekapPenyebab.objects.filter(pk=p.id).exists())
+
+    def test_hapus_id_kepanjangan_ditolak(self):
+        # String digit sangat panjang (mis. "9"*40) lolos isdecimal() lalu bisa
+        # meledak NumericValueOutOfRange/DataError di Postgres kalau dikirim
+        # apa adanya ke query pk. Guard panjang (>10 digit) harus menolak
+        # dengan pesan error + redirect — bukan 404/500 mentah.
+        p = self.penyebab("Mistake credit", "500")
+        r = self.client.post(reverse("rekap_penyebab_simpan"), {
+            "bulan": SEL_BULAN, "hapus": "1", "id": "9" * 40})
+        self.assertNotIn(r.status_code, (404, 500))
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(RekapPenyebab.objects.filter(pk=p.id).exists())
+        msgs = [str(m) for m in get_messages(r.wsgi_request)]
+        self.assertTrue(any("ID penyebab tidak valid" in m for m in msgs))
 
     def test_hapus_bulan_lain_tak_terhapus(self):
         # Regresi: lookup hapus dulu tak di-scope `periode` — id dari BULAN
