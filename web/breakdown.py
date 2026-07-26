@@ -17,7 +17,7 @@ diambil query-time dari JSON `raw`, jadi berlaku retroaktif untuk data lama.
 from collections import Counter
 from decimal import Decimal
 
-from django.db.models import Max
+from django.db.models import Count, Max, Sum
 from django.db.models.fields.json import KeyTextTransform
 
 from transactions.models import Transaction
@@ -331,4 +331,80 @@ def bracket_breakdown(toko, dari, sampai=None, dengan_koreksi=True):
         "count": sum(len(v) for v in per_akun.values()),
         "dari": dari,
         "sampai": sampai,
+    }
+
+
+def ringkas_bracket_hari(toko, tanggal, dengan_koreksi=True):
+    """Ringkasan bracket 1-hari RINGAN untuk kartu dashboard.
+
+    Beda dengan `bracket_breakdown`: TIDAK memanggil `_saldo_carry` (scan
+    seluruh sejarah toko) — tak layak dipanggil di tiap render dashboard.
+    Satu query grouped `(Bank, Kategori)` via `values().annotate(Sum, Count)`
+    + (opsional) satu query overlay `FRKoreksi`, sehingga dp/wd tetap TEPAT
+    SAMA dengan `bracket_breakdown(toko, tanggal)["total"]["deposit"/"withdraw"]`
+    — nilai deposit/withdraw sama sekali tak bergantung pada saldo carry.
+
+    Aturan skip-akun-absen mengikuti `_apply_koreksi`: koreksi hanya berlaku
+    pada akun yang punya baris bracket (kategori APA PUN) di tanggal itu —
+    bukan cuma akun yang punya baris deposit/withdrawal. `n` (jumlah trx)
+    selalu dari baris nyata; koreksi hanya menimpa nilai (`v`).
+
+    {"dp": {"n", "v"}, "wd": {"n", "v"}, "net", "total_n"} atau None bila
+    `toko` tak punya baris bracket pada `tanggal`.
+    """
+    rows = list(
+        Transaction.objects.filter(
+            toko=toko, source_type__key="bracket", posted_date=tanggal
+        )
+        .annotate(
+            fr_bank=KeyTextTransform("Bank", "raw"),
+            fr_kategori=KeyTextTransform("Kategori", "raw"),
+        )
+        .values("fr_bank", "fr_kategori")
+        .annotate(v=Sum("money_delta"), n=Count("id"))
+    )
+    if not rows:
+        return None
+
+    per_acc = {}  # account_norm → {slug: {"v": Decimal, "n": int}}
+    for r in rows:
+        sel = per_acc.setdefault(_norm_akun(r["fr_bank"]), {})
+        slug = _slug_kategori(r["fr_kategori"])
+        cur = sel.get(slug)
+        if cur is None:
+            sel[slug] = {"v": r["v"] or NOL, "n": r["n"]}
+        else:
+            cur["v"] += r["v"] or NOL
+            cur["n"] += r["n"]
+
+    if dengan_koreksi:
+        from web.models import FRKoreksi  # impor lokal: hindari siklus saat startup
+
+        for k in FRKoreksi.objects.filter(
+            toko=toko, tanggal=tanggal, kolom__in=("deposit", "withdrawal")
+        ).values("account", "kolom", "nilai"):
+            sel = per_acc.get(k["account"])
+            if sel is None:
+                continue  # akun tak hadir tanggal ini → koreksi diabaikan
+            cur = sel.get(k["kolom"])
+            sel[k["kolom"]] = {"v": k["nilai"], "n": cur["n"] if cur else 0}
+
+    dp_v = wd_v = NOL
+    dp_n = wd_n = 0
+    for sel in per_acc.values():
+        dp = sel.get("deposit")
+        if dp:
+            dp_v += dp["v"]
+            dp_n += dp["n"]
+        wd = sel.get("withdrawal")
+        if wd:
+            wd_v += wd["v"]
+            wd_n += wd["n"]
+    wd_v = abs(wd_v)
+
+    return {
+        "dp": {"n": dp_n, "v": dp_v},
+        "wd": {"n": wd_n, "v": wd_v},
+        "net": dp_v - wd_v,
+        "total_n": dp_n + wd_n,
     }

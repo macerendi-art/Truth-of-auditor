@@ -42,7 +42,11 @@ from transactions.models import Transaction, specific_source_label
 from web.access import is_admin, tokos_for
 from web.biaya import rincian_biaya as hitung_rincian_biaya
 from web.bonus import rekonsiliasi_bonus as hitung_rekonsiliasi_bonus
-from web.breakdown import bracket_breakdown as hitung_bracket_breakdown, KATEGORI_KANONIK
+from web.breakdown import (
+    bracket_breakdown as hitung_bracket_breakdown,
+    KATEGORI_KANONIK,
+    ringkas_bracket_hari,
+)
 from web.channels import breakdown_metode
 from web.forms import GantiPasswordForm
 from web.hutang import hutang_piutang as hitung_hutang_piutang
@@ -255,6 +259,13 @@ def dashboard(request):
         # SAMA (_pr) — satu query agregat kecil, total pasti klop panel_sum.
         metode = breakdown_metode(_pr)
 
+    # --- kartu "Ringkasan Bracket" (FR harian, tanggal batch terakhir) ---
+    # Versi ringan (bukan bracket_breakdown penuh — _saldo_carry terlalu berat
+    # utk render dashboard); tetap tie-out persis lewat overlay FRKoreksi yang sama.
+    bracket_sum = None
+    if last is not None and last.recon_date is not None:
+        bracket_sum = ringkas_bracket_hari(active, last.recon_date)
+
     last_no = total_b if last else None
     last_sel = selisih(last) if last else 0
     pending = pending_settlement_count(active)
@@ -279,6 +290,7 @@ def dashboard(request):
         "last": last, "last_no": last_no, "last_sel": last_sel,
         "panel_sum": panel_sum,
         "metode": metode,
+        "bracket_sum": bracket_sum,
         "pending": pending,
         "um_d": um_d,
         "comp": comp,

@@ -75,6 +75,37 @@
 </div>
 {% endif %}
 
+{# ---- RINGKASAN BRACKET (trx & nilai DP/WD FR harian tanggal batch) ---- #}
+{% if bracket_sum %}
+<style>
+.bstrip-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.bstrip .bs{display:flex;flex-direction:column;gap:3px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
+.bstrip .bs-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.bstrip .bs-k.dp{color:var(--ok)} .bstrip .bs-k.wd{color:var(--bad)}
+.bstrip .bs-n{font-size:13px;color:var(--faint)} .bstrip .bs-n b,.bstrip .bs-n{font-variant-numeric:tabular-nums}
+.bstrip .bs-v{font-size:20px;font-weight:800;letter-spacing:-.01em}
+.bstrip .bs-v.neg{color:var(--bad)}
+.bstrip .bs small{font-size:11px;font-weight:600;color:var(--faint)}
+.bstrip .bs.tot{background:linear-gradient(135deg,rgba(37,99,235,.07),rgba(34,211,238,.07))}
+@media (max-width:700px){.bstrip-grid{grid-template-columns:1fr}}
+</style>
+<a class="card reveal bstrip click" href="{% url 'bracket_breakdown' %}?date={{ last.recon_date|date:'Y-m-d' }}" style="margin-top:16px">
+  <div class="h-row" style="margin-bottom:10px"><h3>Ringkasan Bracket — {{ last.recon_date|date:"j M Y" }}</h3>
+    <span class="faint" style="font-size:11.5px">acuan baris FR/Bracket pada tanggal batch</span></div>
+  <div class="bstrip-grid">
+    <div class="bs"><span class="bs-k dp">Deposit</span>
+      <span class="bs-n">{{ bracket_sum.dp.n|intcomma }} <small>trx</small></span>
+      <span class="bs-v mono">{{ bracket_sum.dp.v|floatformat:0|intcomma }}</span></div>
+    <div class="bs"><span class="bs-k wd">Withdraw</span>
+      <span class="bs-n">{{ bracket_sum.wd.n|intcomma }} <small>trx</small></span>
+      <span class="bs-v mono">{{ bracket_sum.wd.v|floatformat:0|intcomma }}</span></div>
+    <div class="bs tot"><span class="bs-k">Total</span>
+      <span class="bs-n">{{ bracket_sum.total_n|intcomma }} <small>trx</small></span>
+      <span class="bs-v mono {% if bracket_sum.net < 0 %}neg{% endif %}" title="Deposit − Withdraw">{{ bracket_sum.net|floatformat:0|intcomma }} <small>net</small></span></div>
+  </div>
+</a>
+{% endif %}
+
 {# ---- METODE PEMBAYARAN (breakdown Bank Title panel per metode) ---- #}
 {% if metode %}
 <style>
