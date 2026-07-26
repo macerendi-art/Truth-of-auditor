@@ -167,6 +167,102 @@ class MutasiBankPhoneLookupTests(MutasiBankBase):
         self.assertContains(r, "085767555197")
 
 
+class ResolveWalletNamesNbmbFallbackTests(MutasiBankBase):
+    """Unit test langsung atas _resolve_wallet_names (web/views.py): baris BRI LAMA
+    (counterparty kosong di DB, ingest sebelum perbaikan regex NBMB varian tanpa-ESB,
+    lihat sources.parsers.banks.NBMB_RE) -> atribut tampilan r.player_name terisi
+    murni saat render, TANPA menulis balik ke Transaction."""
+
+    DESC_TANPA_ESB = "NBMB Cantika Irsad TO DHAVIT PEBRIYANTO"
+    DESC_BRIVA = ("BRIVA30135083144889247NBMBAxxxx Pxxxx "
+                  "BRIVA 30135083144889247NBMBAxxxx ESB:NBMB:0200200P:174837810133")
+
+    def _row(self, desc, jenis, amount):
+        return Transaction(
+            source_type=self.bank, toko=self.lbs, jenis=jenis,
+            amount=abs(Decimal(amount)), money_delta=Decimal(amount),
+            counterparty="", description=desc, raw={"DESK_TRAN": desc},
+        )
+
+    def test_dp_ambil_pengirim(self):
+        from web.views import _resolve_wallet_names
+        t = self._row(self.DESC_TANPA_ESB, "depo", "15000")
+        _resolve_wallet_names([t], self.lbs)
+        self.assertEqual(t.player_name, "Cantika Irsad")
+        self.assertEqual(getattr(t, "phone", ""), "")  # bukan jalur HP
+
+    def test_wd_ambil_penerima(self):
+        from web.views import _resolve_wallet_names
+        t = self._row(self.DESC_TANPA_ESB, "wd", "-15000")
+        _resolve_wallet_names([t], self.lbs)
+        self.assertEqual(t.player_name, "DHAVIT PEBRIYANTO")
+
+    def test_briva_tak_tersentuh(self):
+        from web.views import _resolve_wallet_names
+        t = self._row(self.DESC_BRIVA, "wd", "-70000")
+        _resolve_wallet_names([t], self.lbs)
+        self.assertEqual(getattr(t, "player_name", ""), "")
+        self.assertEqual(getattr(t, "phone", ""), "")
+
+    def test_tak_menyentuh_field_tersimpan(self):
+        # Murni tampilan: atribut Python transient, TIDAK ditulis ke DB.
+        from web.views import _resolve_wallet_names
+        t = Transaction.objects.create(
+            upload=self._up(self.bank, "bca.csv"), source_type=self.bank, toko=self.lbs,
+            jenis="depo", amount=Decimal("15000"), money_delta=Decimal("15000"),
+            counterparty="", description=self.DESC_TANPA_ESB,
+            raw={"DESK_TRAN": self.DESC_TANPA_ESB}, row_hash=f"mb-{next(_seq)}",
+        )
+        _resolve_wallet_names([t], self.lbs)
+        self.assertEqual(t.player_name, "Cantika Irsad")
+        t.refresh_from_db()
+        self.assertEqual(t.counterparty, "")  # kolom DB tetap kosong
+
+
+class MutasiBankNbmbFallbackTests(MutasiBankBase):
+    """Render penuh /mutasi-bank/: baris BRI LAMA counterparty kosong + DESK_TRAN
+    varian tanpa-ESB -> kolom "Nama (sesuai mutasi)" tampil (bukan cuma kolom
+    Keterangan yang memang selalu menampilkan deskripsi mentah)."""
+
+    DESC_TANPA_ESB = "NBMB Cantika Irsad TO DHAVIT PEBRIYANTO"
+    DESC_BRIVA = ("BRIVA30135083144889247NBMBAxxxx Pxxxx "
+                  "BRIVA 30135083144889247NBMBAxxxx ESB:NBMB:0200200P:174837810133")
+    MARKER = "Nama dari deskripsi mutasi (varian tanpa kode ESB)"
+
+    def _tx_bri(self, desc, jenis, amount):
+        upb = self._up(self.bank, "bca.csv")
+        return Transaction.objects.create(
+            upload=upb, source_type=self.bank, toko=self.lbs, jenis=jenis,
+            amount=abs(Decimal(amount)), money_delta=Decimal(amount),
+            occurred_at=datetime(2026, 7, 25, 10, 0), counterparty="",
+            description=desc, raw={"DESK_TRAN": desc},
+            row_hash=f"mb-{next(_seq)}",
+        )
+
+    def test_dp_tanpa_esb_baris_lama_nama_tampil(self):
+        self._tx_bri(self.DESC_TANPA_ESB, "depo", "15000")
+        r = self.client.get(reverse("bank_mutations"))
+        row = r.context["page"].object_list[0]
+        self.assertEqual(row.player_name, "Cantika Irsad")  # DP -> pengirim
+        self.assertContains(r, self.MARKER)                # kolom Nama, bukan Keterangan
+
+    def test_wd_tanpa_esb_baris_lama_nama_tampil(self):
+        self._tx_bri(self.DESC_TANPA_ESB, "wd", "-15000")
+        r = self.client.get(reverse("bank_mutations"))
+        row = r.context["page"].object_list[0]
+        self.assertEqual(row.player_name, "DHAVIT PEBRIYANTO")  # WD -> penerima
+        self.assertContains(r, self.MARKER)
+
+    def test_briva_baris_lama_tetap_strip(self):
+        self._tx_bri(self.DESC_BRIVA, "wd", "-70000")
+        r = self.client.get(reverse("bank_mutations"))
+        row = r.context["page"].object_list[0]
+        self.assertFalse(getattr(row, "player_name", ""))
+        self.assertFalse(getattr(row, "phone", ""))
+        self.assertNotContains(r, self.MARKER)
+        self.assertContains(r, '<span class="faint">—</span>')
+
+
 class MutasiBankSaldoTests(MutasiBankBase):
     def test_saldo_tampil_dan_none_aman(self):
         upb = self._up(self.bank, "bca.csv")

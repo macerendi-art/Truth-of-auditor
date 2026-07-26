@@ -36,6 +36,7 @@ from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewActio
 from sources.detect import detect_source
 from sources.management.commands.ingest import detect_flow
 from sources.models import SourceType, Upload
+from sources.parsers.banks import NBMB_RE
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
 from web.access import is_admin, tokos_for
@@ -1282,9 +1283,20 @@ def _resolve_wallet_names(rows, toko):
     Nama dicari di panel toko yang sama via segmen HP di raw['Player Bank']
     ('KODE|NAMA|ACCT' — lihat parse_bank_triplet). Per halaman saja (<=40 baris,
     <=40 query) — bukan jalur matching, murni tampilan.
+
+    Fallback NBMB tanpa-ESB: baris BRI LAMA (di-ingest sebelum perbaikan regex
+    NBMB_RE — lihat sources.parsers.banks) tersimpan dengan counterparty kosong
+    walau deskripsinya sebenarnya punya nama. Query-time saja, TIDAK menulis
+    balik ke Transaction — parse ulang raw['DESK_TRAN'] pakai regex yang SAMA
+    dengan parser (satu sumber kebenaran) tiap kali halaman dirender.
     """
     for r in rows:
         if r.counterparty or r.source_type.key not in ("bank", "gateway"):
+            continue
+        m_nbmb = NBMB_RE.search((r.raw or {}).get("DESK_TRAN", "") or "")
+        if m_nbmb:
+            sender, receiver = m_nbmb.group(1).strip(), m_nbmb.group(2).strip()
+            r.player_name = sender if r.money_delta > 0 else receiver
             continue
         m = PHONE_RE.search(r.description or "")
         if not m:

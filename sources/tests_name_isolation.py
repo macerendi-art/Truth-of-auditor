@@ -4,6 +4,7 @@ Urutan wajib: (1) isolasi nama per-sumber (buang prefiks bank, kode transaksi,
 nomor rekening, nominal menempel), (2) baru normalisasi via clean_name di engine.
 """
 import csv
+import re
 import tempfile
 
 from django.test import SimpleTestCase
@@ -11,6 +12,7 @@ from django.test import SimpleTestCase
 from sources.parsers.banks import (
     BCACSVParser,
     BRIParser,
+    NBMB_RE,
     extract_bca_name,
     extract_mandiri_name,
     is_bca_fee,
@@ -218,6 +220,69 @@ class BRIParserNameTests(SimpleTestCase):
     def test_atmstrprm_tanpa_nama_kosong(self):
         r = self._parse_one("ATMSTRPRM 08888 000528944 6044603718 ESB:NBMB:0005T00F:151728528944")
         self.assertEqual(r["counterparty"], "")
+
+    def test_nbmb_tanpa_esb_dp_ambil_pengirim(self):
+        # Varian baru tanpa trailer ESB (mutasi WLG 25-07): regex lama gagal total
+        # match -> counterparty kosong di kolom "Nama (sesuai mutasi)". Wajib terisi.
+        r = self._parse_one("NBMB Cantika Irsad TO DHAVIT PEBRIYANTO")
+        self.assertEqual(r["counterparty"], "Cantika Irsad")
+
+    def test_nbmb_tanpa_esb_wd_ambil_penerima(self):
+        r = self._parse_one(
+            "NBMB Cantika Irsad TO DHAVIT PEBRIYANTO",
+            debet="100000.00", kredit=".00",
+        )
+        self.assertEqual(r["counterparty"], "DHAVIT PEBRIYANTO")
+
+    def test_briva_tetap_kosong_setelah_perbaikan_regex(self):
+        # BRIVA: 'NBMB' menempel tanpa spasi ('...NBMBAxxxx...') -> tak boleh
+        # ikut ter-match jadi nama (nama BRIVA memang disamarkan bank).
+        desc = ("BRIVA30135083144889247NBMBAxxxx Pxxxx "
+                "BRIVA 30135083144889247NBMBAxxxx ESB:NBMB:0200200P:174837810133")
+        r = self._parse_one(desc, debet="70000.00", kredit=".00")
+        self.assertEqual(r["counterparty"], "")
+
+    def test_bfst_nbmb_titik_dua_tetap_kosong(self):
+        # Fee BI-Fast: 'NBMB:X' (titik dua nempel, tanpa spasi "TO ...") ->
+        # bukan pola nama, jangan ikut ter-match.
+        r = self._parse_one("BFST2061125016 NBMB:X", debet="2500.00", kredit=".00")
+        self.assertEqual(r["counterparty"], "")
+
+
+class NbmbRegexTests(SimpleTestCase):
+    """NBMB_RE (sources/parsers/banks.py): satu sumber kebenaran dipakai parser BRI
+    DAN fallback tampilan Mutasi Bank di web/views.py."""
+
+    def test_bentuk_lama_ber_esb_identik_dgn_regex_lama(self):
+        # Bukti perilaku lama dipertahankan: lazy group berhenti di ' ESB' PERTAMA,
+        # bukan menelan kode ekor 'ESB:NBMB:....'.
+        old_re = re.compile(r"NBMB (.+?) TO (.+?) ESB")
+        samples = [
+            "NBMB IRAMAYA YUATI TO MARGANI ESB:NBMB:0001500F:151783035958",
+            "NBMB PANCA SENTANA TO ZAENUL BASYAR ESB:NBMB:0001500F:151731713566",
+            "NBMB Cantika Irsad TO WAHYU TRI LAKSONO ESB:NBMB:0001500F:181488857126",
+        ]
+        for desc in samples:
+            old = old_re.search(desc)
+            new = NBMB_RE.search(desc)
+            self.assertIsNotNone(old, desc)
+            self.assertIsNotNone(new, desc)
+            self.assertEqual(
+                (old.group(1), old.group(2)), (new.group(1), new.group(2)), desc,
+            )
+
+    def test_bentuk_baru_tanpa_esb(self):
+        m = NBMB_RE.search("NBMB Cantika Irsad TO DHAVIT PEBRIYANTO")
+        self.assertIsNotNone(m)
+        self.assertEqual((m.group(1), m.group(2)), ("Cantika Irsad", "DHAVIT PEBRIYANTO"))
+
+    def test_briva_tak_pernah_cocok(self):
+        desc = ("BRIVA30135083144889247NBMBAxxxx Pxxxx "
+                "BRIVA 30135083144889247NBMBAxxxx ESB:NBMB:0200200P:174837810133")
+        self.assertIsNone(NBMB_RE.search(desc))
+
+    def test_nbmb_titik_dua_tak_cocok(self):
+        self.assertIsNone(NBMB_RE.search("BFST2061125016 NBMB:X"))
 
 
 class ExtractBCAWDNameTests(SimpleTestCase):

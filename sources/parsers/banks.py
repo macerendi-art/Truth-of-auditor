@@ -140,6 +140,18 @@ def extract_mandiri_name(text):
     return " ".join(toks).strip(" -.,:/")
 
 
+# --- BRI ---
+# 'NBMB <pengirim> TO <penerima> ESB:NBMB:...' (bentuk lazim) ATAU, ditemukan pada
+# mutasi WLG 25-07, 'NBMB <pengirim> TO <penerima>' TANPA trailer ESB sama sekali.
+# Grup nama tetap lazy & berhenti di kemunculan ' ESB' PERTAMA (mempertahankan
+# perilaku lama persis) — bila tak ada ' ESB', berhenti di akhir string.
+# Modul konstan (satu sumber): dipakai parser di sini DAN fallback tampilan
+# query-time di web/views.py (baris lama yang sudah tersimpan tanpa counterparty).
+# BRIVA ('...NBMBAxxxx...' nempel tanpa spasi) & fee BI-Fast ('NBMB:X' titik dua
+# nempel) sengaja TIDAK cocok — keduanya tak punya pola literal 'NBMB ' + ' TO '.
+NBMB_RE = re.compile(r"NBMB (.+?) TO (.+?)(?: ESB|$)")
+
+
 class BRIParser(BaseParser):
     source_key = "bank"
 
@@ -153,7 +165,7 @@ class BRIParser(BaseParser):
             money = credit - debit
             occurred = parse_dt(r.get("TGL_TRAN"))
             desc = str(r.get("DESK_TRAN", "") or "")
-            m = re.search(r"NBMB (.+?) TO (.+?) ESB", desc)
+            m = NBMB_RE.search(desc)
             sender, receiver = (m.group(1).strip(), m.group(2).strip()) if m else ("", "")
             counterparty = sender if money > 0 else receiver
             seq = str(r.get("SEQ", "") or "").strip()
