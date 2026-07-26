@@ -564,15 +564,11 @@ class _MoneyMatcher:
                 )
         panel_tickets = {p.ticket_no for p in left if p.ticket_no}
         panel_refs = {p.reference for p in left if p.reference}
-        # Rekening panel dikenal (cache p._phone sekalian — idiom sama dgn _identity)
-        # dipakai klausa 'blocked' account di bawah (pair kunci PLAYER, bukan ticket).
-        panel_accts = set()
+        # Hangatkan cache p._phone (idiom sama dgn _identity) — dipakai pass 0c
+        # sebagai anchor rekening, dan lagi oleh gerbang identitas pass 1-3.
         for p in left:
-            pp = getattr(p, "_phone", None)
-            if pp is None:
-                pp = p._phone = _panel_phone(p)
-            if pp:
-                panel_accts.add(pp)
+            if getattr(p, "_phone", None) is None:
+                p._phone = _panel_phone(p)
 
         def emit(p, b, bucket, score, reason, detail=""):
             matched.add(p.id)
@@ -645,24 +641,28 @@ class _MoneyMatcher:
             if p.id in matched or b.id in used:
                 continue
             emit(p, b, MatchResult.Bucket.COCOK, 100, "account")
-        # Gateway ber-ticket/ber-reference/ber-akun yang TAK dikenal panel bukan
-        # kandidat fuzzy siapa pun (cermin semantik: uang identitasnya asing bagi
-        # panel tampil sebagai uang tanpa pasangan, bukan dicuri fuzzy pass 1-3).
+        # Gateway ber-ticket/ber-reference yang TAK dikenal panel bukan kandidat
+        # fuzzy siapa pun (cermin semantik: uang yang identitas TRANSAKSInya
+        # asing bagi panel tampil sebagai uang tanpa pasangan, bukan dicuri
+        # fuzzy pass 1-3). Ticket & reference adalah kunci per-TRANSAKSI: satu
+        # nilai = satu transaksi, jadi "tak dikenal panel" benar-benar berarti
+        # "transaksi ini tak ada di panel".
+        #
+        # REKENING SENGAJA TIDAK IKUT MEMBLOKIR. AccountNumber adalah kunci
+        # PEMAIN, bukan kunci transaksi: satu rekening menampung banyak WD, dan
+        # sisi panel hanya membawanya lewat segmen `Player Bank` yang sering
+        # kosong/beda format. Rekening gateway yang tak muncul di panel karena
+        # itu cuma membuktikan CELAH DATA PANEL, bukan transaksi yang berbeda —
+        # memblokirnya membuat SATU pemain berrekening (yang mengisi
+        # panel_accts) membungkam pemain lain di toko yang sama menjadi
+        # no_money. Yang menjaga tetap gerbang identitas pass 1-3 (HP/username/
+        # nama ≥ threshold); pass 0c di atas tetap memakai rekening secara
+        # POSITIF sebagai anchor untuk memasangkan.
         blocked = {
             b.id for t, lst in gw_ticket.items() if t not in panel_tickets for b in lst
         } | {
             b.id for ref, lst in gw_ref.items() if ref not in panel_refs for b in lst
         }
-        # Klausa akun HANYA berlaku bila sisi kredit memang punya rekening dikenal.
-        # Bila panel_accts kosong (mis. relasi bracket↔bank, atau panel tanpa
-        # segmen Player Bank) "tak dikenal" tidak bermakna apa pun — memblokir
-        # akan membuang SEMUA baris gateway ber-AccountNumber dari kandidat
-        # fuzzy sekaligus: jurang match-rate senyap.
-        if panel_accts:
-            blocked |= {
-                b.id for acct, lst in gw_acct.items() if acct not in panel_accts
-                for b in lst
-            }
 
         def kandidat(p, *, lo=0, hi=None, tol_amt=0):
             hi = tol.date_window_days if hi is None else hi

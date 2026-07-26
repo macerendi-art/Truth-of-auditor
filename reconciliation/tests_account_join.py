@@ -74,11 +74,11 @@ class AccountJoinTests(TestCase):
             raw={"Player Bank": f"UNO|{name}|{acct}"},
         )
 
-    def gw_wd(self, amount, acct, dt, *, username="", ticket="", ref=""):
+    def gw_wd(self, amount, acct, dt, *, username="", ticket="", ref="", name=""):
         return Transaction.objects.create(
             upload=self.up_g, source_type=self.gw, toko=self.toko, jenis="wd",
             amount=D(abs(amount)), money_delta=D(-abs(amount)),
-            username=username, occurred_at=dt,
+            counterparty=name, username=username, occurred_at=dt,
             ticket_no=ticket, reference=ref, row_hash=self._rh(),
             raw={"AccountNumber": acct},
         )
@@ -132,35 +132,39 @@ class AccountJoinTests(TestCase):
         self.assertEqual(r.right, g)
         self.assertEqual(r.reason_code, "reference")  # BUKAN "account"
 
-    # 5. klausa blocked: akun asing tak boleh dicuri fuzzy --------------------
-    def test_akun_gateway_asing_tidak_dipasangkan_fuzzy(self):
-        """Diuji pada level run_batch: bukan cuma "tidak dipasangkan", tapi baris
-        uangnya harus MUNCUL sebagai uang tanpa jejak panel (no_panel, kategori
-        'd') supaya selisih batch selalu punya baris penjelas."""
-        # p: identitas kuat (username persis) + rekening SENDIRI dikenal panel.
+    # 5. rekening TIDAK memblokir: gerbang identitas yang memutuskan -----------
+    def test_akun_gateway_asing_tetap_bisa_dipasangkan_lewat_identitas(self):
+        """Rekening adalah kunci PEMAIN, bukan kunci TRANSAKSI (beda dengan
+        ticket/reference). AccountNumber gateway yang tak muncul di panel cuma
+        membuktikan CELAH DATA panel — segmen `Player Bank` kosong, beda format,
+        atau pemain ganti rekening — bukan bahwa uang itu milik transaksi lain.
+        Karena itu ia TIDAK boleh dibuang dari kandidat pass 1-3; gerbang
+        identitas (di sini: username persis → skor 100) yang menentukan."""
+        # p: identitas kuat (username persis), rekeningnya sendiri dikenal panel.
         p = self.panel_wd(200000, "Eko", "082250625228",
                           datetime(2026, 7, 20, 8, 0), username="eko99")
-        # g: nominal & tanggal SAMA + username SAMA (tanpa klausa blocked ini
-        # akan menang di pass 1 skor 100) tapi AccountNumber TAK dikenal panel.
+        # g: nominal & tanggal SAMA + username SAMA, tapi AccountNumber lain.
         g = self.gw_wd(200000, "099999999999", datetime(2026, 7, 20, 8, 0),
                        username="eko99")
         batch = run_batch(self.toko, self.tol, recon_date=date(2026, 7, 20))
         r = MatchResult.objects.get(run__batch=batch, left=p)
-        self.assertIsNone(r.right)
-        self.assertEqual(r.bucket, MatchResult.Bucket.TIDAK)
-        self.assertEqual(r.reason_code, "no_money")
-        # g tak pernah jadi pasangan siapa pun — tampil sebagai no_panel.
-        rg = MatchResult.objects.get(run__batch=batch, right=g)
-        self.assertIsNone(rg.left)
-        self.assertEqual(rg.reason_code, "no_panel")
-        self.assertEqual(batch.summary["unmatched_money"]["d"]["n"], 1)
+        self.assertEqual(r.right, g)
+        self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(r.reason_code, "amount+date+name")
+        # Tak ada sisa uang tanpa jejak panel: g sudah terpakai.
+        self.assertFalse(
+            MatchResult.objects.filter(
+                run__batch=batch, left__isnull=True, right=g).exists(),
+            "baris gateway yang sudah berpasangan tak boleh muncul sbg no_panel",
+        )
 
-    # 5b. guard panel_accts kosong: jangan blokir seluruh gateway ber-rekening -
+    # 5b. gateway ber-rekening tetap kandidat fuzzy penuh ----------------------
     def test_panel_tanpa_rekening_gateway_berrekening_tidak_diblokir(self):
-        """Sisi kredit tanpa satu pun rekening dikenal (mis. run bracket↔bank,
-        atau panel tanpa segmen Player Bank): klausa blocked account TIDAK boleh
-        aktif — kalau aktif, SEMUA baris gateway ber-AccountNumber lenyap dari
-        kandidat fuzzy (jurang match-rate senyap)."""
+        """Sisi kredit tanpa satu pun rekening dikenal (mis. relasi bracket↔bank,
+        atau panel tanpa segmen Player Bank): baris gateway ber-AccountNumber
+        harus tetap utuh sebagai kandidat fuzzy — kalau ia disaring keluar,
+        SEMUA baris gateway ber-AccountNumber lenyap sekaligus (jurang
+        match-rate senyap)."""
         p = self.panel_wd(200000, "Eko", "", datetime(2026, 7, 20, 8, 0),
                           username="eko99")
         g = self.gw_wd(200000, "099999999999", datetime(2026, 7, 20, 8, 0),
@@ -170,6 +174,31 @@ class AccountJoinTests(TestCase):
         self.assertEqual(r.right, g)  # tetap terjangkau pass 1
         self.assertEqual(r.bucket, MatchResult.Bucket.COCOK)
         self.assertEqual(r.reason_code, "amount+date+name")
+
+    # 5b2. satu pemain berrekening tak boleh membungkam pemain lain se-toko ----
+    def test_pemain_berrekening_tidak_membungkam_pemain_tanpa_rekening(self):
+        """Probe: dalam SATU toko, pemain A punya rekening di panel (cocok lewat
+        pass 0c) sehingga himpunan rekening panel TIDAK kosong. Panel pemain B
+        tak membawa segmen rekening sama sekali, jadi rekening di baris gateway
+        B tampak "asing". Kalau keasingan itu dipakai memblokir, B jatuh ke
+        no_money padahal nama, nominal, dan tanggalnya identik — satu pemain
+        berrekening cukup untuk membungkam semua pemain lain di toko yang sama.
+        """
+        acct_a = "082250625228"
+        pa = self.panel_wd(500000, "Budi", acct_a, datetime(2026, 7, 20, 9, 0))
+        ga = self.gw_wd(500000, acct_a, datetime(2026, 7, 20, 9, 5))
+        pb = self.panel_wd(310000, "Siti Rahayu", "",
+                           datetime(2026, 7, 20, 10, 0))
+        gb = self.gw_wd(310000, "089900001111", datetime(2026, 7, 20, 10, 5),
+                        name="Siti Rahayu")
+        run = run_match("panel_bank", self.tol)
+        ra = MatchResult.objects.get(run=run, left=pa)
+        self.assertEqual(ra.right, ga)
+        self.assertEqual(ra.reason_code, "account")  # panel_accts memang terisi
+        rb = MatchResult.objects.get(run=run, left=pb)
+        self.assertEqual(rb.right, gb)
+        self.assertEqual(rb.bucket, MatchResult.Bucket.COCOK)
+        self.assertEqual(rb.reason_code, "amount+date+name")
 
     # 5c. assignment global urut delta (bukan urutan iterasi panel) -----------
     def test_assignment_global_pilih_delta_terkecil_bukan_baris_pertama(self):
