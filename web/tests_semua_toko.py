@@ -268,21 +268,26 @@ class BarTulisTests(TestCase):
         for nama in ("upload", "reconcile"):
             with self.subTest(rute=nama):
                 r = self.client.get(reverse(nama))
-                self.assertContains(r, "Anda dalam mode Semua Toko")
-                self.assertContains(r, "akan tercatat atas nama toko")
+                self.assertContains(
+                    r, "pekerjaan di halaman ini tercatat atas nama toko")
+                self.assertContains(
+                    r, "Pastikan toko ini yang kamu maksud sebelum melanjutkan.")
                 self.assertContains(r, f"<b>{_active_name(r)}</b>")
                 self.assertContains(r, "mode-bar warn")
-                self.assertNotContains(r, "Mode Semua Toko aktif")
+                # copy info (halaman baca) tak boleh ikut nongol di sini
+                self.assertNotContains(r, "halaman ini menampilkan")
 
     def test_halaman_baca_tak_pakai_copy_peringatan(self):
         _sesi_semua(self.client)
         r = self.client.get("/rekening/")
         self.assertNotContains(r, "mode-bar warn")
-        self.assertNotContains(r, "Anda dalam mode Semua Toko")
+        self.assertNotContains(
+            r, "pekerjaan di halaman ini tercatat atas nama toko")
 
     def test_bar_peringatan_tak_muncul_saat_mode_mati(self):
         r = self.client.get(reverse("upload"))
-        self.assertNotContains(r, "Anda dalam mode Semua Toko")
+        self.assertNotContains(
+            r, "pekerjaan di halaman ini tercatat atas nama toko")
         self.assertNotContains(r, "mode-bar warn")
 
 
