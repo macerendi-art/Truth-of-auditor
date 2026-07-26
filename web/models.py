@@ -1,4 +1,8 @@
-"""Model layer web: koreksi tampilan sel FR (overlay — data asli tak tersentuh)."""
+"""Model layer web: overlay tampilan (koreksi sel FR, isian manual Rekap Bulanan).
+
+Semua model di sini bersifat OVERLAY: `Transaction` hasil ingest tidak pernah
+diubah — nilai koreksi/isian ditumpangkan saat render.
+"""
 from django.conf import settings
 from django.db import models
 
@@ -49,3 +53,56 @@ class FRKoreksi(TimeStampedModel):
 
     def __str__(self):
         return f"{self.tanggal} {self.account} [{self.kolom}] = {self.nilai}"
+
+
+class RekapManual(TimeStampedModel):
+    """Isian manual satu baris Rekap Bulanan — menimpa nilai otomatis.
+
+    Kunci baris = (toko, periode, field): `periode` SELALU tanggal 1 bulan
+    bersangkutan, `field` = slug baris di registry `web.rekap.FIELDS`.
+    Sengaja TANPA `choices=` (pola `ReviewAction.alasan`): daftar baris hidup
+    di `web/rekap.py` dan boleh berubah tanpa migrasi — validasi slug dilakukan
+    di view saat menyimpan. Baris `kind="computed"` tak pernah dibaca dari sini
+    (rumus tak boleh ditimpa); riwayat nilai ada di `core.AuditLog`.
+    """
+
+    toko = models.ForeignKey(
+        "sources.Toko", on_delete=models.CASCADE, related_name="rekap_manual")
+    periode = models.DateField(help_text="tanggal 1 bulan bersangkutan")
+    field = models.CharField(max_length=64, help_text="slug baris web.rekap.FIELDS")
+    nilai = models.DecimalField(max_digits=18, decimal_places=2)
+    catatan = models.TextField(blank=True)
+    dibuat_oleh = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="rekap_manual")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["toko", "periode", "field"], name="uniq_rekap_manual"),
+        ]
+
+    def __str__(self):
+        return f"{self.periode:%Y-%m} {self.field} = {self.nilai}"
+
+
+class RekapPenyebab(TimeStampedModel):
+    """Satu baris daftar "Penyebab" selisih Rekap Bulanan (label bebas + nilai).
+
+    Bukan overlay atas baris registry: jumlahnya dinamis per bulan, ditotal
+    jadi baris `penyebab_total` (dan ikut `different`). Urutan tampilan
+    ditentukan `urutan` — bukan waktu input.
+    """
+
+    toko = models.ForeignKey(
+        "sources.Toko", on_delete=models.CASCADE, related_name="rekap_penyebab")
+    periode = models.DateField(help_text="tanggal 1 bulan bersangkutan")
+    label = models.CharField(max_length=100)
+    nilai = models.DecimalField(max_digits=18, decimal_places=2)
+    urutan = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["urutan", "id"]
+
+    def __str__(self):
+        return f"{self.periode:%Y-%m} {self.label} = {self.nilai}"
