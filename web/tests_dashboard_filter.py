@@ -244,7 +244,13 @@ class KerjakanHariIniTests(_Base):
         self.assertContains(r, "total per batch harian pada 20 Jul – 23 Jul 2026")
 
     def test_aria_label_default_tetap_30_hari(self):
-        self.batch(D1)
+        # Tanpa filter, jendela tren di-anchor ke max(batch terakhir, HARI INI)
+        # lalu dipotong 30 hari ke belakang — batch bertanggal mati pelan-pelan
+        # keluar jendela seiring hari berjalan, dan seksi tren (beserta aria
+        # label ini) ikut hilang. Dengan D1 = 20 Jul 2026 tes ini akan merah
+        # sendiri mulai 19 Agu 2026. Tanggal relatif menjaga maksud tes:
+        # ADA batch di dalam jendela default.
+        self.batch(date.today() - timedelta(days=7))
         r = self.client.get(reverse("dashboard"))
         self.assertContains(r, "total per batch harian 30 hari")
 
