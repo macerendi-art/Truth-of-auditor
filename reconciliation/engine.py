@@ -1538,11 +1538,23 @@ def verify_panel_anchor(toko, date_from, date_to, include, window):
     Tanpa panel sama sekali → tak ada yang direkon → tak ada pelanggaran.
 
     'Tertutup' — money (bank/gateway): ∃ panel p dengan p <= m <= p+window (searah
-    engine: uang >= panel). Bracket: ∃ panel p dengan |m-p| <= window."""
+    engine: uang >= panel). Bracket: ∃ panel p dengan |m-p| <= window. TANGGAL YANG
+    SUDAH PUNYA BATCH juga menutup dirinya sendiri: panelnya pernah diupload lalu
+    dikonsumsi (karena itu tak lagi terlihat sebagai jangkar aktif), dan baris baru
+    bertanggal itu — lazim dari statement bank yang berputar — memang punya jalur
+    sendiri, `_retro_homes`/`_writeback_retro`, yang menulisnya balik ke batch asal.
+    Penutupan lewat batch berlaku TEPAT pada tanggalnya saja, tidak melebar sewindow,
+    karena penulisan-balik retro dikunci per tanggal.
+
+    Tiap pelanggaran membawa `butuh_panel`: tanggal panel yang akan menutupnya."""
     pdates = sorted(_panel_dates(toko, date_from, date_to, include))
     if not pdates:
         return []
     pset = set(pdates)
+    bqs = ReconBatch.objects.filter(recon_date__isnull=False)
+    if toko is not None:
+        bqs = bqs.filter(toko=toko)
+    bset = set(bqs.values_list("recon_date", flat=True))
     # Rentang relevan: uang harus >= panel (searah), jadi [panel_awal .. panel_akhir+window];
     # bracket boleh mendahului panel, jadi [panel_awal-window .. panel_akhir+window].
     lo_m, hi_m = pdates[0], pdates[-1] + timedelta(days=window)
@@ -1554,10 +1566,17 @@ def verify_panel_anchor(toko, date_from, date_to, include, window):
     violations = []
 
     def covered_money(m):
-        return any(p <= m <= p + timedelta(days=window) for p in pset)
+        return m in bset or any(p <= m <= p + timedelta(days=window) for p in pset)
 
     def covered_bracket(m):
-        return any(abs((m - p).days) <= window for p in pset)
+        return m in bset or any(abs((m - p).days) <= window for p in pset)
+
+    def butuh_money(m):
+        """Tanggal panel yang akan menutup uang tanggal `m` (uang >= panel)."""
+        return [m - timedelta(days=d) for d in range(window, -1, -1)]
+
+    def butuh_bracket(m):
+        return [m + timedelta(days=d) for d in range(-window, window + 1)]
 
     money_keys = _included_money_sources(include)
     if money_keys:
@@ -1574,7 +1593,8 @@ def verify_panel_anchor(toko, date_from, date_to, include, window):
                 a[1] += 1
         for m, (gross, n) in agg.items():
             if lo_m <= m <= hi_m and not covered_money(m):
-                violations.append({"date": m, "source": "uang", "amount_gross": gross, "n": n})
+                violations.append({"date": m, "source": "uang", "amount_gross": gross,
+                                   "n": n, "butuh_panel": butuh_money(m)})
 
     if _inc(include, "bracket"):
         bdates = defaultdict(int)
@@ -1587,7 +1607,8 @@ def verify_panel_anchor(toko, date_from, date_to, include, window):
                 bdates[dt.date()] += 1
         for m, n in bdates.items():
             if lo_b <= m <= hi_b and not covered_bracket(m):
-                violations.append({"date": m, "source": "bracket", "amount_gross": 0.0, "n": n})
+                violations.append({"date": m, "source": "bracket", "amount_gross": 0.0,
+                                   "n": n, "butuh_panel": butuh_bracket(m)})
 
     return sorted(violations, key=lambda v: (v["date"], v["source"]))
 
@@ -1611,10 +1632,16 @@ def run_batches_auto(toko, tolerance=None, date_from=None, date_to=None, user=No
     panel_dates = _panel_dates(toko, date_from, date_to, include)
     violations = verify_panel_anchor(toko, date_from, date_to, include, window)
     if violations:
+        # Jalan keluar kedua (selain upload panel yang kurang): batasi rentang mulai
+        # dari tanggal panel aman TERAWAL setelah pelanggaran terakhir — baris lama
+        # tetap menunggu, tanggal yang panelnya lengkap tetap bisa dijalankan.
+        batas = max(v["date"] for v in violations)
+        aman = [d for d in panel_dates if d > batas]
         return {
             "ok": False, "batches": [], "dates_processed": [],
             "skipped_existing": [], "violations": violations,
             "errors": [], "panel_dates": panel_dates,
+            "saran_dari": aman[0] if aman else None,
         }
 
     # Batas bawah scope: tanggal panel terawal, diperlebar ke tanggal baris carried

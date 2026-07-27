@@ -1150,13 +1150,25 @@ def reconcile(request):
             user=request.user, include=include,
         )
         if not res["ok"]:
+            # Sebut tanggal panel yang dibutuhkan tiap baris — tanpa itu pemakai
+            # harus menebak sendiri panel tanggal mana yang menutup barisnya.
             rows = format_html_join(
-                "", "<br>&bull; {} — {} ({} baris)",
-                ((v["date"].strftime("%d/%m/%Y"), v["source"], v["n"]) for v in res["violations"]),
+                "", "<br>&bull; {} — {} ({} baris) · butuh panel {}",
+                (
+                    (v["date"].strftime("%d/%m/%Y"), v["source"], v["n"],
+                     " atau ".join(d.strftime("%d/%m") for d in v.get("butuh_panel") or []))
+                    for v in res["violations"]
+                ),
             )
+            saran = res.get("saran_dari")
+            ekor = format_html(
+                "<br>Atau jalankan sebagian dulu: isi <b>Dari tanggal</b> = {} — "
+                "baris lama tetap menunggu sampai panelnya diupload.",
+                saran.strftime("%d/%m/%Y"),
+            ) if saran else ""
             messages.error(request, format_html(
                 "Rekonsiliasi ditolak: ada tanggal ber-uang/bracket tanpa panel penutup. "
-                "Upload panel tanggal terkait dulu, lalu jalankan lagi:{}", rows,
+                "Upload panel tanggal terkait dulu, lalu jalankan lagi:{}{}", rows, ekor,
             ))
             return redirect("reconcile")
         for er in res["errors"]:

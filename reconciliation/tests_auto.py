@@ -210,3 +210,72 @@ class VerifyAnchorTests(_Base):
         self._hari(self.panel, "depo", "60000", "60000", "D2", "p2", 29, username="andi")
         self._hari(self.panel, "depo", "50000", "50000", "D1", "p1", 27, username="budi")
         self.assertEqual(_panel_dates(self.lbs), [date(2026, 6, 27), date(2026, 6, 29)])
+
+
+class AnchorBatchLamaTests(_Base):
+    """Tanggal yang SUDAH punya batch = panel-nya pernah diupload & ditutup.
+
+    Statement bank di sini berputar (rolling): unggahan hari ini sering membawa
+    baris BARU untuk tanggal lampau. Baris begitu punya jalurnya sendiri —
+    `_retro_homes`/`_writeback_retro` menulisnya balik ke batch asal — jadi
+    gerbang jangkar TAK boleh memblokir hanya karena baris panel tanggal itu
+    sudah dikonsumsi (aktif = habis) sehingga tak lagi terlihat sebagai jangkar.
+    """
+
+    def _batch(self, hari):
+        return ReconBatch.objects.create(
+            toko=self.lbs, tolerance=self.tol, recon_date=date(2026, 6, hari)
+        )
+
+    def test_uang_susulan_di_tanggal_berbatch_tak_memblokir(self):
+        # Panel aktif 25 (sisa carry) & 30 → rentang 25-31. Uang 28 tanpa panel
+        # aktif, TAPI 28 sudah punya batch → baris susulan, bukan pelanggaran.
+        self._hari(self.panel, "depo", "50000", "50000", "D1", "p1", 25, username="budi")
+        self._hari(self.panel, "depo", "80000", "80000", "D2", "p2", 30, username="andi")
+        self._batch(28)
+        self._hari(self.bank, "depo", "99000", "99000", "", "k9", 28, username="zola")
+        self.assertEqual(verify_panel_anchor(self.lbs, None, None, None, 1), [])
+
+    def test_bracket_susulan_di_tanggal_berbatch_tak_memblokir(self):
+        self._hari(self.panel, "depo", "50000", "50000", "D1", "p1", 25, username="budi")
+        self._hari(self.panel, "depo", "80000", "80000", "D2", "p2", 30, username="andi")
+        self._batch(28)
+        self._hari(self.bracket, "depo", "99000", "99000", "B9", "b9", 28, username="zola")
+        self.assertEqual(verify_panel_anchor(self.lbs, None, None, None, 1), [])
+
+    def test_tanpa_batch_tetap_memblokir(self):
+        # Kontra-uji: hilangkan batch-nya → pelanggaran harus muncul lagi.
+        self._hari(self.panel, "depo", "50000", "50000", "D1", "p1", 25, username="budi")
+        self._hari(self.panel, "depo", "80000", "80000", "D2", "p2", 30, username="andi")
+        self._hari(self.bank, "depo", "99000", "99000", "", "k9", 28, username="zola")
+        v = verify_panel_anchor(self.lbs, None, None, None, 1)
+        self.assertEqual([(x["date"], x["source"]) for x in v], [(date(2026, 6, 28), "uang")])
+
+    def test_batch_tanggal_lain_tak_menutup(self):
+        # Batch 27 tak menutup uang 28 (retro menulis per TANGGAL, bukan per window).
+        self._hari(self.panel, "depo", "50000", "50000", "D1", "p1", 25, username="budi")
+        self._hari(self.panel, "depo", "80000", "80000", "D2", "p2", 30, username="andi")
+        self._batch(27)
+        self._hari(self.bank, "depo", "99000", "99000", "", "k9", 28, username="zola")
+        v = verify_panel_anchor(self.lbs, None, None, None, 1)
+        self.assertEqual([(x["date"], x["source"]) for x in v], [(date(2026, 6, 28), "uang")])
+
+    def test_pelanggaran_menyebut_panel_yang_dibutuhkan(self):
+        # Pesan harus bisa ditindak: tanggal panel mana yang menutup baris ini.
+        self._hari(self.panel, "depo", "50000", "50000", "D1", "p1", 25, username="budi")
+        self._hari(self.panel, "depo", "80000", "80000", "D2", "p2", 30, username="andi")
+        self._hari(self.bank, "depo", "99000", "99000", "", "k9", 28, username="zola")
+        v = verify_panel_anchor(self.lbs, None, None, None, 1)
+        self.assertEqual(v[0]["butuh_panel"], [date(2026, 6, 27), date(2026, 6, 28)])
+
+    def test_saran_batasi_rentang(self):
+        # Jalan keluar kedua: mulai dari tanggal panel aman berikutnya (30).
+        self._hari(self.panel, "depo", "50000", "50000", "D1", "p1", 25, username="budi")
+        self._hari(self.panel, "depo", "80000", "80000", "D2", "p2", 30, username="andi")
+        self._hari(self.bank, "depo", "99000", "99000", "", "k9", 28, username="zola")
+        res = run_batches_auto(self.lbs, self.tol)
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["saran_dari"], date(2026, 6, 30))
+        # dan memang: dibatasi dari 30 → lolos
+        res2 = run_batches_auto(self.lbs, self.tol, date_from=date(2026, 6, 30))
+        self.assertTrue(res2["ok"], res2["violations"])

@@ -119,6 +119,26 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.12.2",
+        tanggal=_dt.date(2026, 7, 27),
+        nama="Penolakan Rekonsiliasi yang Menuntun",
+        jenis=PATCH,
+        commit="",
+        sorotan=(
+            "Saat rekonsiliasi ditolak karena ada tanggal ber-uang tanpa panel penutup, "
+            "pesannya kini menyebut **panel tanggal berapa** yang dibutuhkan tiap baris "
+            "(mis. “butuh panel 23/07 atau 24/07”) — sebelumnya pemakai harus menebak sendiri.",
+            "Pesan yang sama menawarkan jalan keluar kedua: menjalankan sebagian dulu dengan "
+            "mengisi “Dari tanggal” pada tanggal aman terdekat. Baris lama tetap menunggu "
+            "sampai panelnya diupload, jadi tak ada yang hilang atau salah dihitung.",
+            "Tanggal yang sudah pernah direkonsiliasi tidak lagi ikut memblokir. Mutasi bank "
+            "biasa diekspor berputar sehingga unggahan hari ini kerap membawa baris baru "
+            "bertanggal lampau; baris seperti itu memang sudah punya jalurnya sendiri "
+            "(ditulis balik ke batch tanggalnya), sehingga menahan seluruh rekonsiliasi "
+            "karenanya cuma menyuruh pemakai mengupload panel yang sebenarnya sudah ada.",
+        ),
+    ),
+    Rilis(
         versi="1.12.1",
         tanggal=_dt.date(2026, 7, 27),
         nama="Filter Sumber Panel↔Bracket",

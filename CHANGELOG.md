@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.12.1** · 19 rilis (1 besar, 12 fitur, 2 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.12.2** · 20 rilis (1 besar, 12 fitur, 3 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.12.2 — Penolakan Rekonsiliasi yang Menuntun
+*Perbaikan · 27 Juli 2026*
+
+- Saat rekonsiliasi ditolak karena ada tanggal ber-uang tanpa panel penutup, pesannya kini menyebut **panel tanggal berapa** yang dibutuhkan tiap baris (mis. “butuh panel 23/07 atau 24/07”) — sebelumnya pemakai harus menebak sendiri.
+- Pesan yang sama menawarkan jalan keluar kedua: menjalankan sebagian dulu dengan mengisi “Dari tanggal” pada tanggal aman terdekat. Baris lama tetap menunggu sampai panelnya diupload, jadi tak ada yang hilang atau salah dihitung.
+- Tanggal yang sudah pernah direkonsiliasi tidak lagi ikut memblokir. Mutasi bank biasa diekspor berputar sehingga unggahan hari ini kerap membawa baris baru bertanggal lampau; baris seperti itu memang sudah punya jalurnya sendiri (ditulis balik ke batch tanggalnya), sehingga menahan seluruh rekonsiliasi karenanya cuma menyuruh pemakai mengupload panel yang sebenarnya sudah ada.
 
 ## v1.12.1 — Filter Sumber Panel↔Bracket
 *Perbaikan · 27 Juli 2026*

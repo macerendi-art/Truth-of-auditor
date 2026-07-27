@@ -181,3 +181,45 @@ class ReviewViewTests(TestCase):
         self.assertEqual(ReviewAction.objects.count(), 1)
         ra = ReviewAction.objects.get()
         self.assertEqual(ra.action, "mark_matched")
+
+
+class PesanTolakActionableTests(TestCase):
+    """Pesan penolakan jangkar harus bisa ditindak: sebut tanggal panel yang
+    dibutuhkan + tawarkan jalan keluar kedua (batasi 'Dari tanggal')."""
+
+    def setUp(self):
+        User = get_user_model()
+        User.objects.create_user("aud2", "a2@a.co", "pw12345", role="supervisor")
+        self.client.login(username="aud2", password="pw12345")
+        self.lbs = Toko.objects.get(key="lbs")
+        self.tol = ToleranceProfile.objects.get_or_create(
+            name="Default", defaults={"date_window_days": 1}
+        )[0]
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        self.up = Upload.objects.create(source_type=self.panel, toko=self.lbs)
+        self._n = 0
+
+    def _tx(self, st, hari, jenis="depo"):
+        self._n += 1
+        return Transaction.objects.create(
+            upload=self.up, source_type=st, toko=self.lbs, jenis=jenis,
+            amount=Decimal("50000"), money_delta=Decimal("50000"),
+            occurred_at=datetime(2026, 6, hari, 10, 0), row_hash=f"pa{self._n}",
+        )
+
+    def test_pesan_sebut_panel_dibutuhkan_dan_saran_rentang(self):
+        self._tx(self.panel, 25)
+        self._tx(self.panel, 30)
+        self._tx(self.bank, 28)
+        r = self.client.post(
+            reverse("reconcile"),
+            {"tolerance": "Default", "inc_panel_dp": "on", "inc_bank": "on"},
+            follow=True,
+        )
+        pesan = " ".join(str(m) for m in r.context["messages"])
+        self.assertIn("28/06/2026 — uang (1 baris)", pesan)
+        self.assertIn("butuh panel 27/06 atau 28/06", pesan)
+        self.assertIn("Dari tanggal</b> = 30/06/2026", pesan)
+        self.assertEqual(ReconBatch.objects.filter(toko=self.lbs).count(), 0)
