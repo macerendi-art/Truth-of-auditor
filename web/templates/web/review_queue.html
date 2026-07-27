@@ -69,7 +69,7 @@
     <div class="fold-body tabs sub">
       <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}" class="{% if not btitle %}active{% endif %}">{% if hide_left %}semua bank{% else %}semua title{% endif %}</a>
       {% for b in btitles %}
-      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}&btitle={{ b.code|urlencode }}" class="{% if btitle == b.code %}active{% endif %}">{{ b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
+      <a href="?bucket={{ bucket }}&flow={{ flow }}&from={{ date_from }}&to={{ date_to }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}&btitle={{ b.code|urlencode }}" class="{% if btitle == b.code %}active{% endif %}">{{ b.label|default:b.code }}<span class="n">{{ b.n|intcomma }}</span></a>
       {% endfor %}
     </div>
   </details>

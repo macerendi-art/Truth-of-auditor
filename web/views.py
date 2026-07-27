@@ -11,8 +11,9 @@ from django.contrib.auth.decorators import login_required
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
-from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max, Min, OuterRef, Q, Subquery, Sum
+from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max, Min, OuterRef, Q, Subquery, Sum, TextField
 from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Cast
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.defaultfilters import date as date_filter
@@ -1462,35 +1463,11 @@ def run_detail(request, pk):
 
     # Chip filter bank title / tujuan (dalam bucket+flow+alasan+bank).
     # Tab normal: bank tujuan sisi kredit (left__bank_title). Tab orphan: label
-    # bank/sumber sisi uang, diturunkan dari upload mutasi (BRI/BCA/Mandiri/...
-    # lewat provider/nama file) — sisi uang tak punya kolom bank ter-denormalisasi.
+    # bank/sumber sisi uang — bank/gateway dari upload mutasi, baris FR/Bracket
+    # dari akun FR-nya (lihat `_chips_sumber_uang`).
     btitle = request.GET.get("btitle", "")
     if is_orphan:
-        up_ids = list(
-            qs.filter(right__isnull=False)
-            .values_list("right__upload_id", flat=True).distinct()
-        )
-        ups = Upload.objects.filter(id__in=up_ids).select_related("account", "source_type")
-        label_by_upload = {
-            u.id: specific_source_label(u.source_type.key, account=u.account, upload=u)
-            for u in ups
-        }
-        counts = {}
-        for r in (
-            qs.filter(right__isnull=False)
-            .values("right__upload_id").annotate(n=Count("id"))
-        ):
-            lbl = label_by_upload.get(r["right__upload_id"])
-            if lbl:
-                counts[lbl] = counts.get(lbl, 0) + r["n"]
-        btitles = [
-            {"code": lbl, "n": n}
-            for lbl, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-        ]
-        if btitle:
-            qs = qs.filter(right__upload_id__in=[
-                uid for uid, lbl in label_by_upload.items() if lbl == btitle
-            ])
+        btitles, qs = _chips_sumber_uang(qs, btitle)
     else:
         btitles = [
             {"code": r["left__bank_title"], "n": r["n"]}
@@ -1542,6 +1519,84 @@ def run_detail(request, pk):
         "pilihan_alasan": FRKoreksi.ALASAN_KOREKSI,
     }
     return render(request, "web/run_detail.html", ctx)
+
+
+def _label_akun_fr(akun):
+    """'BANK BCA | HENDI | WITHDRAW' → 'BANK BCA — HENDI · WITHDRAW'.
+
+    Pipa mentah tak enak dibaca di chip; pemisahannya mengikuti `_pecah_akun`
+    di breakdown.py (segmen terakhir = peran akun).
+    """
+    parts = [p.strip() for p in str(akun or "").split("|") if p.strip()]
+    if len(parts) >= 2:
+        return " — ".join(parts[:-1]) + " · " + " ".join(parts[-1].split())
+    return parts[0] if parts else _norm_akun("")
+
+
+def _chips_sumber_uang(qs, btitle):
+    """Chip "Filter bank/sumber" tab **Tidak Ada di Panel** + penyaringannya.
+
+    Sisi uang (kanan) bisa dua rupa dan itulah sumber bug yang dilaporkan klien:
+
+    - mutasi bank/gateway → labelnya diturunkan dari upload (BRI/BCA/Mandiri/
+      NXPay/…), karena baris uang tak punya kolom bank ter-denormalisasi;
+    - baris **FR/Bracket** (relasi panel_bracket, mis. panel Vigor/TM Gaming)
+      → label upload SELALU generik "Bracket" (`specific_source_label` sengaja
+      tak memberi label spesifik untuk panel/bracket), sehingga filternya cuma
+      berisi satu pilihan dan tak ada gunanya. Akun aslinya ada di
+      `raw["Bank"]` — sumber yang sama yang dipakai halaman /bracket/.
+
+    `qs` harus sudah difilter tab/arus/alasan. → (chips, qs terfilter).
+    """
+    # `Cast(..., TextField())` WAJIB: tanpa itu Django membandingkan sisi kanan
+    # sebagai JSON (`JSON_EXTRACT('BANK BCA | …','$')`) dan SQLite menolaknya
+    # dengan "malformed JSON" — nama akun FR bukan dokumen JSON yang sah.
+    akun_fr = Cast(KeyTextTransform("Bank", "right__raw"), TextField())
+    uang = qs.filter(right__isnull=False)
+    counts, labels = {}, {}
+
+    # 1) baris FR/Bracket → akun FR dari raw["Bank"]
+    for r in (
+        uang.filter(right__source_type__key="bracket")
+        .annotate(fr_akun=akun_fr)
+        .values("fr_akun").annotate(n=Count("id"))
+    ):
+        code = _norm_akun(r["fr_akun"])
+        counts[code] = counts.get(code, 0) + r["n"]
+        labels[code] = _label_akun_fr(r["fr_akun"])
+
+    # 2) baris uang lain → label bank/gateway dari upload (perilaku lama)
+    lain = uang.exclude(right__source_type__key="bracket")
+    ups = Upload.objects.filter(
+        id__in=list(lain.values_list("right__upload_id", flat=True).distinct())
+    ).select_related("account", "source_type")
+    label_by_upload = {
+        u.id: specific_source_label(u.source_type.key, account=u.account, upload=u)
+        for u in ups
+    }
+    for r in lain.values("right__upload_id").annotate(n=Count("id")):
+        lbl = label_by_upload.get(r["right__upload_id"])
+        if lbl:
+            counts[lbl] = counts.get(lbl, 0) + r["n"]
+
+    chips = [
+        {"code": code, "label": labels.get(code), "n": n}
+        for code, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+    if not btitle:
+        return chips, qs
+
+    qs = qs.annotate(fr_akun=akun_fr)
+    if btitle == _norm_akun(""):  # sentinel baris FR tanpa kolom Bank
+        cocok = Q(right__source_type__key="bracket") & (
+            Q(fr_akun__isnull=True) | Q(fr_akun="")
+        )
+    else:
+        cocok = Q(right__source_type__key="bracket", fr_akun=btitle)
+    ids = [uid for uid, lbl in label_by_upload.items() if lbl == btitle]
+    if ids:
+        cocok |= Q(right__upload_id__in=ids)
+    return chips, qs.filter(cocok)
 
 
 def _parse_date(s):
@@ -1629,34 +1684,11 @@ def review_queue(request):
             qs = qs.filter(left__player_bank=bank)
 
     # Bank title: tab normal = left__bank_title; tab orphan = label bank/sumber
-    # sisi uang (diturunkan dari upload mutasi) — sama persis run_detail.
+    # sisi uang (bank/gateway dari upload, FR/Bracket dari akun FR-nya) — jalur
+    # yang sama persis dengan run_detail.
     btitle = request.GET.get("btitle", "")
     if is_orphan:
-        up_ids = list(
-            qs.filter(right__isnull=False)
-            .values_list("right__upload_id", flat=True).distinct()
-        )
-        ups = Upload.objects.filter(id__in=up_ids).select_related("account", "source_type")
-        label_by_upload = {
-            u.id: specific_source_label(u.source_type.key, account=u.account, upload=u)
-            for u in ups
-        }
-        counts = {}
-        for r in (
-            qs.filter(right__isnull=False)
-            .values("right__upload_id").annotate(n=Count("id"))
-        ):
-            lbl = label_by_upload.get(r["right__upload_id"])
-            if lbl:
-                counts[lbl] = counts.get(lbl, 0) + r["n"]
-        btitles = [
-            {"code": lbl, "n": n}
-            for lbl, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-        ]
-        if btitle:
-            qs = qs.filter(right__upload_id__in=[
-                uid for uid, lbl in label_by_upload.items() if lbl == btitle
-            ])
+        btitles, qs = _chips_sumber_uang(qs, btitle)
     else:
         btitles = [
             {"code": r["left__bank_title"], "n": r["n"]}

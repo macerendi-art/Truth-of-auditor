@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.12.0** · 18 rilis (1 besar, 12 fitur, 1 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.12.1** · 19 rilis (1 besar, 12 fitur, 2 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.12.1 — Filter Sumber Panel↔Bracket
+*Perbaikan · 27 Juli 2026*
+
+- Pada hasil Panel↔Bracket, tab “Tidak Ada di Panel” punya filter “bank/sumber” yang sebelumnya hanya berisi satu pilihan bertuliskan “Bracket” — tidak ada gunanya untuk menyaring. Sekarang isinya rekening FR yang sebenarnya (mis. “BANK BCA — HENDI · WITHDRAW”, “QRIS FLYER · DEPOSIT / WITHDRAW”), ditulis sama seperti di halaman Breakdown FR/Bracket dan lengkap dengan jumlah barisnya.
+- Perbaikan yang sama berlaku di Area Pengecekan, supaya daftar kerja lintas hari bisa disaring per rekening FR juga.
+- Yang tidak berubah: pencocokan dengan bank atau gateway tetap menampilkan nama banknya (BRI, BCA, Mandiri, NXPay, …) seperti sebelumnya. Baris FR yang kolom rekeningnya kosong dikelompokkan sebagai “(Tanpa Akun)” — bukan disembunyikan.
 
 ## v1.12.0 — Dashboard Bisa Menoleh ke Belakang
 *Rilis fitur · 26 Juli 2026*

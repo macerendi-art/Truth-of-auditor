@@ -119,6 +119,27 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.12.1",
+        tanggal=_dt.date(2026, 7, 27),
+        nama="Filter Sumber Panel↔Bracket",
+        jenis=PATCH,
+        commit="",
+        sorotan=(
+            "Pada hasil Panel↔Bracket, tab “Tidak Ada di Panel” punya filter "
+            "“bank/sumber” yang sebelumnya hanya berisi satu pilihan bertuliskan "
+            "“Bracket” — tidak ada gunanya untuk menyaring. Sekarang isinya rekening "
+            "FR yang sebenarnya (mis. “BANK BCA — HENDI · WITHDRAW”, “QRIS FLYER · "
+            "DEPOSIT / WITHDRAW”), ditulis sama seperti di halaman Breakdown "
+            "FR/Bracket dan lengkap dengan jumlah barisnya.",
+            "Perbaikan yang sama berlaku di Area Pengecekan, supaya daftar kerja "
+            "lintas hari bisa disaring per rekening FR juga.",
+            "Yang tidak berubah: pencocokan dengan bank atau gateway tetap "
+            "menampilkan nama banknya (BRI, BCA, Mandiri, NXPay, …) seperti "
+            "sebelumnya. Baris FR yang kolom rekeningnya kosong dikelompokkan "
+            "sebagai “(Tanpa Akun)” — bukan disembunyikan.",
+        ),
+    ),
+    Rilis(
         versi="1.12.0",
         tanggal=_dt.date(2026, 7, 26),
         nama="Dashboard Bisa Menoleh ke Belakang",

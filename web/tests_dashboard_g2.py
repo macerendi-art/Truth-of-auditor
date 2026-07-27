@@ -48,7 +48,10 @@ class DashboardG2Tests(TestCase):
         )
 
     def test_tren_batasi_30_hari(self):
-        anchor = date(2026, 6, 27)
+        # Anchor tren = max(batch terakhir, HARI INI) → tanggal mati bikin tes ini
+        # kedaluwarsa sendiri begitu hari berganti (pernah terjadi 27 Juli 2026:
+        # batch 27 Juni tepat jatuh di luar jendela). Pakai tanggal relatif.
+        anchor = date.today()
         self._batch(anchor, 5000)
         self._batch(anchor - timedelta(days=40), 9999)  # di luar 30 hari
         r = self.client.get(reverse("dashboard"))
