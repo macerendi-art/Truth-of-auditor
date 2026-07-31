@@ -144,7 +144,13 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
 
 
 # Sufiks acak yang ditambahkan storage Django saat nama staging bentrok
-# ("X.xlsx" -> "X_1pZwg1n.xlsx") — dibuang agar nama file bisa dibandingkan.
+# ("X.xlsx" -> "X_1pZwg1n.xlsx"). Pengupasan HANYA berlaku pada nama yang sudah
+# TERSIMPAN (peninggalan lama: `original_name` dulu diturunkan dari path staging);
+# nama upload BARU datang bersih dari pengunggah, jadi tak pernah dikupas.
+# Mengupas kedua sisi merusak nama bertanggal yang kebetulan sepola — "_27JUN26"
+# dan "_28JUN26" sama-sama 7 alnum, keduanya jadi "mutasi.xlsx", padahal ekspor
+# bank kumulatif hari ke-2 memang memuat isi hari ke-1 sehingga bukti superset
+# lolos dan file hari ke-1 salah dilabeli "ketiban".
 _SUFIKS_STORAGE_RE = re.compile(r"_[A-Za-z0-9]{7}(?=\.[^.]+$)")
 
 # Batas usia kandidat. Bukan aturan bisnis — tak ada tenggat yang dijanjikan;
@@ -154,8 +160,12 @@ _SUFIKS_STORAGE_RE = re.compile(r"_[A-Za-z0-9]{7}(?=\.[^.]+$)")
 TIBAN_JENDELA = timedelta(days=14)
 
 
-def _nama_kunci(name):
-    return _SUFIKS_STORAGE_RE.sub("", (name or "").strip()).casefold()
+def _nama_kunci(name, buang_sufiks=False):
+    """Nama file yang dinormalisasi (trim + casefold); sufiks storage dibuang bila diminta."""
+    nama = (name or "").strip()
+    if buang_sufiks:
+        nama = _SUFIKS_STORAGE_RE.sub("", nama)
+    return nama.casefold()
 
 
 def _tandai_tiban(up, st, toko, file_hashes, user):
@@ -179,7 +189,10 @@ def _tandai_tiban(up, st, toko, file_hashes, user):
         created_at__gte=timezone.now() - TIBAN_JENDELA,
     ).exclude(pk=up.pk)
     for cand in kandidat:
-        if _nama_kunci(cand.original_name) != kunci:
+        # Asimetris: nama baru dipakai apa adanya, nama tersimpan boleh dikupas
+        # sufiks storage-nya (baris lama bisa membawa peninggalan path staging).
+        if kunci not in (_nama_kunci(cand.original_name),
+                         _nama_kunci(cand.original_name, buang_sufiks=True)):
             continue
         # Isi file kandidat = baris miliknya + baris dedup yang ter-link padanya.
         # Diambil sebagai himpunan (2 query) alih-alih dua `exclude(row_hash__in=…)`

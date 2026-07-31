@@ -89,6 +89,40 @@ class TibanTests(TestCase):
         up_a.refresh_from_db()
         self.assertEqual(up_a.superseded_by_id, up_b.pk)
 
+    def test_sufiks_tanggal_beda_tidak_tiban(self):
+        """`_27JUN26` berbentuk sufiks storage tapi BERMAKNA — jangan dikupas dari nama baru.
+
+        Ekspor bank kumulatif tanggal 28 sah memuat seluruh isi ekspor tanggal 27,
+        jadi bukti superset lolos. Yang menahan cuma nama: kalau kedua sisi dikupas,
+        keduanya jadi "mutasi.xlsx" dan file tanggal 27 salah dilabeli ketiban.
+        """
+        up_a, _, _ = self._unggah(["a", "b"], "MUTASI_27JUN26.xlsx")
+        self._unggah(["a", "b", "c"], "MUTASI_28JUN26.xlsx")
+
+        up_a.refresh_from_db()
+        self.assertIsNone(up_a.superseded_by_id)
+        self.assertFalse(AuditLog.objects.filter(aksi="upload_tiban").exists())
+
+    def test_sufiks_tanggal_gaya_bri_tidak_tiban(self):
+        """Jebakan yang sama, skema penamaan lain: `bri0107` vs `bri0207` (7 alnum)."""
+        up_a, _, _ = self._unggah(["a", "b"], "mutasi_bri0107.csv")
+        self._unggah(["a", "b", "c"], "mutasi_bri0207.csv")
+
+        up_a.refresh_from_db()
+        self.assertIsNone(up_a.superseded_by_id)
+
+    def test_dua_nama_bersufiks_acak_beda_tidak_tiban(self):
+        """Kedua sisi kotor dgn sufiks acak berbeda -> tak ditandai (fail-safe, disengaja).
+
+        Pengupasan hanya berlaku pada sisi TERSIMPAN. Bila nama file baru pun kotor,
+        tak ada sisi bersih untuk dijadikan acuan — lebih baik lewat daripada salah tandai.
+        """
+        up_a, _, _ = self._unggah(["a", "b"], "X_aaa1111.xlsx")
+        self._unggah(["a", "b", "c"], "X_bbb2222.xlsx")
+
+        up_a.refresh_from_db()
+        self.assertIsNone(up_a.superseded_by_id)
+
     def test_nama_beda_tidak_tiban(self):
         """Superset saja tak cukup — nama file harus cocok."""
         up_a, _, _ = self._unggah(["a", "b"], "MUTASI BRI 27-06.csv")
