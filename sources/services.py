@@ -1,10 +1,14 @@
 """Service ingest: parse file -> simpan Transaction kanonik (idempoten via row_hash)."""
 import os
+import re
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 
 from django.db import IntegrityError, transaction as db_tx
+from django.utils import timezone
 
+from core.audit import catat
 from transactions.models import Transaction, owner_from_filename
 
 from .models import SourceType, Upload
@@ -101,10 +105,12 @@ def _decrypt_to_temp(path, password):
     return tmp.name
 
 
-def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=None, toko=None, provider="", password=""):
+def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=None, toko=None, provider="", password="", original_name=""):
     """Parse `file_path` dengan parser `parser_key`, simpan sebagai Transaction.
 
     File terenkripsi (Mandiri e-statement) didekripsi dulu memakai `password`.
+    `original_name` = nama file APA ADANYA dari pengunggah; `file_path` menunjuk
+    file staging yang namanya bisa dibubuhi sufiks acak oleh storage Django.
     Mengembalikan (upload, created, duplicate).
     """
     if parser_key not in PARSERS:
@@ -126,18 +132,70 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
         meta = getattr(parser, "meta", {}) or {}
         owner = meta.get("owner_name", "") or owner_from_filename(Path(file_path).name)
         try:
-            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner)
+            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner, original_name)
         except IntegrityError:
             # Balapan ingest ganda (double-submit / dua worker): constraint DB
             # menolak baris kembar. Ulang SEKALI — percobaan kedua membaca ulang
             # row_hash yang baru saja di-commit proses lain → terhitung duplikat.
-            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner)
+            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner, original_name)
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
 
 
-def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner=""):
+# Sufiks acak yang ditambahkan storage Django saat nama staging bentrok
+# ("X.xlsx" -> "X_1pZwg1n.xlsx") — dibuang agar nama file bisa dibandingkan.
+_SUFIKS_STORAGE_RE = re.compile(r"_[A-Za-z0-9]{7}(?=\.[^.]+$)")
+
+# Batas usia kandidat. Bukan aturan bisnis — tak ada tenggat yang dijanjikan;
+# bukti sebenarnya adalah superset row_hash di bawah. Jendela ini membatasi
+# kandidat yang diperiksa dan menahan kejutan pada ekspor kumulatif sama-nama
+# (file bulan ini yang memuat seluruh isi file bulan lalu).
+TIBAN_JENDELA = timedelta(days=14)
+
+
+def _nama_kunci(name):
+    return _SUFIKS_STORAGE_RE.sub("", (name or "").strip()).casefold()
+
+
+def _tandai_tiban(up, st, toko, file_hashes, user):
+    """Upload ulang yang LEBIH LENGKAP menandai file lama sama-nama 'ketiban'.
+
+    Kasusnya: file tarikan bank kadang kepotong DI BAWAH; versi utuhnya di-upload
+    ulang dgn nama yang sama. Bukti utamanya superset row_hash: SELURUH isi file
+    kandidat (baris miliknya + baris dedup yang ter-link padanya) harus tercakup
+    file baru. Murni metadata — transaksi, atribusi, dan batch tak disentuh
+    sama sekali.
+
+    Batas yang diketahui: parser BCA PDF memakai row_hash posisional; bila baris
+    DI ATAS overlap ikut berubah, bukti superset gagal dan file lama tidak
+    ditandai — itu perilaku fail-safe yang benar.
+    """
+    kunci = _nama_kunci(up.original_name)
+    if not kunci:
+        return
+    kandidat = Upload.objects.filter(
+        toko=toko, source_type=st, superseded_by__isnull=True,
+        created_at__gte=timezone.now() - TIBAN_JENDELA,
+    ).exclude(pk=up.pk)
+    for cand in kandidat:
+        if _nama_kunci(cand.original_name) != kunci:
+            continue
+        # Isi file kandidat = baris miliknya + baris dedup yang ter-link padanya.
+        # Diambil sebagai himpunan (2 query) alih-alih dua `exclude(row_hash__in=…)`
+        # supaya file besar tidak berubah jadi ribuan parameter SQL.
+        isi = set(
+            Transaction.objects.filter(upload=cand).values_list("row_hash", flat=True)
+        ) | set(cand.duplicate_transactions.values_list("row_hash", flat=True))
+        if not isi or not isi <= file_hashes:
+            continue  # kandidat kosong = tanpa bukti; selebihnya = bukan superset
+        cand.superseded_by = up
+        cand.save(update_fields=["superseded_by", "updated_at"])
+        catat(user, "upload_tiban", f"Upload #{cand.pk}", toko=toko,
+              lama=cand.original_name, baru=up.original_name, upload_baru=up.pk)
+
+
+def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner="", original_name=""):
     """Simpan hasil parse sebagai Upload + Transaction (atomic, dedup row_hash)."""
     with db_tx.atomic():
             up = Upload.objects.create(
@@ -147,7 +205,7 @@ def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, pr
                 provider=provider,
                 flow=flow or "",
                 recon_date=recon_date,
-                original_name=Path(file_path).name,
+                original_name=Path(original_name or file_path).name[:255],
                 owner_name=(owner or "")[:100],
                 status=Upload.PARSED,
                 uploaded_by=user,
@@ -203,4 +261,9 @@ def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, pr
             up.rows_parsed = len(objs)
             up.rows_duplicate = dup
             up.save(update_fields=["rows_parsed", "rows_duplicate"])
+            # `dup_tercatat | hash baris baru` = seluruh isi file ini. Hanya bila
+            # file MENAMBAH baris (upload ulang identik: no-op). Di dalam atomic()
+            # → penandaan ikut ter-rollback bila percobaan pertama gagal.
+            if objs:
+                _tandai_tiban(up, st, toko, dup_tercatat | {o.row_hash for o in objs}, user)
     return up, len(objs), dup

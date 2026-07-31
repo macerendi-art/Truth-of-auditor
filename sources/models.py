@@ -137,6 +137,13 @@ class Upload(TimeStampedModel):
         blank=True,
     )
     error = models.TextField(blank=True)
+    # SET_NULL disengaja: menghapus upload yang lebih baru harus mengembalikan
+    # upload lama ke keadaan tidak-ketiban.
+    superseded_by = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="supersedes",
+        help_text="Terisi bila file ini 'ketiban' upload ulang sama-nama yang lebih lengkap",
+    )
     uploaded_by = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True
     )
