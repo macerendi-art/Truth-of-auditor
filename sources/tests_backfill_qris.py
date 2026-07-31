@@ -5,10 +5,12 @@ kosong. Command mengisi kolom DAN `raw["Bank Title"]` sekali jalan, idempoten.
 """
 from decimal import Decimal
 from io import StringIO
+from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 
+from sources.management.commands import backfill_qris_bank_title as backfill_qris
 from sources.models import SourceType, Toko, Upload
 from transactions.models import Transaction
 from web.channels import kelas_metode
@@ -40,12 +42,39 @@ class BackfillQrisBankTitleTests(TestCase):
         out = StringIO()
         call_command("backfill_qris_bank_title", stdout=out)
         tx.refresh_from_db()
+        # Kolom = "QRIS" (segmen pertama), raw = triplet dgn nama & norek
+        # kosong — sama persis dgn yang ditulis parser, lihat CORPanelQRISParser.
         self.assertEqual(tx.bank_title, "QRIS")
-        self.assertEqual(tx.raw["Bank Title"], "QRIS")
+        self.assertEqual(tx.raw["Bank Title"], "QRIS||")
         self.assertEqual(tx.raw["Transaction ID"], UUID)  # isi raw lama utuh
         laporan = out.getvalue()
         self.assertIn("diperiksa=1", laporan)
         self.assertIn("diubah=1", laporan)
+
+    def test_raw_kosong_tetap_terisi(self):
+        """Baris ber-`raw` kosong menempuh cabang `tx.raw or {}` — tak boleh KO.
+
+        (`raw` NOT NULL di DB, jadi `{}` adalah satu-satunya nilai falsy yang
+        benar-benar bisa muncul; guard `or {}` tetap dipertahankan untuk
+        instance yang belum tersimpan.)
+        """
+        tx = self._baris(row_hash="qris-raw-kosong")
+        Transaction.objects.filter(pk=tx.pk).update(raw={})
+        call_command("backfill_qris_bank_title", stdout=StringIO())
+        tx.refresh_from_db()
+        self.assertEqual(tx.raw, {"Bank Title": "QRIS||"})
+        self.assertEqual(tx.bank_title, "QRIS")
+
+    def test_potongan_menghabiskan_semua_baris(self):
+        """Loop potongan (500/putaran) harus menyapu bersih, bukan 1 potongan."""
+        for i in range(7):
+            self._baris(row_hash=f"qris-massal-{i}")
+        out = StringIO()
+        with patch.object(backfill_qris, "UKURAN_POTONGAN", 3):
+            call_command("backfill_qris_bank_title", stdout=out)
+        self.assertEqual(
+            Transaction.objects.filter(bank_title="QRIS").count(), 7)
+        self.assertIn("diubah=7", out.getvalue())
 
     def test_idempoten_jalan_dua_kali(self):
         tx = self._baris()

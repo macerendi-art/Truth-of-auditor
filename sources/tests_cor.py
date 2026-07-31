@@ -2,10 +2,14 @@ import os, tempfile
 from datetime import date, datetime
 from decimal import Decimal
 from io import StringIO
+from types import SimpleNamespace
 
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 from openpyxl import Workbook
+# Tes sisi parser boleh memanggil helper engine (arah import sources -> recon
+# hanya di tes); larangan layering yg berlaku adalah reconciliation !-> web.
+from reconciliation.engine import _expected_owner, _route_ok
 from sources.models import SourceType, Toko, Upload
 from sources.parsers.base import extract_ticket, parse_bank_triplet, row_hash
 from sources.parsers.bracket import BracketParser
@@ -362,7 +366,8 @@ class CORPanelQRISTests(SimpleTestCase):
     # Ekspor rail QRIS tak punya kolom bank tujuan sama sekali (DP) atau cuma
     # bank PEMAIN (WD) -> bank_title dulu kosong: sel tabel/ekspor "—", chip
     # filter bank kosong, dan kartu "Metode Pembayaran" dashboard salah
-    # menggolongkannya "Lainnya". Railnya memang QRIS -> label disintesis.
+    # menggolongkannya "Lainnya". Railnya memang QRIS -> label disintesis
+    # berbentuk triplet panel "KODE|NAMA|NOREK" dgn NAMA & NOREK kosong.
     def test_dp_bank_title_qris_disintesis(self):
         path = _xlsx([
             self.HEADER,
@@ -374,8 +379,8 @@ class CORPanelQRISTests(SimpleTestCase):
         finally:
             os.remove(path)
         r = rows[0]
-        self.assertEqual(r["bank_title"], "QRIS")
-        self.assertEqual(r["raw"]["Bank Title"], "QRIS")
+        self.assertEqual(r["bank_title"], "QRIS")      # kolom = segmen pertama
+        self.assertEqual(r["raw"]["Bank Title"], "QRIS||")
 
     def test_wd_bank_title_qris_tak_mengganggu_player_bank(self):
         path = _xlsx([
@@ -390,12 +395,34 @@ class CORPanelQRISTests(SimpleTestCase):
         finally:
             os.remove(path)
         r = rows[0]
-        self.assertEqual(r["bank_title"], "QRIS")
-        self.assertEqual(r["raw"]["Bank Title"], "QRIS")
+        self.assertEqual(r["bank_title"], "QRIS")      # kolom = segmen pertama
+        self.assertEqual(r["raw"]["Bank Title"], "QRIS||")
         # Bank PEMAIN (dari Destination Bank) tetap seperti sebelumnya.
         self.assertEqual(r["player_bank"], "DANA")
         self.assertEqual(r["raw"]["Player Bank"],
                          "DANA|MHD ACHIR FADLI PASARIBU|081261612552")
+
+    def test_label_qris_inert_di_engine(self):
+        """Label sintetis TIDAK boleh dibaca engine sebagai nama pemilik rekening.
+
+        `_expected_owner` mengambil segmen TENGAH "Bank Title" (dan jatuh ke
+        seluruh string bila tak ada "|"). Label telanjang "QRIS" akan jadi
+        `expected="QRIS"` sehingga `_route_ok` — yang dulu selalu None untuk
+        baris ini — mulai dievaluasi dan menyalakan kunci sort sekunder pada
+        SELURUH populasi COR QRIS. Segmen tengah kosong menjaganya inert.
+        """
+        path = _xlsx([
+            self.HEADER,
+            ["1", "01 Jul 2026 23:59:56", "01 Jul 2026 23:59:19", "zidanhoki11",
+             "03f747e8-ac9c-48e0-a", "85000", "", "success"],
+        ])
+        try:
+            rows = CORPanelQRISParser().parse(path, flow="dp")
+        finally:
+            os.remove(path)
+        t = SimpleNamespace(raw=rows[0]["raw"])
+        self.assertEqual(_expected_owner(t), "")
+        self.assertIsNone(_route_ok(_expected_owner(t), "QRIS COR 01 JULI", "gateway"))
 
     def test_row_hash_tak_ikut_bank_title(self):
         # Penjaga dedup: hash HANYA dari [txid, username, amount]. Kalau label
