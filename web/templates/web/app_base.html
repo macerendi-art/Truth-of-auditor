@@ -131,6 +131,34 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .toko-pick .lbl{font-size:10.5px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
 .toko-pick select{border:none;background:none;font-family:inherit;font-weight:600;font-size:13.5px;color:var(--ink);cursor:pointer;padding:0 2px;max-width:110px}
 .toko-pick select:focus{outline:none}
+/* Pemilih Toko dgn kotak cari (toko-picker.js). Select asli tetap sumber
+   kebenaran — .tp-native menyembunyikannya HANYA setelah kontrol ini berhasil
+   dibangun. Ukuran & warna meniru .toko-pick di atas supaya tak terbaca
+   sebagai komponen asing. */
+.tp-native{display:none}
+.tp-host{position:relative}
+.tp-trigger{display:inline-flex;align-items:center;gap:5px;max-width:110px;padding:0 2px;border:none;background:none;
+  font-family:inherit;font-weight:600;font-size:13.5px;line-height:1.55;color:var(--ink);cursor:pointer}
+.tp-trigger .tp-cur{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-trigger .tp-chev{width:13px;height:13px;flex-shrink:0;color:var(--faint)}
+/* Varian medan penuh (modal Pengingat Toko) — meniru input/select global. */
+.tp-host.tp-field{display:block}
+.tp-host.tp-field .tp-trigger{width:100%;max-width:none;justify-content:space-between;padding:9px 12px;
+  font-size:14px;font-weight:500;border:1px solid var(--line-2);border-radius:10px;background:var(--panel)}
+.tp-pop{position:absolute;top:calc(100% + 6px);right:0;z-index:70;min-width:230px;max-width:calc(100vw - 24px);padding:6px;
+  background:var(--panel);border:1px solid var(--line-2);border-radius:var(--radius-sm);box-shadow:var(--shadow-lg)}
+.tp-host.tp-field .tp-pop{left:0;right:0;min-width:0;max-width:none}
+.tp-pop [hidden]{display:none}
+.tp-cari{padding:7px 10px;font-size:13px;border-radius:8px;margin-bottom:6px}
+.tp-list{position:relative;max-height:260px;overflow-y:auto;overscroll-behavior:contain}
+.tp-grup-lbl{padding:7px 10px 4px;font-size:10.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+.tp-opt{display:block;padding:7px 10px;border-radius:8px;font-size:13.5px;font-weight:500;color:var(--ink);
+  cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tp-opt:hover{background:var(--panel-2)}
+.tp-opt.tp-on{background:var(--info-bg);color:var(--brand)}
+.tp-opt[aria-selected="true"]{font-weight:700}
+.tp-kosong{padding:12px 10px;font-size:12.5px;color:var(--faint);text-align:center}
+@media(prefers-reduced-motion:no-preference){.tp-opt{transition:background .12s,color .12s}}
 .content{padding:24px var(--pad) 70px;max-width:1280px;width:100%;margin:0 auto}
 /* Wide mode: halaman padat-data (rekonsiliasi) memakai ruang kosong kiri-kanan */
 .content.wide{max-width:min(1680px,100%)}
@@ -468,7 +496,7 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
   .topbar .crumb{display:none}
   .topbar form[role="search"]{display:none}
   .toko-pick .lbl{display:none}
-  .toko-pick select{max-width:92px}
+  .toko-pick select,.toko-pick .tp-trigger{max-width:92px}
   .row>.btn{width:100%;justify-content:center}
   .page-head{flex-wrap:wrap}
   .seg{max-width:100%;overflow-x:auto}
@@ -743,6 +771,7 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
 </script>
 {% endif %}
 <script src="{% static 'web/js/range-select.js' %}" defer></script>
+<script src="{% static 'web/js/toko-picker.js' %}" defer></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
