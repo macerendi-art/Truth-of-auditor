@@ -3,6 +3,7 @@ import re
 import zipfile
 from datetime import date as date_cls, timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from django.contrib import messages
 from django.contrib.auth import logout as auth_logout, update_session_auth_hash
@@ -814,7 +815,7 @@ def _uploads_for(toko):
     )
     return (
         Upload.objects.filter(toko=toko)
-        .select_related("source_type")
+        .select_related("source_type", "superseded_by")  # badge "Ketiban" per baris
         .annotate(locked=ExpressionWrapper(
             Exists(ref_left) | Exists(ref_right) | Exists(consumed),
             output_field=BooleanField(),
@@ -844,6 +845,10 @@ def upload(request):
         keys = request.POST.getlist("parser_key")
         flows = request.POST.getlist("flow")
         passwords = request.POST.getlist("password")
+        # Nama file APA ADANYA dari pengunggah. Path staging bukan penggantinya:
+        # bila namanya bentrok storage Django membubuhi sufiks acak ("X.xlsx" ->
+        # "X_1pZwg1n.xlsx"), dan deteksi "ketiban" mencocokkan nama file.
+        orig_names = request.POST.getlist("orig_name")
         provider = request.POST.get("provider", "")
         n_ok = n_err = 0
         for i, (path_rel, key, flow) in enumerate(zip(staged, keys, flows)):
@@ -854,12 +859,22 @@ def upload(request):
                 n_err += 1
                 continue
             try:
-                ingest(
+                up, created, _dup = ingest(
                     key, default_storage.path(path_rel), flow=flow,
                     user=request.user, toko=active, provider=provider,
                     password=(passwords[i] if i < len(passwords) else ""),
+                    # Nilai dari form → hanya basename-nya yang dipakai; kosong
+                    # (klien lama) → service memakai fallback path staging.
+                    original_name=(Path(orig_names[i]).name if i < len(orig_names) else ""),
                 )
                 n_ok += 1
+                # Penandaan tiban terjadi DI DALAM ingest; di sini cuma laporannya.
+                for lama in up.supersedes.all():
+                    messages.info(
+                        request,
+                        f'"{up.original_name}" menggantikan "{lama.original_name}" — '
+                        f"file lama ditandai Ketiban ({created} baris baru).",
+                    )
             except Exception as e:  # noqa: BLE001 - tampilkan error parse ke user
                 messages.error(request, f"{path_rel}: {e}")
                 n_err += 1
@@ -1827,7 +1842,9 @@ def bank_mutations(request):
 
     # Dropdown per-file: upload sumber uang toko aktif, IKUT tombol sumber
     # (Bank → hanya file bank; Gateway QRIS → hanya file gateway).
-    upload_qs = Upload.objects.filter(toko=active, source_type__key__in=money_keys)
+    upload_qs = Upload.objects.filter(
+        toko=active, source_type__key__in=money_keys
+    ).select_related("superseded_by")  # sufiks "· ketiban" per entri
     if src:
         upload_qs = upload_qs.filter(source_type__key=src)
     uploads = list(upload_qs.order_by("-id"))

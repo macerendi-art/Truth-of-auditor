@@ -176,7 +176,7 @@
       <tbody>
       {% for p in preview %}
       <tr>
-        <td>{{ p.name }}<input type="hidden" name="staged" value="{{ p.staged }}"></td>
+        <td>{{ p.name }}<input type="hidden" name="staged" value="{{ p.staged }}"><input type="hidden" name="orig_name" value="{{ p.name }}"></td>
         <td>
           <select name="parser_key" class="f">
             {% for pk in parsers %}<option value="{{ pk }}" {% if pk == p.parser_key %}selected{% endif %}>{{ pk }}</option>{% endfor %}
@@ -245,7 +245,7 @@
         <td>{{ u.flow|default:"—" }}</td>
         <td class="r num">{{ u.rows_parsed|intcomma }}</td>
         <td class="r num faint">{{ u.rows_duplicate|intcomma }}</td>
-        <td>{% if u.status == 'parsed' %}<span class="badge ok">parsed</span>{% elif u.status == 'error' %}<span class="badge bad">error</span>{% else %}<span class="badge warn">{{ u.status }}</span>{% endif %}</td>
+        <td>{% if u.status == 'parsed' %}<span class="badge ok">parsed</span>{% elif u.status == 'error' %}<span class="badge bad">error</span>{% else %}<span class="badge warn">{{ u.status }}</span>{% endif %}{% if u.superseded_by %} <span class="badge muted" title='Ketiban — seluruh isinya sudah tercakup file "{{ u.superseded_by.original_name }}" ({{ u.superseded_by.created_at|date:"d/m H:i" }})'>Ketiban</span>{% endif %}</td>
         <td>{{ u.uploaded_by.username|default:"—" }}</td>
         <td class="faint">{{ u.created_at|date:"d/m H:i" }}</td>
         {% if is_admin_user %}

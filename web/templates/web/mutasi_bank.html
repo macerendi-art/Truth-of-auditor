@@ -29,7 +29,7 @@
   <form method="get" class="row">
     <div class="field" style="flex:2"><label>File mutasi</label>
       <select name="upload"><option value="">Semua file</option>
-      {% for u in uploads %}<option value="{{ u.id }}" {% if sel_upload and sel_upload.id == u.id %}selected{% endif %}>{{ u.original_name|default:u }}{% if u.owner_name %} · a/n {{ u.owner_name }}{% endif %} · {{ u.n_rows_file|intcomma }} baris{% if u.cover_lo %} · {{ u.cover_lo|date:"d/m H:i" }}–{{ u.cover_hi|date:"d/m H:i" }}{% endif %}</option>{% endfor %}</select></div>
+      {% for u in uploads %}<option value="{{ u.id }}" {% if sel_upload and sel_upload.id == u.id %}selected{% endif %}>{{ u.original_name|default:u }}{% if u.owner_name %} · a/n {{ u.owner_name }}{% endif %} · {{ u.n_rows_file|intcomma }} baris{% if u.cover_lo %} · {{ u.cover_lo|date:"d/m H:i" }}–{{ u.cover_hi|date:"d/m H:i" }}{% endif %}{% if u.superseded_by %} · ketiban{% endif %}</option>{% endfor %}</select></div>
     <div class="field"><label>Dari tanggal</label><input type="date" name="from" value="{{ date_from }}"></div>
     <div class="field"><label>Sampai tanggal</label><input type="date" name="to" value="{{ date_to }}"></div>
     {% if src %}<input type="hidden" name="source" value="{{ src }}">{% endif %}
