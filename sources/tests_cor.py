@@ -7,7 +7,7 @@ from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 from openpyxl import Workbook
 from sources.models import SourceType, Toko, Upload
-from sources.parsers.base import extract_ticket, parse_bank_triplet
+from sources.parsers.base import extract_ticket, parse_bank_triplet, row_hash
 from sources.parsers.bracket import BracketParser
 from sources.parsers.cor import CORPanelBankParser
 from sources.parsers.cor import CORPanelQRISParser
@@ -358,6 +358,62 @@ class CORPanelQRISTests(SimpleTestCase):
         self.assertLessEqual(len(r["player_bank"]), 40)   # tak boleh overflow
         self.assertEqual(r["counterparty"], "MHD ACHIR FADLI PASARIBU")
         self.assertEqual(r["reference"], "1d4c8093-f8b0-482a-af1f-dc452ef7ed6a")
+
+    # Ekspor rail QRIS tak punya kolom bank tujuan sama sekali (DP) atau cuma
+    # bank PEMAIN (WD) -> bank_title dulu kosong: sel tabel/ekspor "—", chip
+    # filter bank kosong, dan kartu "Metode Pembayaran" dashboard salah
+    # menggolongkannya "Lainnya". Railnya memang QRIS -> label disintesis.
+    def test_dp_bank_title_qris_disintesis(self):
+        path = _xlsx([
+            self.HEADER,
+            ["1", "01 Jul 2026 23:59:56", "01 Jul 2026 23:59:19", "zidanhoki11",
+             "03f747e8-ac9c-48e0-a", "85000", "", "success"],
+        ])
+        try:
+            rows = CORPanelQRISParser().parse(path, flow="dp")
+        finally:
+            os.remove(path)
+        r = rows[0]
+        self.assertEqual(r["bank_title"], "QRIS")
+        self.assertEqual(r["raw"]["Bank Title"], "QRIS")
+
+    def test_wd_bank_title_qris_tak_mengganggu_player_bank(self):
+        path = _xlsx([
+            self.WD_HEADER,
+            ["1", "11 Jul 2026 23:03:05", "11 Jul 2026 23:02:56", "batako87",
+             "1d4c8093-f8b0-482a-af1f-dc452ef7ed6a",
+             "DANA-081261612552-MHD ACHIR FADLI PASARIBU", "800000", "success",
+             "gacor25sub42"],
+        ])
+        try:
+            rows = CORPanelQRISParser().parse(path, flow="wd")
+        finally:
+            os.remove(path)
+        r = rows[0]
+        self.assertEqual(r["bank_title"], "QRIS")
+        self.assertEqual(r["raw"]["Bank Title"], "QRIS")
+        # Bank PEMAIN (dari Destination Bank) tetap seperti sebelumnya.
+        self.assertEqual(r["player_bank"], "DANA")
+        self.assertEqual(r["raw"]["Player Bank"],
+                         "DANA|MHD ACHIR FADLI PASARIBU|081261612552")
+
+    def test_row_hash_tak_ikut_bank_title(self):
+        # Penjaga dedup: hash HANYA dari [txid, username, amount]. Kalau label
+        # bank ikut dihitung, seluruh file COR QRIS lama akan ter-ingest ulang
+        # sebagai baris baru.
+        path = _xlsx([
+            self.HEADER,
+            ["1", "01 Jul 2026 23:59:56", "01 Jul 2026 23:59:19", "zidanhoki11",
+             "03f747e8-ac9c-48e0-a", "85000", "", "success"],
+        ])
+        try:
+            rows = CORPanelQRISParser().parse(path, flow="dp")
+        finally:
+            os.remove(path)
+        self.assertEqual(
+            rows[0]["row_hash"],
+            row_hash("cor_panel_qris",
+                     ["03f747e8-ac9c-48e0-a", "zidanhoki11", Decimal("85000")]))
 
 
 class CORQRISGatewayTests(SimpleTestCase):

@@ -112,6 +112,11 @@ class CORPanelQRISParser(BaseParser):
                 counterparty = ""
             occurred = parse_dt(r.get("Requested Date"))
             posted = parse_dt(r.get("Approved Date"))
+            # Rail QRIS tak punya kolom bank tujuan di ekspor — sintesis "QRIS"
+            # supaya chip filter, sel tabel, ekspor, dan kelas metode dashboard
+            # tak lagi kosong. (raw sintetis = praktik mapan parser COR, lihat
+            # raw["Player Bank"] di atas.)
+            raw["Bank Title"] = "QRIS"
             player_bank, bank_title = derive_bank_fields("panel", raw)
             row = {
                 "source_type": "panel",
