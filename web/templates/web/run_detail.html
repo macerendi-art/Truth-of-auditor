@@ -42,9 +42,9 @@
     <a href="?bucket=tidak_ada_panel&flow={{ flow }}" class="{% if bucket == 'tidak_ada_panel' %}active{% endif %}">{{ orphan_label }}</a>
   </div>
   <div class="seg" role="group" aria-label="Pilah arus Deposit atau Withdraw">
-    <a href="?bucket={{ bucket }}" class="{% if not flow %}active{% endif %}">Semua</a>
-    <a href="?bucket={{ bucket }}&flow=depo" class="dp {% if flow == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit</a>
-    <a href="?bucket={{ bucket }}&flow=wd" class="wd {% if flow == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw</a>
+    <a href="?bucket={{ bucket }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}" class="{% if not flow %}active{% endif %}">Semua</a>
+    <a href="?bucket={{ bucket }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&flow=depo" class="dp {% if flow == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit</a>
+    <a href="?bucket={{ bucket }}&reason={{ reason|urlencode }}&bank={{ bank|urlencode }}&btitle={{ btitle|urlencode }}&flow=wd" class="wd {% if flow == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw</a>
   </div>
 </div>
 

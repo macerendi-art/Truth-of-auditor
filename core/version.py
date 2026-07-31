@@ -130,7 +130,8 @@ RILIS: tuple[Rilis, ...] = (
             "begitu saja karena sebagian transaksi memang tidak membawa nama bank sama sekali. "
             "Baris seperti itu sekarang dikumpulkan sebagai **“(Tanpa Bank)”** — jadi bisa "
             "disaring seperti bank lain, bukan lagi menyembunyikan filternya dari semua orang. "
-            "Mengurutkan kolom juga tidak lagi membuang filter bank yang sedang dipakai.",
+            "Mengurutkan kolom maupun berpindah ke tab **Deposit/Withdraw** juga tidak lagi "
+            "membuang filter bank yang sedang dipakai.",
             "Transaksi **QRIS** pada panel Gacor25 kini berlabel QRIS, bukan kosong. "
             "Efeknya terasa di tiga tempat: kolom Bank Title terisi, kartu **“Metode Pembayaran”** "
             "di dashboard tidak lagi menghitungnya sebagai “Lainnya”, dan filter banknya punya "

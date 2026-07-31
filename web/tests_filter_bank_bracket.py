@@ -213,6 +213,54 @@ class TautanUrutTests(_Base):
             self.assertIn("btitle=QRIS", href)
 
 
+class TautanArusTests(_Base):
+    """Bug sekelas tautan urut: tab Deposit/Withdraw membuang filter yang aktif.
+
+    Chip bank/alasan justru fitur utama rilis ini, jadi jalur "pilih chip lalu
+    klik Deposit" adalah jalur yang paling sering ditempuh — filternya tak boleh
+    hilang diam-diam. Pola pembawa param sama dgn `web/templates/web/review_queue.html`.
+    """
+
+    def setUp(self):
+        super().setUp()
+        row = self.panel_row(player_bank="BCA", bank_title="QRIS")
+        self.hasil(MatchResult.Bucket.TIDAK, row, None, "no_bracket")
+        self.hasil(MatchResult.Bucket.TIDAK, self.panel_row(), None, "no_bracket")
+
+    def seg_hrefs(self, **q):
+        html = self.get(**q).content.decode()
+        blok = re.search(
+            r'<div class="seg"[^>]*aria-label="Pilah arus[^"]*">(.*?)</div>', html, re.S
+        )
+        self.assertIsNotNone(blok, "blok segmented control arus tak ditemukan")
+        return re.findall(r'href="([^"]+)"', blok.group(1))
+
+    def test_tautan_arus_membawa_filter_aktif(self):
+        hrefs = self.seg_hrefs(
+            bucket="tidak_cocok", bank="BCA", btitle="QRIS", reason="no_bracket"
+        )
+        self.assertEqual(len(hrefs), 3, f"tautan arus tak lengkap: {hrefs}")
+        for href in hrefs:
+            self.assertIn("bank=BCA", href)
+            self.assertIn("btitle=QRIS", href)
+            self.assertIn("reason=no_bracket", href)
+
+    def test_tautan_arus_meng_urlencode_sentinel(self):
+        # "(Tanpa Bank)" wajib ter-escape; mentah-mentah "(" ")" & spasi merusak
+        # querystring dan chip-nya tak pernah kembali terpilih.
+        hrefs = self.seg_hrefs(bucket="tidak_cocok", bank=SENTINEL)
+        for href in hrefs:
+            self.assertIn("bank=%28Tanpa%20Bank%29", href)
+
+    def test_tab_bucket_sengaja_mereset_filter(self):
+        """Kebalikannya DISENGAJA: chip dihitung per-bucket, jadi pindah bucket
+        harus melepas filter (chip bank bucket lain bisa tak ada sama sekali)."""
+        html = self.get(bucket="tidak_cocok", bank="BCA").content.decode()
+        blok = re.search(r'<div class="tabs" style="margin-bottom:0">(.*?)</div>', html, re.S)
+        for href in re.findall(r'href="([^"]+)"', blok.group(1)):
+            self.assertNotIn("bank=", href)
+
+
 class OrphanTakBerubahTests(_Base):
     """Regresi: tab 'Tidak Ada di Panel' tetap pakai chip akun FR (`_chips_sumber_uang`)."""
 

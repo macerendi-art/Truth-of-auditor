@@ -15,11 +15,23 @@ string bila tak ada "|", jadi label telanjang "QRIS" akan dibacanya sebagai nama
 pemilik rekening. Kolom DAN raw sama-sama diisi supaya backfill_bank_fields —
 yang menurunkan kolom dari raw — tidak mengembalikan kolom jadi kosong.
 
-Selektor `description__startswith="QRIS "` mengasingkan rail QRIS COR, TAPI
-bukan jaminan mutlak: parser panel Nexus menulis `description` dari kolom
-Remarks yang isinya teks bebas, jadi baris Nexus ber-Remarks awalan "QRIS " dan
-`bank_title` kosong ikut tersapu. Jalankan dengan `--toko <toko COR>` bila ada
-keraguan. Catatan lain: `__startswith` bersifat case-INsensitive di SQLite tapi
+Selektor `description__startswith="QRIS "` SENDIRIAN tidak cukup: hanya parser
+COR yang menulis awalan itu secara konstruksi, sedangkan parser panel Nexus
+menyalin `description` dari kolom Remarks yang isinya teks bebas — baris Nexus
+ber-Remarks awalan "QRIS " dan `bank_title` kosong akan ikut tersapu, dan
+sapuannya MENIMPA `raw["Bank Title"]` yang bisa memuat triplet asli (nama
+pemilik rekening yang dibaca engine `_expected_owner`, dan golongan kartu
+"Metode Pembayaran" dashboard). Karena itu pagarnya struktural, bukan imbauan:
+selektor hanya menerima toko ber-panel Vigor/TM Gaming — daftar IZIN, supaya
+engine panel baru yang ditambahkan kelak ikut aman tanpa mengubah file ini.
+
+Baris tanpa toko (jalur CLI `ingest` tanpa `--toko`) TIDAK BISA diatribusikan ke
+panel mana pun, jadi ikut terlewat (join `toko__panel__in` bersifat INNER).
+Sebagai command yang MENULIS, diam adalah arah gagal yang benar: tidak menulis
+itu terlihat ("—" bertahan) dan bisa diulang, sementara menulis salah bersifat
+merusak & tak berjejak. Supaya tidak diam-diam, jumlahnya dilaporkan tersendiri.
+
+Catatan lain: `__startswith` bersifat case-INsensitive di SQLite tapi
 case-sensitive di Postgres (produksi) — hitungan bisa berbeda antara dev & prod.
 Parser QRIS lain berawalan sama ("QRIS COR ...", "QRIS WD ...") tapi bersumber
 `gateway`, jadi sudah tersaring `source_type__key="panel"`.
@@ -29,6 +41,7 @@ tak menemukan apa-apa.
 """
 from django.core.management.base import BaseCommand
 
+from sources.models import Toko
 from transactions.models import Transaction
 
 # Baris yang sudah ditulis KELUAR dari selektor (bank_title tak lagi kosong),
@@ -49,11 +62,17 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts):
-        qs = Transaction.objects.filter(
+        calon = Transaction.objects.filter(
             source_type__key="panel", bank_title="", description__startswith="QRIS "
         )
+        # Daftar IZIN panel (lihat docstring): baris Nexus & baris tanpa toko
+        # tidak pernah masuk. `__in` memakai INNER JOIN, jadi toko NULL gugur.
+        qs = calon.filter(toko__panel__in=[Toko.PANEL_VIGOR, Toko.PANEL_TMG])
         if opts["toko"]:
             qs = qs.filter(toko__key=opts["toko"])
+
+        # Tak relevan bila operator memang menyempitkan ke satu toko.
+        tanpa_toko = 0 if opts["toko"] else calon.filter(toko__isnull=True).count()
 
         if opts["dry_run"]:
             # Wajib keluar lebih awal: tanpa menulis, tak ada baris yang keluar
@@ -61,6 +80,7 @@ class Command(BaseCommand):
             n = qs.count()
             self.stdout.write(self.style.SUCCESS(
                 f"diperiksa={n} diubah={n} (dry-run, tidak ditulis)"))
+            self._lapor_tanpa_toko(tanpa_toko)
             return
 
         diubah = 0
@@ -80,3 +100,11 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(f"diperiksa={diubah} diubah={diubah}")
         )
+        self._lapor_tanpa_toko(tanpa_toko)
+
+    def _lapor_tanpa_toko(self, n):
+        """Baris yang dilewati karena tak beratribusi toko — sebut, jangan diam."""
+        if n:
+            self.stdout.write(self.style.WARNING(
+                f"dilewati tanpa toko={n} (panel tak bisa ditentukan — "
+                f"atribusikan toko-nya dulu bila memang rail QRIS COR)"))
