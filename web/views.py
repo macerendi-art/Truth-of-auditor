@@ -1460,18 +1460,13 @@ def run_detail(request, pk):
     # filter bank beralih ke SISI UANG. Bank pemain tak relevan → dikosongkan.
     is_orphan = bucket == "tidak_ada_panel"
 
-    # Chip filter bank pemain (dalam bucket+flow+alasan). Kosong/orphan dikecualikan.
+    # Chip filter bank pemain (dalam bucket+flow+alasan). Baris tanpa bank masuk
+    # sentinel "(Tanpa Bank)"; orphan dikecualikan (lihat `_chips_bank_kiri`).
     bank = request.GET.get("bank", "")
     if is_orphan:
         banks, bank = [], ""
     else:
-        banks = [
-            {"code": r["left__player_bank"], "n": r["n"]}
-            for r in qs.filter(left__player_bank__gt="")
-            .values("left__player_bank").annotate(n=Count("id")).order_by("-n")
-        ]
-        if bank:
-            qs = qs.filter(left__player_bank=bank)
+        banks, qs = _chips_bank_kiri(qs, "player_bank", bank)
 
     # Chip filter bank title / tujuan (dalam bucket+flow+alasan+bank).
     # Tab normal: bank tujuan sisi kredit (left__bank_title). Tab orphan: label
@@ -1481,13 +1476,7 @@ def run_detail(request, pk):
     if is_orphan:
         btitles, qs = _chips_sumber_uang(qs, btitle)
     else:
-        btitles = [
-            {"code": r["left__bank_title"], "n": r["n"]}
-            for r in qs.filter(left__bank_title__gt="")
-            .values("left__bank_title").annotate(n=Count("id")).order_by("-n")
-        ]
-        if btitle:
-            qs = qs.filter(left__bank_title=btitle)
+        btitles, qs = _chips_bank_kiri(qs, "bank_title", btitle)
 
     # Ringkasan total pada set terfilter penuh (sebelum paginasi).
     totals = qs.aggregate(
@@ -1531,6 +1520,44 @@ def run_detail(request, pk):
         "pilihan_alasan": FRKoreksi.ALASAN_KOREKSI,
     }
     return render(request, "web/run_detail.html", ctx)
+
+
+TANPA_BANK = "(Tanpa Bank)"
+
+
+def _chips_bank_kiri(qs, field, val):
+    """Chip filter kolom bank SISI KIRI (player_bank/bank_title) + penyaringannya.
+
+    Baris kiri yang kolomnya kosong (mis. panel QRIS COR yang ekspornya memang
+    tanpa kolom bank) dikelompokkan ke sentinel "(Tanpa Bank)" — supaya fold
+    filter tetap muncul di run QRIS-berat (Vigor/TM Gaming), yang sebelumnya
+    lenyap total karena daftar opsinya kosong, dan barisnya tetap bisa disaring.
+    Baris tanpa sisi kiri (orphan) tidak dihitung: bank pemain adalah konsep
+    sisi panel — tab "Tidak Ada di Panel" punya jalurnya sendiri
+    (`_chips_sumber_uang`).
+
+    `qs` harus sudah difilter tab/arus/alasan. → (chips, qs terfilter).
+    """
+    key = f"left__{field}"
+    chips, n_kosong = [], 0
+    # Tie-break `key` menjaga urutan chip stabil saat jumlahnya seri — tanpa itu
+    # SQLite (dev) dan Postgres (prod) bebas mengurutkan seri sesukanya.
+    for r in (
+        qs.filter(left__isnull=False)
+        .values(key).annotate(n=Count("id")).order_by("-n", key)
+    ):
+        if r[key]:
+            chips.append({"code": r[key], "n": r["n"]})
+        else:
+            n_kosong += r["n"]
+    if n_kosong:  # sentinel selalu paling belakang, sebanyak apa pun barisnya
+        chips.append({"code": TANPA_BANK, "n": n_kosong})
+
+    if not val:
+        return chips, qs
+    if val == TANPA_BANK:
+        return chips, qs.filter(left__isnull=False, **{key: ""})
+    return chips, qs.filter(**{key: val})
 
 
 def _label_akun_fr(akun):
@@ -1687,13 +1714,7 @@ def review_queue(request):
     if is_orphan:
         banks, bank = [], ""
     else:
-        banks = [
-            {"code": r["left__player_bank"], "n": r["n"]}
-            for r in qs.filter(left__player_bank__gt="")
-            .values("left__player_bank").annotate(n=Count("id")).order_by("-n")
-        ]
-        if bank:
-            qs = qs.filter(left__player_bank=bank)
+        banks, qs = _chips_bank_kiri(qs, "player_bank", bank)
 
     # Bank title: tab normal = left__bank_title; tab orphan = label bank/sumber
     # sisi uang (bank/gateway dari upload, FR/Bracket dari akun FR-nya) — jalur
@@ -1702,13 +1723,7 @@ def review_queue(request):
     if is_orphan:
         btitles, qs = _chips_sumber_uang(qs, btitle)
     else:
-        btitles = [
-            {"code": r["left__bank_title"], "n": r["n"]}
-            for r in qs.filter(left__bank_title__gt="")
-            .values("left__bank_title").annotate(n=Count("id")).order_by("-n")
-        ]
-        if btitle:
-            qs = qs.filter(left__bank_title=btitle)
+        btitles, qs = _chips_bank_kiri(qs, "bank_title", btitle)
 
     # Ringkasan total pada set terfilter penuh (sebelum paginasi) — pola run_detail.
     totals = qs.aggregate(
