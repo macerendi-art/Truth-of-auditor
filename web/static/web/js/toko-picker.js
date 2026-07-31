@@ -115,6 +115,9 @@
     }
     pop.appendChild(daftar);
     var kosong = buat('div', 'tp-kosong', 'Toko tidak ditemukan.');
+    // role="status" (aria-live sopan): saringan yang nihil harus TERDENGAR juga,
+    // bukan cuma terlihat — pesannya muncul tanpa fokus pindah ke mana pun.
+    kosong.setAttribute('role', 'status');
     kosong.hidden = true;
     pop.appendChild(kosong);
 
@@ -222,6 +225,16 @@
       if (pop.hidden) buka(); else tutup(true);
     });
 
+    // Handler panah di bawah menempel di popover, jadi saat popover tertutup
+    // pemicu tuli terhadap panah — padahal <select> bawaan membuka daftarnya
+    // dgn ArrowDown/ArrowUp. Samakan.
+    trigger.addEventListener('keydown', function (e) {
+      if (pop.hidden && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        e.preventDefault(); // jangan menggulir halaman
+        buka();
+      }
+    });
+
     daftar.addEventListener('click', function (e) {
       var node = e.target.closest ? e.target.closest('.tp-opt') : null;
       if (node) pilih(node);
@@ -245,7 +258,13 @@
         e.stopPropagation(); // jangan ikut menutup modal Pengingat Toko
         tutup(true);
       } else if (e.key === 'Tab') {
-        tutup(false); // fokus keluar → popover tak boleh tertinggal terbuka
+        // Fokus keluar → popover tak boleh tertinggal terbuka. Fokus WAJIB
+        // dikembalikan ke pemicu di sini juga (masih sebelum aksi bawaan Tab
+        // jalan): menyembunyikan popover saat fokus masih di dalamnya membuat
+        // Firefox membuang fokus ke <body>, jadi Tab melempar pengguna ke puncak
+        // halaman. Dgn pemicu yang kembali berfokus, Tab lanjut ke kontrol
+        // berikutnya persis seperti <select> bawaan.
+        tutup(true);
       }
     });
 
@@ -256,7 +275,11 @@
     select.dataset.tpDone = '1';
   }
 
-  document.addEventListener('mousedown', function (e) {
+  // pointerdown, bukan mousedown: iOS Safari hanya mensintesis event tetikus
+  // untuk target yang dianggapnya bisa diklik, jadi ketukan di latar halaman
+  // yang inert tak akan menutup popover. pointerdown menyeragamkan tetikus,
+  // sentuh, dan pena — dan 375px adalah viewport kelas satu di app ini.
+  document.addEventListener('pointerdown', function (e) {
     if (terbuka && !terbuka.host.contains(e.target)) terbuka.tutup(false);
   });
 
