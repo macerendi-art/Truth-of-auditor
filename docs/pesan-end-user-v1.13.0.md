@@ -32,8 +32,34 @@ Sekarang berlabel **QRIS**, sehingga:
   "Lainnya",
 - pilihan filter banknya jadi berarti.
 
-Untuk transaksi lama yang sudah terlanjur masuk, ada perintah pengisian ulang
-yang dijalankan terpisah.
+**Kenapa dulu bisa kosong?** Ekspor QRIS dari panel memang tidak punya kolom bank
+tujuan sama sekali — rail QRIS tidak melewati bank tertentu, jadi filenya tidak
+menyebutkan apa pun di sana. Karena sistem mengelompokkan metode pembayaran
+berdasarkan label bank itu, semua transaksi QRIS jatuh ke keranjang "Lainnya",
+padahal jelas QRIS.
+
+**Soal transaksi lama.** Perbaikan ini berlaku untuk data yang masuk mulai
+sekarang — setiap upload panel QRIS berikutnya otomatis berlabel. Transaksi lama
+yang sudah terlanjur tersimpan dengan label kosong perlu diperbaiki lewat satu
+perintah tersendiri, karena perbaikan kode tidak bisa mundur mengubah data yang
+sudah ada.
+
+Yang berubah setelah perintah itu dijalankan **hanya satu hal yang terlihat**:
+kartu "Metode Pembayaran" di dashboard. Angka yang selama ini menumpuk di
+"Lainnya" pindah ke baris "QRIS".
+
+Yang **tidak** berubah:
+
+- Tidak ada transaksi yang ditambah atau dihapus — jumlah barisnya persis sama.
+- Tidak ada angka rekonsiliasi yang bergerak: total deposit, withdraw, selisih,
+  dan hasil cocok/tidak cocok semuanya tetap.
+- Tidak ada hasil rekonsiliasi lama yang dihitung ulang.
+- Total pada kartu Metode Pembayaran juga tetap sama — yang berubah hanya
+  pembagiannya.
+
+Singkatnya ini murni pemberian label, bukan perhitungan ulang. Ibaratnya:
+transaksi yang selama ini masuk map "lain-lain" karena sampulnya tidak bertulisan,
+sekarang ditulisi "QRIS" dan dipindah ke map yang benar — isi mapnya sama persis.
 
 ### 3. File lama otomatis ditandai "Ketiban"
 
@@ -111,3 +137,16 @@ tidak menambah tombol yang mungkin tak pernah dipakai.
 seluruh metadata upload hanya **0,05 MB** atau **0,06%** dari total; tidak satu
 pun upload menyimpan berkas fisik; yang memang tumbuh adalah tabel transaksi
 (63% dari basis data), dan itu tidak berubah karena fitur ini.
+
+### Backfill QRIS — angka produksi per 1 Agustus 2026
+
+Dry-run di produksi: **265.843 baris** akan dilabeli, dengan rincian
+**g25** 202.192 · **slo** 41.601 · **w25** 22.050. Toko **mmk** (panel Nexus)
+punya 9.423 baris berpola serupa dan **sengaja dikecualikan** — perintahnya
+hanya menyentuh toko berpanel Vigor/TM Gaming, karena pada panel Nexus kolom
+keterangan berisi teks bebas sehingga barisnya bisa mirip tanpa benar-benar QRIS.
+
+Perintahnya idempoten (aman dijalankan ulang; jalan kedua tidak mengubah apa pun)
+dan diproses per 500 baris. Jalankan `--dry-run` lebih dulu, lalu tanpa flag itu.
+Kalau ditunda, tidak ada yang rusak — fitur tetap berjalan penuh untuk transaksi
+baru, hanya data lama yang tetap tak berlabel.
