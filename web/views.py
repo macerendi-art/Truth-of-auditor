@@ -60,6 +60,7 @@ from web.forms import GantiPasswordForm
 from web.hutang import hutang_piutang as hitung_hutang_piutang
 from web.models import FRKoreksi, RekapManual, RekapPenyebab
 from web.monthly import monthly_summary
+from web.penjaga import periksa_upload
 from web.quotes import random_login_tagline
 from web.rekap import FIELDS as REKAP_FIELDS
 from web.rekap import rekap_bulanan as hitung_rekap_bulanan
@@ -875,6 +876,11 @@ def upload(request):
                         f'"{up.original_name}" menggantikan "{lama.original_name}" — '
                         f"file lama ditandai Ketiban ({created} baris baru).",
                     )
+                # Penjaga salah-tarik: MEMPERINGATKAN saja. File tetap masuk —
+                # sebuah brand/merchant baru belum punya kebiasaan pembanding,
+                # dan memblokirnya berarti menghentikan kerja karena tebakan.
+                for catatan in periksa_upload(up):
+                    messages.warning(request, catatan)
             except Exception as e:  # noqa: BLE001 - tampilkan error parse ke user
                 messages.error(request, f"{path_rel}: {e}")
                 n_err += 1
