@@ -492,3 +492,20 @@ class KolamKebiasaanPerAliranTest(TestCase):
         up = self._upload("03-08-2026 LAPORAN BARU SLO.xlsx", 9999)
 
         self.assertEqual(periksa_upload(up), [])
+
+    def test_pesan_menyebut_nama_berkas_yang_diperiksa(self):
+        """Regresi: variabel nama tetangga sempat menimpa nama berkas yang
+        sedang diperiksa, sehingga peringatannya menuduh berkas LAIN — di
+        produksi berbunyi "25-07-2026 …" untuk unggahan tanggal 06-08."""
+        for i, n in enumerate([615, 697, 678, 714, 700, 690]):
+            self._upload(f"{i + 1:02d}-08-2026 W25 DP QRIS UNOPAY.xlsx", n)
+        up = self._upload("07-08-2026 W25 DP QRIS UNOPAY.xlsx", 9156)
+
+        pesan = periksa_upload(up)
+
+        self.assertTrue(pesan, "seharusnya ada peringatan")
+        for p in pesan:
+            self.assertTrue(
+                p.startswith('"07-08-2026 W25 DP QRIS UNOPAY.xlsx"'),
+                f"pesan menyebut berkas yang salah: {p}",
+            )

@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.14.1** · 23 rilis (1 besar, 14 fitur, 4 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.14.2** · 24 rilis (1 besar, 14 fitur, 5 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.14.2 — Peringatan Menyebut Berkas yang Benar
+*Perbaikan · 7 Agustus 2026*
+
+- **Peringatan unggahan kini menyebut nama berkas yang benar.** Sesaat setelah perbaikan sebelumnya, dua dari tiga peringatan keliru mencantumkan nama berkas lain — isinya tepat, labelnya bukan berkas yang sedang diperiksa. Justru itu yang paling membingungkan: orang mencari berkas yang sebenarnya tidak bermasalah.
+- Angka dan penilaian peringatan tidak berubah sama sekali; hanya nama berkas yang ditampilkan yang dibetulkan.
+- Ditemukan lewat pemeriksaan pada data produksi sungguhan, bukan dari pengujian otomatis — karena itu pemeriksaan namanya kini ikut dikunci uji agar tidak terulang.
 
 ## v1.14.1 — Penjaga yang Tahu Bedanya
 *Perbaikan · 7 Agustus 2026*

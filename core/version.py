@@ -119,6 +119,25 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.14.2",
+        tanggal=_dt.date(2026, 8, 7),
+        nama="Peringatan Menyebut Berkas yang Benar",
+        jenis=PATCH,
+        commit="",
+        sorotan=(
+            "**Peringatan unggahan kini menyebut nama berkas yang benar.** Sesaat setelah "
+            "perbaikan sebelumnya, dua dari tiga peringatan keliru mencantumkan nama berkas "
+            "lain — isinya tepat, labelnya bukan berkas yang sedang diperiksa. Justru itu "
+            "yang paling membingungkan: orang mencari berkas yang sebenarnya tidak "
+            "bermasalah.",
+            "Angka dan penilaian peringatan tidak berubah sama sekali; hanya nama berkas "
+            "yang ditampilkan yang dibetulkan.",
+            "Ditemukan lewat pemeriksaan pada data produksi sungguhan, bukan dari pengujian "
+            "otomatis — karena itu pemeriksaan namanya kini ikut dikunci uji agar tidak "
+            "terulang.",
+        ),
+    ),
+    Rilis(
         versi="1.14.1",
         tanggal=_dt.date(2026, 8, 7),
         nama="Penjaga yang Tahu Bedanya",

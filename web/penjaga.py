@@ -284,14 +284,18 @@ def _periksa(up):
     aliran = kunci_aliran(up.original_name)
     riwayat = []
     if aliran:
-        for nama, parsed, dup in (
+        # NB: nama tetangga TIDAK boleh dinamai `nama` — itu variabel berkas yang
+        # sedang diperiksa, dipakai dua pesan di bawah. Pernah tertimpa sekali dan
+        # peringatannya menyebut nama berkas tetangga (`test_pesan_menyebut_nama_
+        # berkas_yang_diperiksa` menjaganya).
+        for nama_lain, parsed, dup in (
             type(up).objects
             .filter(toko=up.toko, source_type=up.source_type, status=up.PARSED)
             .exclude(pk=up.pk)
             .order_by("-id")
             .values_list("original_name", "rows_parsed", "rows_duplicate")[:JENDELA_SISIR]
         ):
-            if kunci_aliran(nama) == aliran:
+            if kunci_aliran(nama_lain) == aliran:
                 riwayat.append((parsed or 0) + (dup or 0))
                 if len(riwayat) == 10:
                     break
