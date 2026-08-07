@@ -7,8 +7,9 @@ berhari-hari kemudian:
 1. **Tanggal isi vs tanggal di nama file** — file bernama ``01-08-2026`` yang
    isinya 30/06–01/07 pernah menarik batas bawah rentang panel mundur sebulan
    dan membuat seluruh mutasi Juli diprotes gerbang panel-penutup.
-2. **Jumlah baris vs kebiasaan** — file gateway 9.156 baris di toko yang
-   kebiasaannya 615–714 baris/hari.
+2. **Jumlah baris vs kebiasaan** — file gateway 9.156 baris pada aliran yang
+   kebiasaannya 615–714 baris/hari. Kebiasaan dihitung PER ALIRAN (berkas
+   berulang yang sama), bukan per jenis sumber — lihat `kunci_aliran`.
 3. **Irisan kode transaksi dengan panel** — file gateway yang tak satu pun
    kode transaksinya dikenal panel hari itu; pada kasus nyata seluruh 9.156
    barisnya milik merchant lain dan melahirkan 9.618 baris "uang tanpa panel".
@@ -41,12 +42,17 @@ log = logging.getLogger(__name__)
 #: lazim: panel tanggal D memuat request D-1 larut malam yang di-approve tanggal D.
 TOLERANSI_TANGGAL = 1
 
-#: Volume: butuh minimal sekian upload sebelumnya (sumber+arah sama) sebelum
+#: Volume: butuh minimal sekian upload sebelumnya DARI ALIRAN YANG SAMA sebelum
 #: berani bicara, dan kebiasaan itu sendiri harus cukup besar — sumber
 #: bervolume kecil (WD QRIS ±25 baris) berayun 3-4 kali lipat secara wajar.
 MIN_RIWAYAT = 5
 MIN_BIASA = 20
 LIPAT_VOLUME = 4
+
+#: Berapa upload terakhir (satu sumber, satu toko) yang disisir untuk mencari
+#: 10 tetangga se-aliran. SLO mengunggah ±4 berkas panel dan belasan berkas bank
+#: per hari, jadi 120 menutup sekitar dua pekan — cukup dalam, tetap satu query.
+JENDELA_SISIR = 120
 
 #: Irisan kunci: butuh sekian kode transaksi sebelum disebut pola, dan berbunyi
 #: di bawah sekian persen. Hari normal berada di ~100% (kalibrasi W25 03–04/08:
@@ -70,6 +76,39 @@ def _ribu(n):
 
 def _sah(hari, bulan):
     return 1 <= hari <= 31 and 1 <= bulan <= 12
+
+
+def kunci_aliran(nama):
+    """Nama file -> identitas "laporan berulang" yang sama; None bila tak terbaca.
+
+    Kebiasaan volume HARUS dihitung per aliran, bukan per jenis sumber. Satu
+    `source_type` menampung berkas yang volumenya berbeda jauh: pada panel
+    Vigor/TM Gaming, "PANEL DP SLO" (±140 baris, pasangannya bank) dan
+    "PANEL QRIS DP SLO" (±6.900 baris, pasangannya berkas QRIS) sama-sama
+    `panel`+`dp`; berkas bank pun terpisah per rekening. Kolam campur begitu
+    bermodus-dua dan mediannya jatuh di lembah kosong di antaranya — pada data
+    nyata SLO 3 Agustus 2026 median kolam campurnya 2.670, angka yang tidak
+    menggambarkan satu pun dari keduanya. Lebih buruk lagi, nilainya bergeser
+    mengikuti URUTAN unggah dalam satu kiriman: berkas panel-bank dinilai
+    terhadap median 2.670, berkas QRIS sedetik kemudian terhadap 147. Tiga
+    peringatan palsu lahir dari situ.
+
+    Identitas aliran diambil dari kebiasaan penamaan pengunggah sendiri: buang
+    tanggal dan ekstensi, sisanya jadi HIMPUNAN kata. Himpunan (bukan urutan)
+    disengaja — W25 pernah berganti dari "QRIS UNOPAY DP W25" ke "W25 DP QRIS
+    UNOPAY"; sebagai urutan itu dua aliran, sebagai himpunan tetap satu.
+    Bila penamaannya benar-benar berubah, kolamnya memang kosong dan penjaga
+    diam sampai kebiasaan baru terbentuk — gagal-aman, bukan salah tuduh.
+    """
+    teks = (nama or "").lower()
+    teks = re.sub(r"(\.[a-z0-9]{1,5})+$", "", teks)  # ekstensi, termasuk ".xlsx.xlsx"
+    for pola in (_POLA_ISO, _POLA_LENGKAP, _POLA_PENDEK):
+        teks = pola.sub(" ", teks)
+    token = [t for t in re.split(r"[^a-z0-9]+", teks) if t]
+    # Sisa angka pendek = pecahan tanggal yang lolos; kode brand ("w25", "oke25")
+    # selamat karena bercampur huruf.
+    token = {t for t in token if not (t.isdigit() and len(t) <= 4)}
+    return tuple(sorted(token)) or None
 
 
 def tanggal_dari_nama(nama):
@@ -148,8 +187,9 @@ def periksa_volume(baris, riwayat, minimal_riwayat=MIN_RIWAYAT,
                    minimal_biasa=MIN_BIASA, lipat=LIPAT_VOLUME):
     """None bila wajar; dict bila jumlah baris jauh dari kebiasaan.
 
-    `riwayat` = jumlah baris upload-upload sebelumnya untuk sumber & arah yang
-    sama. Median dipakai, bukan rata-rata: satu file salah tarik di riwayat tak
+    `riwayat` = jumlah baris upload-upload sebelumnya DARI ALIRAN YANG SAMA
+    (lihat `kunci_aliran` — mencampur aliran melahirkan peringatan palsu).
+    Median dipakai, bukan rata-rata: satu file salah tarik di riwayat tak
     boleh menggeser acuan sampai file salah berikutnya terlihat normal.
     """
     if baris <= 0:
@@ -238,18 +278,28 @@ def _periksa(up):
             "Pastikan periode ekspornya benar."
         )
 
-    riwayat = list(
-        type(up).objects
-        .filter(toko=up.toko, source_type=up.source_type, flow=up.flow, status=up.PARSED)
-        .exclude(pk=up.pk)
-        .order_by("-id")
-        .values_list("rows_parsed", "rows_duplicate")[:10]
-    )
-    h = periksa_volume(n_baris, [(a or 0) + (b or 0) for a, b in riwayat])
+    # Kolam kebiasaan = 10 upload terakhir SE-ALIRAN (bukan se-jenis-sumber).
+    # `flow` sengaja TIDAK ikut menyaring: arahnya sudah terbawa nama file, dan
+    # deteksi flow yang meleset pada satu berkas akan memecah kolam tanpa sebab.
+    aliran = kunci_aliran(up.original_name)
+    riwayat = []
+    if aliran:
+        for nama, parsed, dup in (
+            type(up).objects
+            .filter(toko=up.toko, source_type=up.source_type, status=up.PARSED)
+            .exclude(pk=up.pk)
+            .order_by("-id")
+            .values_list("original_name", "rows_parsed", "rows_duplicate")[:JENDELA_SISIR]
+        ):
+            if kunci_aliran(nama) == aliran:
+                riwayat.append((parsed or 0) + (dup or 0))
+                if len(riwayat) == 10:
+                    break
+    h = periksa_volume(n_baris, riwayat)
     if h:
         arah = "jauh di atas" if h["arah"] == "atas" else "jauh di bawah"
         pesan.append(
-            f'"{nama}" — {_ribu(h["baris"])} baris, {arah} kebiasaan sumber ini '
+            f'"{nama}" — {_ribu(h["baris"])} baris, {arah} kebiasaan berkas ini '
             f'di toko ini (biasanya ±{_ribu(round(h["biasanya"]))}). '
             "Pastikan filenya tidak tertukar atau salah periode."
         )

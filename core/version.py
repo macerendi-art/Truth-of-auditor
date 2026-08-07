@@ -119,6 +119,30 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.14.1",
+        tanggal=_dt.date(2026, 8, 7),
+        nama="Penjaga yang Tahu Bedanya",
+        jenis=PATCH,
+        commit="",
+        sorotan=(
+            "**Peringatan “jumlah baris tidak wajar” tidak lagi salah tuduh.** Pada panel "
+            "Vigor/TM Gaming, satu jenis sumber sebenarnya memuat dua jenis berkas yang "
+            "volumenya sangat berbeda — panel QRIS (ribuan baris) dan panel biasa untuk "
+            "bank (ratusan baris) — dan berkas bank pun terpisah per rekening. Sebelumnya "
+            "semuanya dibandingkan dalam satu kelompok, sehingga berkas yang sepenuhnya "
+            "normal ikut ditegur. Kini tiap jenis berkas punya kebiasaannya sendiri, "
+            "dikenali dari pola penamaan yang dipakai pengunggah.",
+            "Ikutannya, hasil peringatan tidak lagi bergantung pada urutan berkas diunggah. "
+            "Sebelumnya berkas yang diproses belakangan dinilai terhadap kebiasaan yang "
+            "baru saja bergeser oleh berkas sebelumnya dalam kiriman yang sama.",
+            "Bila pola penamaan sebuah berkas berubah, peringatan volumenya **berhenti "
+            "sementara** untuk berkas itu sampai terkumpul lima kali unggahan dengan pola "
+            "baru — sengaja diam daripada menuduh berdasarkan pembanding yang keliru. "
+            "Dua pemeriksaan lain, yaitu tanggal isi berkas dan kecocokan kode transaksi "
+            "gateway dengan panel, tidak terpengaruh dan tetap berjalan penuh.",
+        ),
+    ),
+    Rilis(
         versi="1.14.0",
         tanggal=_dt.date(2026, 8, 7),
         nama="Penjaga Salah Unggah",

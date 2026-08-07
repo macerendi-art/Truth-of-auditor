@@ -28,6 +28,7 @@ from sources import services
 from sources.models import SourceType, Toko, Upload
 from transactions.models import Transaction
 from web.penjaga import (
+    kunci_aliran,
     periksa_irisan_kunci,
     periksa_tanggal_isi,
     periksa_upload,
@@ -364,3 +365,130 @@ class PenjagaDiHalamanUploadTest(TestCase):
         self.assertIn("Penjaga upload gagal", log.output[0])  # tetap tercatat, tidak hilang
         self.assertIn("1 file diproses, 0 gagal.", self._pesan(r))
         self.assertEqual(Upload.objects.filter(original_name="06-08-2026 Y.xlsx").count(), 1)
+
+
+class KunciAliranTest(TestCase):
+    """Identitas "laporan berulang" dari nama file — dasar kolam kebiasaan."""
+
+    def test_tanggal_dan_ekstensi_dibuang(self):
+        self.assertEqual(
+            kunci_aliran("03-08-2026 PANEL DP SLO.xlsx"), ("dp", "panel", "slo")
+        )
+
+    def test_ekstensi_ganda_ikut_dibuang(self):
+        """Nama nyata dari klien: "…UTAMA.xlsx.xlsx"."""
+        self.assertEqual(
+            kunci_aliran("03_08_2026_SLO_DP_MANDIRI_AKBAR FUAD PUTRA UTAMA.xlsx.xlsx"),
+            ("akbar", "dp", "fuad", "mandiri", "putra", "slo", "utama"),
+        )
+
+    def test_panel_qris_dan_panel_bank_ALIRAN_BERBEDA(self):
+        """Inti perbaikan: pada Vigor/TM Gaming keduanya sama-sama panel+dp,
+        tapi volumenya ±140 vs ±6.900 baris."""
+        self.assertNotEqual(
+            kunci_aliran("03-08-2026 PANEL DP SLO.xlsx"),
+            kunci_aliran("03-08-2026 PANEL QRIS DP SLO.xlsx"),
+        )
+
+    def test_dp_dan_wd_aliran_berbeda(self):
+        self.assertNotEqual(
+            kunci_aliran("03-08-2026 PANEL DP SLO.xlsx"),
+            kunci_aliran("03-08-2026 PANEL WD SLO.xlsx"),
+        )
+
+    def test_rekening_bank_berbeda_aliran_berbeda(self):
+        self.assertNotEqual(
+            kunci_aliran("03_08_2026_SLO_WD_BRI_ERIK_ERIANSAH.csv"),
+            kunci_aliran("03_08_2026_SLO_WD_BCA_AHMAD_SAMUDI.pdf"),
+        )
+
+    def test_urutan_kata_tidak_memecah_aliran(self):
+        """W25 pernah berganti "QRIS UNOPAY DP W25" -> "W25 DP QRIS UNOPAY"."""
+        self.assertEqual(
+            kunci_aliran("29-07-2026 QRIS UNOPAY DP W25.xlsx"),
+            kunci_aliran("06-08-2026 W25 DP QRIS UNOPAY.xlsx"),
+        )
+
+    def test_kode_brand_berangka_selamat(self):
+        self.assertIn("w25", kunci_aliran("06-08-2026 W25 DP.xlsx"))
+        self.assertIn("oke25", kunci_aliran("06-08-2026 OKE25 DP.xlsx"))
+
+    def test_nama_yang_isinya_hanya_tanggal_menghasilkan_none(self):
+        """Kunci kosong akan menyatukan semua berkas tak bernama — lebih baik
+        diam daripada mengarang kolam."""
+        self.assertIsNone(kunci_aliran("03-08-2026.xlsx"))
+        self.assertIsNone(kunci_aliran(""))
+
+
+class KolamKebiasaanPerAliranTest(TestCase):
+    """Kolam kebiasaan diambil per aliran — regresi atas tiga peringatan palsu
+    yang menimpa SLO pada 3 Agustus 2026 (data nyata dipakai apa adanya)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            "aud3", "a3@a.co", "pw12345", role="supervisor"
+        )
+        self.toko = Toko.objects.get(key="lbs")
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+
+    def _upload(self, nama, baris):
+        up = Upload.objects.create(
+            source_type=self.panel, toko=self.toko, flow="dp", original_name=nama,
+            status=Upload.PARSED, rows_parsed=baris, uploaded_by=self.user,
+        )
+        return up
+
+    def _riwayat_slo(self):
+        """Selang-seling QRIS/panel-bank persis seperti produksi."""
+        for tgl, qris, bank in [
+            (27, 5657, 118), (28, 5614, 92), (29, 5533, 111),
+            (30, 5185, 107), (31, 5609, 139), (1, 6900, 131), (2, 7152, 155),
+        ]:
+            self._upload(f"{tgl:02d}-07-2026 PANEL QRIS DP SLO.xlsx", qris)
+            self._upload(f"{tgl:02d}-07-2026 PANEL DP SLO.xlsx", bank)
+
+    def test_panel_bank_kecil_tidak_lagi_salah_tuduh(self):
+        """132 baris itu NORMAL untuk aliran ini (kebiasaan ±131–155).
+        Kolam campur lama bermedian 2.670 dan membuatnya berbunyi."""
+        self._riwayat_slo()
+        up = self._upload("03-08-2026 PANEL DP SLO.xlsx", 132)
+
+        self.assertEqual(periksa_upload(up), [])
+
+    def test_panel_qris_besar_tidak_lagi_salah_tuduh(self):
+        """6.673 baris NORMAL untuk aliran QRIS (kebiasaan ±5.600–7.100)."""
+        self._riwayat_slo()
+        up = self._upload("03-08-2026 PANEL QRIS DP SLO.xlsx", 6673)
+
+        self.assertEqual(periksa_upload(up), [])
+
+    def test_urutan_unggah_tidak_lagi_mengubah_putusan(self):
+        """Cacat lama: berkas yang diproses belakangan menilai dirinya terhadap
+        kolam yang baru saja bergeser. Dua urutan harus memberi hasil sama."""
+        self._riwayat_slo()
+        a = self._upload("03-08-2026 PANEL DP SLO.xlsx", 132)
+        b = self._upload("03-08-2026 PANEL QRIS DP SLO.xlsx", 6673)
+        self.assertEqual((periksa_upload(a), periksa_upload(b)), ([], []))
+
+        Upload.objects.filter(pk__in=[a.pk, b.pk]).delete()
+        b2 = self._upload("03-08-2026 PANEL QRIS DP SLO.xlsx", 6673)
+        a2 = self._upload("03-08-2026 PANEL DP SLO.xlsx", 132)
+        self.assertEqual((periksa_upload(b2), periksa_upload(a2)), ([], []))
+
+    def test_pencilan_SUNGGUHAN_dalam_satu_aliran_tetap_berbunyi(self):
+        """Penjaganya tak boleh jadi tumpul: 9.156 baris pada aliran yang
+        kebiasaannya ±700 harus tetap ketahuan (kasus W25 06/08)."""
+        for i, n in enumerate([615, 697, 678, 714, 700, 690]):
+            self._upload(f"{i + 1:02d}-08-2026 W25 DP QRIS UNOPAY.xlsx", n)
+        up = self._upload("07-08-2026 W25 DP QRIS UNOPAY.xlsx", 9156)
+
+        pesan = periksa_upload(up)
+        self.assertTrue(any("kebiasaan berkas ini" in p for p in pesan), pesan)
+        self.assertTrue(any("±694" in p for p in pesan), pesan)
+
+    def test_aliran_baru_diam_sampai_kebiasaan_terbentuk(self):
+        """Ganti pola penamaan = kolam kosong = diam, bukan salah tuduh."""
+        self._riwayat_slo()
+        up = self._upload("03-08-2026 LAPORAN BARU SLO.xlsx", 9999)
+
+        self.assertEqual(periksa_upload(up), [])

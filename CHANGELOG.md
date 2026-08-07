@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.14.0** · 22 rilis (1 besar, 14 fitur, 3 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.14.1** · 23 rilis (1 besar, 14 fitur, 4 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.14.1 — Penjaga yang Tahu Bedanya
+*Perbaikan · 7 Agustus 2026*
+
+- **Peringatan “jumlah baris tidak wajar” tidak lagi salah tuduh.** Pada panel Vigor/TM Gaming, satu jenis sumber sebenarnya memuat dua jenis berkas yang volumenya sangat berbeda — panel QRIS (ribuan baris) dan panel biasa untuk bank (ratusan baris) — dan berkas bank pun terpisah per rekening. Sebelumnya semuanya dibandingkan dalam satu kelompok, sehingga berkas yang sepenuhnya normal ikut ditegur. Kini tiap jenis berkas punya kebiasaannya sendiri, dikenali dari pola penamaan yang dipakai pengunggah.
+- Ikutannya, hasil peringatan tidak lagi bergantung pada urutan berkas diunggah. Sebelumnya berkas yang diproses belakangan dinilai terhadap kebiasaan yang baru saja bergeser oleh berkas sebelumnya dalam kiriman yang sama.
+- Bila pola penamaan sebuah berkas berubah, peringatan volumenya **berhenti sementara** untuk berkas itu sampai terkumpul lima kali unggahan dengan pola baru — sengaja diam daripada menuduh berdasarkan pembanding yang keliru. Dua pemeriksaan lain, yaitu tanggal isi berkas dan kecocokan kode transaksi gateway dengan panel, tidak terpengaruh dan tetap berjalan penuh.
 
 ## v1.14.0 — Penjaga Salah Unggah
 *Rilis fitur · 7 Agustus 2026*
