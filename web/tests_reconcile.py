@@ -221,5 +221,17 @@ class PesanTolakActionableTests(TestCase):
         pesan = " ".join(str(m) for m in r.context["messages"])
         self.assertIn("28/06/2026 — uang (1 baris)", pesan)
         self.assertIn("butuh panel 27/06 atau 28/06", pesan)
-        self.assertIn("Dari tanggal</b> = 30/06/2026", pesan)
+        # Jalan keluar kedua = TAUTAN. Sebelumnya pesan menyuruh "isi Dari
+        # tanggal", padahal field itu tertutup di dalam "Filter lanjutan".
+        self.assertIn('href="/reconcile/?date_from=2026-06-30"', pesan)
+        self.assertIn("batasi mulai 30/06/2026", pesan)
         self.assertEqual(ReconBatch.objects.filter(toko=self.lbs).count(), 0)
+
+    def test_tautan_saran_benar_benar_mengisi_filternya(self):
+        """Tautan itu tak berguna kalau halamannya tak menerima parameternya:
+        filter harus terisi DAN 'Filter lanjutan' harus terbuka sendiri."""
+        r = self.client.get(reverse("reconcile"), {"date_from": "2026-06-30"})
+
+        self.assertEqual(r.context["date_from"], "2026-06-30")
+        self.assertContains(r, 'value="2026-06-30"')
+        self.assertContains(r, "<details class=\"adv\" open>")

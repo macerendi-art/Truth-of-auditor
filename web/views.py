@@ -58,6 +58,7 @@ from web.breakdown import (
 from web.channels import breakdown_metode
 from web.forms import GantiPasswordForm
 from web.hutang import hutang_piutang as hitung_hutang_piutang
+from web.kelengkapan import status_sumber
 from web.models import FRKoreksi, RekapManual, RekapPenyebab
 from web.monthly import monthly_summary
 from web.penjaga import periksa_upload
@@ -1182,10 +1183,17 @@ def reconcile(request):
                 ),
             )
             saran = res.get("saran_dari")
+            # Jalan keluar kedua sebagai TAUTAN, bukan instruksi. Field "Dari
+            # tanggal" bersembunyi di dalam <details> "Filter lanjutan" yang
+            # tertutup, jadi menyuruh "isi Dari tanggal" berarti menyuruh orang
+            # berburu. Tautan ini hanya MENGISI filternya (halaman membuka
+            # <details> sendiri bila date_from ada) — menjalankannya tetap
+            # butuh satu tekan tombol, karena run itu operasi keuangan.
             ekor = format_html(
-                "<br>Atau jalankan sebagian dulu: isi <b>Dari tanggal</b> = {} — "
-                "baris lama tetap menunggu sampai panelnya diupload.",
-                saran.strftime("%d/%m/%Y"),
+                '<br>Atau jalankan sebagian dulu: <a href="{}?date_from={}"><b>batasi '
+                "mulai {}</b></a> — filternya terisi otomatis, tinggal tekan Jalankan. "
+                "Baris lama tetap menunggu sampai panelnya diupload.",
+                reverse("reconcile"), saran.isoformat(), saran.strftime("%d/%m/%Y"),
             ) if saran else ""
             messages.error(request, format_html(
                 "Rekonsiliasi ditolak: ada tanggal ber-uang/bracket tanpa panel penutup. "
@@ -1243,6 +1251,9 @@ def reconcile(request):
     ctx = {
         "active_toko": active,
         "completeness": comp,
+        # Angka pembeda "belum diupload" vs "sudah terpakai batch" — TAMPILAN
+        # saja; `completeness` (boolean, ikut tersimpan di ReconBatch) tak berubah.
+        "status_sumber": status_sumber(active, df, dt),
         "comp_ready": comp_ready,
         "comp_total": len(comp_keys),
         "comp_pct": round(100 * comp_ready / len(comp_keys)),

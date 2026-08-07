@@ -17,6 +17,12 @@
 .src-row .pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;white-space:nowrap}
 .src-row .pill.on{color:var(--ok);background:var(--ok-bg)}
 .src-row .pill.off{color:var(--muted);background:var(--panel-2);border:1px solid var(--line)}
+/* "terpakai" = sudah diupload, barisnya sudah habis dipakai batch. Sengaja
+   dibedakan dari "kosong"/"opsional": dua keadaan itu dulu tampil identik dan
+   membuat pemakai menyimpulkan filenya tidak terbaca. Nada informasi (brand),
+   bukan alarm, dan tidak seredup baris yang benar-benar kosong. */
+.src-row.used{opacity:.8}
+.src-row .pill.used{color:var(--brand);background:var(--info-bg)}
 .switch{position:relative;width:38px;height:22px;flex-shrink:0;display:inline-block}
 .switch input{position:absolute;opacity:0;width:0;height:0}
 .switch .track{position:absolute;inset:0;background:var(--line-2);border-radius:99px;transition:background .16s;cursor:pointer}
@@ -47,7 +53,7 @@ details.adv .adv-body{padding:2px 14px 14px}
 </div>
 
 <div class="grid cols-2">
-  {% with c=completeness %}
+  {% with c=completeness s=status_sumber %}
   {# ---- KELENGKAPAN DATA ---- #}
   <div class="card reveal">
     <div class="h-row" style="margin-bottom:8px">
@@ -59,34 +65,34 @@ details.adv .adv-body{padding:2px 14px 14px}
     <p class="faint" style="margin:0 0 6px;font-size:.86rem">Aktifkan sumber yang ikut dijalankan. Sumber kosong tidak bisa diaktifkan.</p>
 
     <div class="src-list">
-      <div class="src-row {% if c.panel_dp %}on{% else %}off{% endif %}">
+      <div class="src-row {% if c.panel_dp %}on{% elif s.panel_dp.terpakai %}used{% else %}off{% endif %}">
         <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg></span>
-        <div class="meta"><b>Panel Deposit</b><small>Riwayat DP dari panel</small></div>
-        <span class="pill {% if c.panel_dp %}on{% else %}off{% endif %}">{% if c.panel_dp %}siap{% else %}kosong{% endif %}</span>
+        <div class="meta"><b>Panel Deposit</b><small>{% if not c.panel_dp and s.panel_dp.terpakai %}{{ s.panel_dp.terpakai|intcomma }} baris sudah dipakai Batch #{{ s.panel_dp.batch_no }}{% if s.panel_dp.batch_tanggal %} · {{ s.panel_dp.batch_tanggal|date:"d/m" }}{% endif %}{% else %}Riwayat DP dari panel{% endif %}</small></div>
+        <span class="pill {% if c.panel_dp %}on{% elif s.panel_dp.terpakai %}used{% else %}off{% endif %}">{% if c.panel_dp %}siap{% elif s.panel_dp.terpakai %}terpakai{% else %}kosong{% endif %}</span>
         <label class="switch"><input type="checkbox" name="inc_panel_dp" form="jalankan-form" {% if c.panel_dp %}checked{% else %}disabled{% endif %}><span class="track"></span></label>
       </div>
-      <div class="src-row {% if c.panel_wd %}on{% else %}off{% endif %}">
+      <div class="src-row {% if c.panel_wd %}on{% elif s.panel_wd.terpakai %}used{% else %}off{% endif %}">
         <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></span>
-        <div class="meta"><b>Panel Withdraw</b><small>Riwayat WD dari panel</small></div>
-        <span class="pill {% if c.panel_wd %}on{% else %}off{% endif %}">{% if c.panel_wd %}siap{% else %}kosong{% endif %}</span>
+        <div class="meta"><b>Panel Withdraw</b><small>{% if not c.panel_wd and s.panel_wd.terpakai %}{{ s.panel_wd.terpakai|intcomma }} baris sudah dipakai Batch #{{ s.panel_wd.batch_no }}{% if s.panel_wd.batch_tanggal %} · {{ s.panel_wd.batch_tanggal|date:"d/m" }}{% endif %}{% else %}Riwayat WD dari panel{% endif %}</small></div>
+        <span class="pill {% if c.panel_wd %}on{% elif s.panel_wd.terpakai %}used{% else %}off{% endif %}">{% if c.panel_wd %}siap{% elif s.panel_wd.terpakai %}terpakai{% else %}kosong{% endif %}</span>
         <label class="switch"><input type="checkbox" name="inc_panel_wd" form="jalankan-form" {% if c.panel_wd %}checked{% else %}disabled{% endif %}><span class="track"></span></label>
       </div>
-      <div class="src-row {% if c.bracket %}on{% else %}off{% endif %}">
+      <div class="src-row {% if c.bracket %}on{% elif s.bracket.terpakai %}used{% else %}off{% endif %}">
         <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
-        <div class="meta"><b>Bracket / FR</b><small>{% if c.bracket %}Ledger agen{% else %}opsional — Panel↔Bracket dilewati bila kosong{% endif %}</small></div>
-        <span class="pill {% if c.bracket %}on{% else %}off{% endif %}">{% if c.bracket %}siap{% else %}opsional{% endif %}</span>
+        <div class="meta"><b>Bracket / FR</b><small>{% if not c.bracket and s.bracket.terpakai %}{{ s.bracket.terpakai|intcomma }} baris sudah dipakai Batch #{{ s.bracket.batch_no }}{% if s.bracket.batch_tanggal %} · {{ s.bracket.batch_tanggal|date:"d/m" }}{% endif %}{% else %}{% if c.bracket %}Ledger agen{% else %}opsional — Panel↔Bracket dilewati bila kosong{% endif %}{% endif %}</small></div>
+        <span class="pill {% if c.bracket %}on{% elif s.bracket.terpakai %}used{% else %}off{% endif %}">{% if c.bracket %}siap{% elif s.bracket.terpakai %}terpakai{% else %}opsional{% endif %}</span>
         <label class="switch"><input type="checkbox" name="inc_bracket" form="jalankan-form" {% if c.bracket %}checked{% else %}disabled{% endif %}><span class="track"></span></label>
       </div>
-      <div class="src-row {% if c.bank %}on{% else %}off{% endif %}">
+      <div class="src-row {% if c.bank %}on{% elif s.bank.terpakai %}used{% else %}off{% endif %}">
         <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>
-        <div class="meta"><b>Bank</b><small>Mutasi rekening (BCA/BRI/Mandiri)</small></div>
-        <span class="pill {% if c.bank %}on{% else %}off{% endif %}">{% if c.bank %}siap{% else %}kosong{% endif %}</span>
+        <div class="meta"><b>Bank</b><small>{% if not c.bank and s.bank.terpakai %}{{ s.bank.terpakai|intcomma }} baris sudah dipakai Batch #{{ s.bank.batch_no }}{% if s.bank.batch_tanggal %} · {{ s.bank.batch_tanggal|date:"d/m" }}{% endif %}{% else %}Mutasi rekening (BCA/BRI/Mandiri){% endif %}</small></div>
+        <span class="pill {% if c.bank %}on{% elif s.bank.terpakai %}used{% else %}off{% endif %}">{% if c.bank %}siap{% elif s.bank.terpakai %}terpakai{% else %}kosong{% endif %}</span>
         <label class="switch"><input type="checkbox" name="inc_bank" form="jalankan-form" {% if c.bank %}checked{% else %}disabled{% endif %}><span class="track"></span></label>
       </div>
-      <div class="src-row {% if c.gateway %}on{% else %}off{% endif %}">
+      <div class="src-row {% if c.gateway %}on{% elif s.gateway.terpakai %}used{% else %}off{% endif %}">
         <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>
-        <div class="meta"><b>Gateway</b><small>QR Flyer / NXPay</small></div>
-        <span class="pill {% if c.gateway %}on{% else %}off{% endif %}">{% if c.gateway %}siap{% else %}opsional{% endif %}</span>
+        <div class="meta"><b>Gateway</b><small>{% if not c.gateway and s.gateway.terpakai %}{{ s.gateway.terpakai|intcomma }} baris sudah dipakai Batch #{{ s.gateway.batch_no }}{% if s.gateway.batch_tanggal %} · {{ s.gateway.batch_tanggal|date:"d/m" }}{% endif %}{% else %}QR Flyer / NXPay{% endif %}</small></div>
+        <span class="pill {% if c.gateway %}on{% elif s.gateway.terpakai %}used{% else %}off{% endif %}">{% if c.gateway %}siap{% elif s.gateway.terpakai %}terpakai{% else %}opsional{% endif %}</span>
         <label class="switch"><input type="checkbox" name="inc_gateway" form="jalankan-form" {% if c.gateway %}checked{% else %}disabled{% endif %}><span class="track"></span></label>
       </div>
     </div>
