@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "g15-visual",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DATABASE_URL=sqlite:////private/tmp/claude-501/-Users-macads-Truth-of-auditor--claude-worktrees-loving-joliot-2aa399/9dbea579-50f9-462c-ba4b-77d2bd34e9b0/scratchpad/g15.sqlite3",
+        "/Users/macads/Truth-of-auditor/.venv/bin/python",
+        "manage.py",
+        "runserver",
+        "127.0.0.1:8722",
+        "--noreload"
+      ],
+      "port": 8722
+    },
+    {
       "name": "g14-visual",
       "runtimeExecutable": "env",
       "runtimeArgs": [

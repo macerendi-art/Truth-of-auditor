@@ -335,6 +335,9 @@ class PenjagaDiHalamanUploadTest(TestCase):
         pesan = self._pesan(r)
         self.assertIn("tidak dikenal panel", pesan)
         self.assertIn("1 file diproses, 0 gagal.", pesan)
+        # ...dan benar-benar TERCETAK sebagai peringatan, bukan sekadar ada di
+        # `messages`: nada visualnya yang membedakannya dari galat.
+        self.assertContains(r, 'class="msg warning"')
 
     def test_file_wajar_tanpa_peringatan(self):
         self._unggah("06-08-2026 PANEL W25.xlsx",

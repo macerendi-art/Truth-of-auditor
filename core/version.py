@@ -119,6 +119,36 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.14.0",
+        tanggal=_dt.date(2026, 8, 7),
+        nama="Penjaga Salah Unggah",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**Aplikasi kini memperingatkan saat sebuah file sepertinya salah tarik.** "
+            "Begitu file selesai diunggah, tiga hal diperiksa: apakah tanggal isinya jauh "
+            "dari tanggal di nama filenya, apakah jumlah barisnya melenceng jauh dari "
+            "kebiasaan sumber itu di toko tersebut, dan — khusus file gateway — apakah kode "
+            "transaksinya benar-benar dikenal panel hari itu. Sebelumnya kesalahan seperti ini "
+            "baru ketahuan berhari-hari kemudian lewat ribuan baris tidak cocok yang harus "
+            "ditelusuri satu per satu.",
+            "Peringatannya **tidak menghalangi**. File tetap masuk dan pekerjaan tetap jalan; "
+            "yang diberikan hanyalah angkanya, supaya orang yang paling tahu — pengunggahnya — "
+            "bisa menilai sendiri. Ketiga pemeriksaan juga sengaja diam saat buktinya tipis, "
+            "misalnya pada brand baru yang belum punya kebiasaan pembanding, karena penjaga "
+            "yang sering salah tuduh akan berhenti dibaca orang.",
+            "Kartu **Kelengkapan Data** kini membedakan “belum diunggah” dari “sudah terpakai”. "
+            "Dulu keduanya tampil sama-sama abu-abu bertulis “opsional”, sehingga file yang "
+            "sebenarnya sudah masuk dan sudah dipakai rekonsiliasi terbaca seolah tidak "
+            "terdeteksi. Sekarang baris seperti itu menyebutkan jumlah barisnya dan batch "
+            "mana yang memakainya.",
+            "Saat rekonsiliasi ditolak karena ada tanggal tanpa panel penutup, saran "
+            "“jalankan sebagian dulu” kini berupa **tautan yang langsung mengisikan filternya**. "
+            "Sebelumnya pesan itu menyuruh mengisi sebuah kolom yang tersembunyi di dalam "
+            "panel “Filter lanjutan” yang tertutup.",
+        ),
+    ),
+    Rilis(
         versi="1.13.0",
         tanggal=_dt.date(2026, 8, 1),
         nama="Filter Bank Menyeluruh, Upload Ketiban & Cari Toko",
