@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.14.2** · 24 rilis (1 besar, 14 fitur, 5 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.15.0** · 25 rilis (1 besar, 15 fitur, 5 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.15.0 — Detail FR/Bracket
+*Rilis fitur · 8 Agustus 2026*
+
+- **Halaman baru: Detail FR/Bracket.** Selama ini Control Bracket menjawab “berapa”, tapi tidak “isinya apa saja”. Kalau sel Adjustment sebuah rekening tertulis 450.000, satu-satunya cara mengetahui isinya adalah membuka kembali berkas FR-nya. Sekarang cukup memilih rekening dan kategorinya, lalu seluruh baris penyusunnya tampil lengkap dengan jam, member, keterangan, nominal, dan saldo berjalannya.
+- Berlaku untuk **semua kategori dan semua rekening** — Deposit, Withdrawal, Sesama CM, Beban Admin, Biaya Transaksi, dan seterusnya — serta bisa disaring per rentang tanggal atau dicari bebas berdasarkan keterangan, member, maupun username.
+- Angkanya dijamin **selalu sama dengan halaman Breakdown**: aturan hitungnya satu sumber, dan kesamaannya dikunci uji otomatis untuk setiap sel, bukan sekadar diperiksa sekali. Bila sebuah sel pernah dikoreksi manual, halaman ini menyebutkannya terang-terangan — nilai tampil sekian, isi aslinya sekian — supaya selisihnya tidak pernah jadi teka-teki.
 
 ## v1.14.2 — Peringatan Menyebut Berkas yang Benar
 *Perbaikan · 7 Agustus 2026*

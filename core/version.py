@@ -119,6 +119,30 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.15.0",
+        tanggal=_dt.date(2026, 8, 8),
+        nama="Detail FR/Bracket",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**Halaman baru: Detail FR/Bracket.** Selama ini Control Bracket menjawab "
+            "“berapa”, tapi tidak “isinya apa saja”. Kalau sel Adjustment sebuah rekening "
+            "tertulis 450.000, satu-satunya cara mengetahui isinya adalah membuka kembali "
+            "berkas FR-nya. Sekarang cukup memilih rekening dan kategorinya, lalu seluruh "
+            "baris penyusunnya tampil lengkap dengan jam, member, keterangan, nominal, dan "
+            "saldo berjalannya.",
+            "Berlaku untuk **semua kategori dan semua rekening** — Deposit, Withdrawal, "
+            "Sesama CM, Beban Admin, Biaya Transaksi, dan seterusnya — serta bisa disaring "
+            "per rentang tanggal atau dicari bebas berdasarkan keterangan, member, maupun "
+            "username.",
+            "Angkanya dijamin **selalu sama dengan halaman Breakdown**: aturan hitungnya "
+            "satu sumber, dan kesamaannya dikunci uji otomatis untuk setiap sel, bukan "
+            "sekadar diperiksa sekali. Bila sebuah sel pernah dikoreksi manual, halaman ini "
+            "menyebutkannya terang-terangan — nilai tampil sekian, isi aslinya sekian — "
+            "supaya selisihnya tidak pernah jadi teka-teki.",
+        ),
+    ),
+    Rilis(
         versi="1.14.2",
         tanggal=_dt.date(2026, 8, 7),
         nama="Peringatan Menyebut Berkas yang Benar",

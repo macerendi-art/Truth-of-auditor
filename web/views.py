@@ -56,6 +56,7 @@ from web.breakdown import (
     ringkas_bracket_rentang,
 )
 from web.channels import breakdown_metode
+from web.detail_fr import detail_fr as hitung_detail_fr
 from web.forms import GantiPasswordForm
 from web.hutang import hutang_piutang as hitung_hutang_piutang
 from web.kelengkapan import status_sumber
@@ -1957,6 +1958,39 @@ def bracket_breakdown(request):
         "prev_sampai": sampai - timedelta(days=span),
         "next_dari": dari + timedelta(days=span),
         "next_sampai": sampai + timedelta(days=span),
+    })
+
+
+@login_required
+def bracket_detail(request):
+    """Sub-menu "Detail FR/Bracket": baris-baris di balik tiap sel Control
+    Bracket. `/bracket/` menjawab "berapa", halaman ini "isinya apa saja" —
+    permintaan aslinya: sel Adjustment tertulis −450.000, tiga baris apa itu.
+
+    Resolusi tanggal SENGAJA identik dgn `/bracket/` (termasuk back-compat
+    `?date=`) supaya berpindah halaman tidak diam-diam mengubah periode."""
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    latest = Transaction.objects.filter(
+        toko=active, source_type__key="bracket"
+    ).aggregate(m=Max("posted_date"))["m"]
+    lama = _parse_date(request.GET.get("date", ""))
+    sampai = _parse_date(request.GET.get("sampai", "")) or lama or latest or date_cls.today()
+    dari = _parse_date(request.GET.get("dari", "")) or lama or sampai
+    if dari > sampai:
+        dari, sampai = sampai, dari
+    data = hitung_detail_fr(
+        active, dari, sampai,
+        akun=request.GET.get("akun", ""),
+        kategori=request.GET.get("kategori", ""),
+        q=request.GET.get("q", "").strip(),
+    )
+    span = (sampai - dari).days + 1
+    return render(request, "web/detail_fr.html", {
+        "data": data, "dari": dari, "sampai": sampai, "latest": latest,
+        "prev_dari": dari - timedelta(days=span), "prev_sampai": sampai - timedelta(days=span),
+        "next_dari": dari + timedelta(days=span), "next_sampai": sampai + timedelta(days=span),
     })
 
 

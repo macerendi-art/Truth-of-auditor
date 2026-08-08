@@ -1,0 +1,134 @@
+{% extends "web/app_base.html" %}
+{% load humanize %}
+{% block title %}Detail FR/Bracket · Truth of Auditor{% endblock %}
+{% block crumb %}Transaksi · Detail FR/Bracket{% endblock %}
+{% block head %}
+<style>
+.pilih-bar{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+.pilih-bar a{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid var(--line-2);
+  border-radius:999px;background:var(--panel-2);font-size:12.5px;font-weight:600;color:var(--muted);text-decoration:none}
+.pilih-bar a:hover{color:var(--ink)}
+.pilih-bar a.on{color:var(--brand);border-color:var(--brand);background:var(--info-bg)}
+.pilih-bar a .n{font-weight:500;opacity:.7}
+.sel-kartu{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 18px}
+.sel-kartu .angka{font-family:'Sora';font-size:26px;font-weight:700;letter-spacing:-.02em}
+.sel-kartu .angka.min{color:var(--bad)}
+.sel-kartu .ket{font-size:13px;color:var(--muted)}
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-head reveal">
+  <div>
+    <h1>Detail FR/Bracket</h1>
+    <p>Rincian baris di balik tiap angka pada <b>Control Bracket</b> — pilih rekening dan kategorinya untuk melihat isinya.</p>
+  </div>
+</div>
+
+<div class="card reveal" style="margin-bottom:18px">
+  <form method="get">
+    <div class="row">
+      <div class="field"><label>Dari</label><input type="date" name="dari" value="{{ dari|date:'Y-m-d' }}"></div>
+      <div class="field"><label>Sampai</label><input type="date" name="sampai" value="{{ sampai|date:'Y-m-d' }}"></div>
+      <div class="field" style="flex:2"><label>Cari</label>
+        <input type="search" name="q" value="{{ data.q }}" placeholder="keterangan, member, atau username…"></div>
+      <input type="hidden" name="akun" value="{{ data.akun }}">
+      <input type="hidden" name="kategori" value="{{ data.kategori }}">
+      <button class="btn primary" type="submit">Terapkan</button>
+    </div>
+  </form>
+
+  <div class="field" style="margin:12px 0 0"><label>FR Account</label>
+    <div class="pilih-bar">
+      <a class="{% if not data.akun %}on{% endif %}"
+         href="?dari={{ dari|date:'Y-m-d' }}&amp;sampai={{ sampai|date:'Y-m-d' }}&amp;kategori={{ data.kategori|urlencode }}&amp;q={{ data.q|urlencode }}">Semua</a>
+      {% for a in data.akun_pilihan %}
+      <a class="{% if data.akun == a.account %}on{% endif %}"
+         href="?dari={{ dari|date:'Y-m-d' }}&amp;sampai={{ sampai|date:'Y-m-d' }}&amp;akun={{ a.account|urlencode }}&amp;kategori={{ data.kategori|urlencode }}&amp;q={{ data.q|urlencode }}">{{ a.account }} <span class="n">{{ a.n }}</span></a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="field" style="margin:10px 0 0"><label>Kategori</label>
+    <div class="pilih-bar">
+      <a class="{% if not data.kategori %}on{% endif %}"
+         href="?dari={{ dari|date:'Y-m-d' }}&amp;sampai={{ sampai|date:'Y-m-d' }}&amp;akun={{ data.akun|urlencode }}&amp;q={{ data.q|urlencode }}">Semua</a>
+      {% for k in data.kategori_pilihan %}
+      <a class="{% if data.kategori == k.slug %}on{% endif %}"
+         href="?dari={{ dari|date:'Y-m-d' }}&amp;sampai={{ sampai|date:'Y-m-d' }}&amp;akun={{ data.akun|urlencode }}&amp;kategori={{ k.slug|urlencode }}&amp;q={{ data.q|urlencode }}">{{ k.label }} <span class="n">{{ k.n }}</span></a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{# Kartu jawaban: inilah "450rb itu isinya apa saja" dalam satu baris. #}
+<div class="card reveal" style="margin-bottom:18px">
+  <div class="sel-kartu">
+    <div>
+      <div class="k faint" style="font-size:12px;text-transform:uppercase;letter-spacing:.04em">
+        {% if data.kategori %}{% for k in data.kategori_pilihan %}{% if k.slug == data.kategori %}{{ k.label }}{% endif %}{% endfor %}{% else %}Semua kategori{% endif %}
+        · {% if data.akun %}{{ data.akun }}{% else %}semua rekening{% endif %}
+      </div>
+      <div class="angka {% if data.total < 0 %}min{% endif %} mono">{{ data.total|floatformat:0|intcomma }}</div>
+    </div>
+    <div class="ket">
+      <b>{{ data.jumlah|intcomma }}</b> baris ·
+      {% if dari == sampai %}{{ dari|date:"d/m/Y" }}{% else %}{{ dari|date:"d/m/Y" }}–{{ sampai|date:"d/m/Y" }}{% endif %}
+    </div>
+  </div>
+  {% if data.koreksi %}
+  <div class="msg warning" style="margin:14px 0 0;font-size:13px">
+    Sel ini <b>dikoreksi manual</b> di halaman Breakdown: yang tampil di sana
+    <b class="mono">{{ data.koreksi.nilai|floatformat:0|intcomma }}</b>, sedangkan isi aslinya
+    <b class="mono">{{ data.total|floatformat:0|intcomma }}</b> seperti daftar di bawah.
+    {% if data.koreksi.alasan %}Alasan: {{ data.koreksi.alasan }}.{% endif %}
+    {% if data.koreksi.catatan %} {{ data.koreksi.catatan }}{% endif %}
+    {% if data.koreksi.oleh %} — oleh {{ data.koreksi.oleh }}{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{% if not data.baris %}
+<div class="card reveal"><div class="cell-empty" style="padding:34px 12px;text-align:center">
+  Tidak ada baris FR yang cocok dengan pilihan ini.
+  <div class="faint" style="margin-top:6px;font-size:12.5px">
+    Rekening yang saldonya berjalan tapi tanpa mutasi pada rentang ini memang tidak punya baris —
+    angkanya tetap tampil di Breakdown sebagai saldo bawaan.</div>
+</div></div>
+{% else %}
+<div class="card pad0 reveal">
+  <div class="table-wrap" style="border:none">
+  <table class="selectable">
+    <thead><tr>
+      <th>Tanggal</th><th>Jam</th><th>FR Account</th><th>Kategori</th>
+      <th>Member</th><th>Keterangan</th><th class="num">Nominal</th><th class="num">Saldo Akhir</th>
+    </tr></thead>
+    <tbody>
+    {% for b in data.baris %}
+    <tr>
+      <td>{{ b.tanggal|date:"d/m/Y" }}</td>
+      <td class="mono">{{ b.jam }}</td>
+      <td>{{ b.account }}</td>
+      <td>{{ b.kategori_label }}</td>
+      <td>{{ b.member }}{% if not b.member and b.username %}<span class="faint">{{ b.username }}</span>{% endif %}</td>
+      <td>{{ b.keterangan }}</td>
+      <td class="num mono" {% if b.nominal < 0 %}style="color:var(--bad)"{% endif %}>{{ b.nominal|floatformat:0|intcomma }}</td>
+      <td class="num mono faint">{% if b.saldo is not None %}{{ b.saldo|floatformat:0|intcomma }}{% else %}·{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr>
+      <th colspan="6">Total {{ data.jumlah|intcomma }} baris</th>
+      <th class="num mono" {% if data.total < 0 %}style="color:var(--bad)"{% endif %}>{{ data.total|floatformat:0|intcomma }}</th>
+      <th></th>
+    </tr></tfoot>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+<p class="faint" style="margin:14px 2px 0;font-size:12.5px">
+  Angka di sini dihitung dengan aturan yang sama persis dengan halaman
+  <a href="{% url 'bracket_breakdown' %}?dari={{ dari|date:'Y-m-d' }}&amp;sampai={{ sampai|date:'Y-m-d' }}">Breakdown FR/Bracket</a>,
+  jadi jumlah tiap pilihan selalu sama dengan angka selnya di sana.
+</p>
+{% endblock %}

@@ -573,7 +573,9 @@ tr.htmx-swapping td{opacity:.35;transition:opacity .15s}
       <span class="lbl">FR/Bracket</span>
       <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
     </summary>
-    <a class="link sub {% if '/bracket' in p %}active{% endif %}" href="{% url 'bracket_breakdown' %}">Breakdown FR/Bracket</a>
+    {# Kondisi dipersempit: '/bracket' polos juga cocok '/bracket/detail/' → dua tautan menyala. #}
+    <a class="link sub {% if '/bracket' in p and '/bracket/detail' not in p %}active{% endif %}" href="{% url 'bracket_breakdown' %}">Breakdown FR/Bracket</a>
+    <a class="link sub {% if '/bracket/detail' in p %}active{% endif %}" href="{% url 'bracket_detail' %}">Detail FR/Bracket</a>
     <a class="link sub {% if '/hutang-piutang' in p %}active{% endif %}" href="{% url 'hutang_piutang' %}">Hutang/Piutang</a>
   </details>
   {% if is_admin_user %}
