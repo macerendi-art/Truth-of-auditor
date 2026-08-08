@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.16.0** · 26 rilis (1 besar, 16 fitur, 5 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.16.1** · 27 rilis (1 besar, 16 fitur, 6 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.16.1 — Angka pada Tombol Pilihan Kini Jujur
+*Perbaikan · 8 Agustus 2026*
+
+- **Angka kecil di tiap tombol pilihan halaman Detail FR/Bracket kini selalu sama dengan jumlah baris yang muncul saat tombol itu diklik.** Sebelumnya angkanya dihitung tanpa memperhatikan pilihan lain yang sedang aktif, sehingga tombol bertuliskan “Beban Admin Bank 95” bisa berujung hanya 2 baris begitu sebuah rekening ikut dipilih.
+- Tombol pilihan yang isinya nol kini disembunyikan — sebelumnya ia tetap tampil padahal hanya menuntun ke halaman kosong. Pilihan yang sedang aktif tetap ditampilkan meski hasilnya kosong, supaya tidak ada yang kehilangan jejak pilihannya sendiri.
+- Tombol **Semua** kini juga menyertakan jumlahnya, mengikuti aturan yang sama.
 
 ## v1.16.0 — Dari Angka Langsung ke Isinya
 *Rilis fitur · 8 Agustus 2026*

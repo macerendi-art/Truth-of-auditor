@@ -352,3 +352,109 @@ class TautanDariPanelKoreksiTest(_Basis):
 
         self.assertContains(r, "Tidak ada baris FR di sel ini")
         self.assertNotContains(r, "baris penyusunnya")
+
+
+class AngkaChipTest(_Basis):
+    """Janji tunggal: **angka di chip = jumlah baris yang muncul kalau diklik.**
+
+    Cacat v1.16.0 (dilaporkan end user): angka dihitung dari seluruh baris
+    in-range tanpa peduli filter lain yang aktif, sehingga chip "Beban Admin
+    Bank 95" berujung 2 baris begitu satu rekening dipilih.
+    """
+
+    A = "BANK BCA | ACHMAD DWI SYAHPUTRA | WITHDRAW"
+    B = "BANK BNI | SITI ULIYA | WITHDRAW"
+
+    def _isi(self):
+        self.fr(self.A, "Beban Admin Bank", "-2500", jam="03:07")
+        self.fr(self.A, "Beban Admin Bank", "-1000", jam="23:30")
+        self.fr(self.A, "Withdrawal", "-500000", jam="10:00")
+        self.fr(self.A, "Withdrawal", "-700000", jam="11:00")
+        self.fr(self.B, "Beban Admin Bank", "-1500", jam="09:00")
+        self.fr(self.B, "Deposit", "90000", jam="08:00")
+
+    def _n_akun(self, d, akun):
+        return next(a["n"] for a in d["akun_pilihan"] if a["account"] == akun)
+
+    def _n_kat(self, d, slug):
+        return next(k["n"] for k in d["kategori_pilihan"] if k["slug"] == slug)
+
+    def test_angka_chip_akun_menghormati_kategori_terpilih(self):
+        """Kasus persis dari laporan: kategori terpilih, chip akun harus
+        menunjukkan jumlah DALAM kategori itu — bukan seluruh baris akun."""
+        self._isi()
+        d = detail_fr(self.toko, date(2026, 8, 3), kategori="beban admin bank")
+
+        self.assertEqual(self._n_akun(d, self.A), 2)   # dulu: 4 (seluruh baris akun)
+        self.assertEqual(self._n_akun(d, self.B), 1)
+
+    def test_angka_chip_kategori_menghormati_akun_terpilih(self):
+        self._isi()
+        d = detail_fr(self.toko, date(2026, 8, 3), akun=self.A)
+
+        self.assertEqual(self._n_kat(d, "beban admin bank"), 2)  # dulu: 3 (semua akun)
+        self.assertEqual(self._n_kat(d, "withdrawal"), 2)
+
+    def test_setiap_chip_menepati_angkanya_kalau_diklik(self):
+        """Uji sifat menyeluruh: untuk SETIAP kombinasi filter dan SETIAP chip
+        yang tampil, mengklik chip itu harus menghasilkan tepat sekian baris."""
+        self._isi()
+        kombinasi = [
+            {}, {"akun": self.A}, {"akun": self.B},
+            {"kategori": "beban admin bank"}, {"kategori": "withdrawal"},
+            {"q": "0"}, {"akun": self.A, "q": "0"},
+        ]
+        diperiksa = 0
+        for kombo in kombinasi:
+            d = detail_fr(self.toko, date(2026, 8, 3), **kombo)
+            for a in d["akun_pilihan"]:
+                hasil = detail_fr(self.toko, date(2026, 8, 3),
+                                  **{**kombo, "akun": a["account"]})
+                self.assertEqual(hasil["jumlah"], a["n"],
+                                 f"chip akun {a['account']} pada {kombo}")
+                diperiksa += 1
+            for k in d["kategori_pilihan"]:
+                hasil = detail_fr(self.toko, date(2026, 8, 3),
+                                  **{**kombo, "kategori": k["slug"]})
+                self.assertEqual(hasil["jumlah"], k["n"],
+                                 f"chip kategori {k['slug']} pada {kombo}")
+                diperiksa += 1
+        self.assertGreaterEqual(diperiksa, 20, "sifat ini harus teruji pada banyak chip")
+
+    def test_chip_semua_juga_menepati_angkanya(self):
+        self._isi()
+        d = detail_fr(self.toko, date(2026, 8, 3), kategori="beban admin bank")
+
+        # "Semua" pada dimensi akun = melepas filter akun, filter lain tetap
+        self.assertEqual(d["n_akun_semua"],
+                         detail_fr(self.toko, date(2026, 8, 3),
+                                   kategori="beban admin bank")["jumlah"])
+        # "Semua" pada dimensi kategori = melepas filter kategori
+        self.assertEqual(d["n_kategori_semua"],
+                         detail_fr(self.toko, date(2026, 8, 3))["jumlah"])
+
+    def test_chip_nol_tidak_ditampilkan(self):
+        """Chip berjumlah 0 hanya menuntun ke halaman kosong."""
+        self._isi()
+        d = detail_fr(self.toko, date(2026, 8, 3), kategori="deposit")
+
+        self.assertNotIn(self.A, [a["account"] for a in d["akun_pilihan"]])
+        self.assertIn(self.B, [a["account"] for a in d["akun_pilihan"]])
+
+    def test_pilihan_aktif_tetap_tampil_walau_hasilnya_kosong(self):
+        """Kombinasi tanpa hasil tidak boleh membuat antarmuka kehilangan
+        jejak pilihannya sendiri."""
+        self._isi()
+        d = detail_fr(self.toko, date(2026, 8, 3), akun=self.A, kategori="deposit")
+
+        self.assertEqual(d["jumlah"], 0)
+        self.assertIn(self.A, [a["account"] for a in d["akun_pilihan"]])
+        self.assertIn("deposit", [k["slug"] for k in d["kategori_pilihan"]])
+
+    def test_pencarian_ikut_diperhitungkan_angka_chip(self):
+        self._isi()
+        d = detail_fr(self.toko, date(2026, 8, 3), q="tidak-ada-teks-ini")
+
+        self.assertEqual(d["akun_pilihan"], [])
+        self.assertEqual(d["kategori_pilihan"], [])
+        self.assertEqual(d["jumlah"], 0)

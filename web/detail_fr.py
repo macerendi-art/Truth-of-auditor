@@ -109,23 +109,33 @@ def detail_fr(toko, dari, sampai=None, akun="", kategori="", q=""):
     cari = " ".join(str(q or "").split()).lower()
 
     baris, total, akun_n, kategori_n = [], NOL, {}, {}
+    n_akun_semua = n_kategori_semua = 0
     for (pk, pd, delta, saldo, bank, kat, jam,
          member, username, keterangan) in rows:
         account = _norm_akun(bank)
         slug = _slug_kategori(kat)
-        # Pilihan filter dihitung dari SELURUH baris in-range, bukan dari hasil
-        # tersaring — kalau tidak, memilih satu akun akan melenyapkan akun lain
-        # dari daftarnya dan pemakai terkunci pada pilihannya sendiri.
-        akun_n[account] = akun_n.get(account, 0) + 1
-        kategori_n[slug] = kategori_n.get(slug, 0) + 1
 
-        if akun_pilih and account != akun_pilih:
-            continue
-        if kategori_pilih and slug != kategori_pilih:
-            continue
-        if cari and cari not in " ".join(
+        lolos_akun = not akun_pilih or account == akun_pilih
+        lolos_kategori = not kategori_pilih or slug == kategori_pilih
+        lolos_cari = not cari or cari in " ".join(
             filter(None, [str(keterangan or ""), str(member or ""), str(username or "")])
-        ).lower():
+        ).lower()
+
+        # Angka pada tiap chip dihitung SILANG: memperhitungkan filter lain yang
+        # sedang aktif, tapi mengabaikan pilihan dimensinya sendiri. Dengan begitu
+        # satu janji selalu ditepati — **angka di chip = jumlah baris yang muncul
+        # kalau chip itu diklik**. Versi sebelumnya menghitung dari seluruh baris
+        # in-range tanpa peduli filter lain, sehingga chip "Beban Admin Bank 95"
+        # bisa berujung 2 baris begitu satu rekening dipilih; itu membuat
+        # angkanya tak berarti apa-apa dan pemakai merasa dibohongi.
+        if lolos_kategori and lolos_cari:
+            akun_n[account] = akun_n.get(account, 0) + 1
+            n_akun_semua += 1
+        if lolos_akun and lolos_cari:
+            kategori_n[slug] = kategori_n.get(slug, 0) + 1
+            n_kategori_semua += 1
+
+        if not (lolos_akun and lolos_kategori and lolos_cari):
             continue
 
         delta = delta or NOL
@@ -154,6 +164,14 @@ def detail_fr(toko, dari, sampai=None, akun="", kategori="", q=""):
     if akun_pilih and kategori_pilih and dari == sampai:
         koreksi = _koreksi_sel(toko, dari, akun_pilih, kategori_pilih)
 
+    # Chip berjumlah 0 tidak ditampilkan: ia hanya menuntun ke halaman kosong.
+    # Pilihan yang SEDANG aktif selalu dipertahankan meski 0, supaya antarmuka
+    # tak pernah kehilangan jejak pilihannya sendiri.
+    if akun_pilih:
+        akun_n.setdefault(akun_pilih, 0)
+    if kategori_pilih:
+        kategori_n.setdefault(kategori_pilih, 0)
+
     return {
         "baris": baris,
         "total": total,
@@ -161,11 +179,15 @@ def detail_fr(toko, dari, sampai=None, akun="", kategori="", q=""):
         "akun_pilihan": [
             {"account": a, "n": n, "name": _pecah_akun(a)[0], "role": _pecah_akun(a)[1]}
             for a, n in sorted(akun_n.items(), key=lambda kv: kv[0])
+            if n or a == akun_pilih
         ],
         "kategori_pilihan": [
             {"slug": s, "label": label_kategori(s), "n": n}
             for s, n in sorted(kategori_n.items(), key=lambda kv: _urut_kategori(kv[0]))
+            if n or s == kategori_pilih
         ],
+        "n_akun_semua": n_akun_semua,
+        "n_kategori_semua": n_kategori_semua,
         "koreksi": koreksi,
         "dari": dari,
         "sampai": sampai,

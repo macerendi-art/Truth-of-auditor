@@ -119,6 +119,25 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.16.1",
+        tanggal=_dt.date(2026, 8, 8),
+        nama="Angka pada Tombol Pilihan Kini Jujur",
+        jenis=PATCH,
+        commit="",
+        sorotan=(
+            "**Angka kecil di tiap tombol pilihan halaman Detail FR/Bracket kini selalu "
+            "sama dengan jumlah baris yang muncul saat tombol itu diklik.** Sebelumnya "
+            "angkanya dihitung tanpa memperhatikan pilihan lain yang sedang aktif, sehingga "
+            "tombol bertuliskan “Beban Admin Bank 95” bisa berujung hanya 2 baris begitu "
+            "sebuah rekening ikut dipilih.",
+            "Tombol pilihan yang isinya nol kini disembunyikan — sebelumnya ia tetap tampil "
+            "padahal hanya menuntun ke halaman kosong. Pilihan yang sedang aktif tetap "
+            "ditampilkan meski hasilnya kosong, supaya tidak ada yang kehilangan jejak "
+            "pilihannya sendiri.",
+            "Tombol **Semua** kini juga menyertakan jumlahnya, mengikuti aturan yang sama.",
+        ),
+    ),
+    Rilis(
         versi="1.16.0",
         tanggal=_dt.date(2026, 8, 8),
         nama="Dari Angka Langsung ke Isinya",

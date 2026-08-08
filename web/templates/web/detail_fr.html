@@ -40,7 +40,7 @@
   <div class="field" style="margin:12px 0 0"><label>FR Account</label>
     <div class="pilih-bar">
       <a class="{% if not data.akun %}on{% endif %}"
-         href="?dari={{ dari|date:'Y-m-d' }}&amp;sampai={{ sampai|date:'Y-m-d' }}&amp;kategori={{ data.kategori|urlencode }}&amp;q={{ data.q|urlencode }}">Semua</a>
+         href="?dari={{ dari|date:'Y-m-d' }}&amp;sampai={{ sampai|date:'Y-m-d' }}&amp;kategori={{ data.kategori|urlencode }}&amp;q={{ data.q|urlencode }}">Semua <span class="n">{{ data.n_akun_semua }}</span></a>
       {% for a in data.akun_pilihan %}
       <a class="{% if data.akun == a.account %}on{% endif %}"
          href="?dari={{ dari|date:'Y-m-d' }}&amp;sampai={{ sampai|date:'Y-m-d' }}&amp;akun={{ a.account|urlencode }}&amp;kategori={{ data.kategori|urlencode }}&amp;q={{ data.q|urlencode }}">{{ a.account }} <span class="n">{{ a.n }}</span></a>
@@ -51,7 +51,7 @@
   <div class="field" style="margin:10px 0 0"><label>Kategori</label>
     <div class="pilih-bar">
       <a class="{% if not data.kategori %}on{% endif %}"
-         href="?dari={{ dari|date:'Y-m-d' }}&amp;sampai={{ sampai|date:'Y-m-d' }}&amp;akun={{ data.akun|urlencode }}&amp;q={{ data.q|urlencode }}">Semua</a>
+         href="?dari={{ dari|date:'Y-m-d' }}&amp;sampai={{ sampai|date:'Y-m-d' }}&amp;akun={{ data.akun|urlencode }}&amp;q={{ data.q|urlencode }}">Semua <span class="n">{{ data.n_kategori_semua }}</span></a>
       {% for k in data.kategori_pilihan %}
       <a class="{% if data.kategori == k.slug %}on{% endif %}"
          href="?dari={{ dari|date:'Y-m-d' }}&amp;sampai={{ sampai|date:'Y-m-d' }}&amp;akun={{ data.akun|urlencode }}&amp;kategori={{ k.slug|urlencode }}&amp;q={{ data.q|urlencode }}">{{ k.label }} <span class="n">{{ k.n }}</span></a>
