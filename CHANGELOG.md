@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.15.0** · 25 rilis (1 besar, 15 fitur, 5 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.16.0** · 26 rilis (1 besar, 16 fitur, 5 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.16.0 — Dari Angka Langsung ke Isinya
+*Rilis fitur · 8 Agustus 2026*
+
+- **Rincian sebuah angka kini bisa dibuka langsung dari selnya.** Klik angka di Control Bracket seperti biasa, dan pada panel yang muncul kini ada tautan “Lihat sekian baris penyusunnya” — tidak perlu lagi berpindah menu lalu memilih ulang rekening, kategori, dan tanggalnya.
+- Cara mengoreksi angka **tidak berubah sama sekali**: tetap satu klik, form yang sama, di tempat yang sama. Tautan rincian hanyalah tambahan di dalam panel itu, bukan langkah baru yang harus dilewati lebih dulu — mengoreksi adalah pekerjaan harian dan tidak boleh jadi lebih lambat demi keperluan yang sesekali.
+- Kolom **Saldo Awal** dan **Saldo Akhir** sengaja tidak diberi tautan. Keduanya adalah posisi saldo pada satu titik waktu, bukan hasil penjumlahan baris mana pun, sehingga menautkannya ke sebuah daftar transaksi justru akan menyesatkan.
 
 ## v1.15.0 — Detail FR/Bracket
 *Rilis fitur · 8 Agustus 2026*

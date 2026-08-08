@@ -6,6 +6,15 @@
     Nilai asli: <b class="mono">{% if asli is None %}—{% else %}{{ asli|floatformat:0|intcomma }}{% endif %}</b>
     {% if koreksi %} · koreksi aktif oleh <b>{{ koreksi.dibuat_oleh.username|default:"—" }}</b>{% endif %}
   </p>
+  {% if rincian %}
+  <p style="margin:-4px 0 12px;font-size:12.5px">
+    {% if rincian.n %}
+    <a href="{{ rincian.url }}">Lihat {{ rincian.n|intcomma }} baris penyusunnya →</a>
+    {% else %}
+    <span class="faint">Tidak ada baris FR di sel ini.</span>
+    {% endif %}
+  </p>
+  {% endif %}
   <form hx-post="{% url 'fr_koreksi_simpan' %}" hx-target="#fr-control" hx-swap="outerHTML">
     {% csrf_token %}
     <input type="hidden" name="date" value="{{ tanggal|date:'Y-m-d' }}">

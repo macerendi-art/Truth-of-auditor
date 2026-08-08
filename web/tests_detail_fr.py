@@ -284,3 +284,71 @@ class HalamanTest(_Basis):
         r = self.client.get(reverse("bracket_detail"))
 
         self.assertEqual(r.status_code, 200)
+
+
+class TautanDariPanelKoreksiTest(_Basis):
+    """Jalan pintas dari sel Control Bracket ke rinciannya.
+
+    Ditempatkan DI DALAM panel koreksi yang sudah terbuka, bukan sebagai menu
+    pilihan sebelum panel: koreksi adalah pekerjaan harian dan harus tetap satu
+    klik, sedangkan melihat rincian sifatnya sesekali."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.login(username="aud", password="pw12345")
+        self.client.post(reverse("set_toko"), {"toko_id": self.toko.id})
+        self.akun = "BANK BCA | IGNATIUS IVAN | WITHDRAW"
+
+    def _panel(self, kolom, akun=None):
+        return self.client.get(reverse("fr_koreksi_form"), {
+            "date": "2026-08-03", "account": akun or self.akun, "kolom": kolom,
+        })
+
+    def test_panel_menawarkan_tautan_rincian_dengan_jumlah_barisnya(self):
+        for n in ("-200000", "-150000", "-100000"):
+            self.fr(self.akun, "Adjustment", n)
+
+        r = self._panel("adjustment")
+
+        self.assertContains(r, "Lihat 3 baris penyusunnya")
+        self.assertContains(r, reverse("bracket_detail"))
+        self.assertContains(r, "kategori=adjustment")
+
+    def test_tautan_membawa_penyaring_yang_benar_dan_terenkode(self):
+        """Nama akun memuat spasi dan '|' — harus ter-encode, bukan memutus URL."""
+        self.fr(self.akun, "Adjustment", "-450000")
+
+        r = self._panel("adjustment")
+        html = r.content.decode()
+
+        self.assertIn("dari=2026-08-03", html)
+        self.assertIn("sampai=2026-08-03", html)
+        self.assertIn("akun=BANK%20BCA%20%7C%20IGNATIUS%20IVAN%20%7C%20WITHDRAW", html)
+
+    def test_form_koreksi_tetap_utuh_satu_klik(self):
+        """Kontrak lama: panel yang sama tetap memuat formnya — tautan rincian
+        adalah tambahan, bukan pengganti."""
+        self.fr(self.akun, "Adjustment", "-450000")
+
+        r = self._panel("adjustment")
+
+        self.assertContains(r, 'name="nilai"')
+        self.assertContains(r, "Simpan")
+        self.assertContains(r, reverse("fr_koreksi_simpan"))
+
+    def test_sel_saldo_tidak_dapat_tautan(self):
+        """Saldo awal/akhir bukan jumlah dari baris mana pun — menautkannya ke
+        daftar baris justru menyesatkan."""
+        self.fr(self.akun, "Deposit", "50000", saldo="100000")
+
+        for kolom in ("saldo_awal", "saldo_akhir"):
+            r = self._panel(kolom)
+            self.assertNotContains(r, "baris penyusunnya", msg_prefix=kolom)
+
+    def test_sel_kategori_kosong_menyebut_kosong_bukan_tautan_menyesatkan(self):
+        self.fr(self.akun, "Deposit", "50000")
+
+        r = self._panel("adjustment")
+
+        self.assertContains(r, "Tidak ada baris FR di sel ini")
+        self.assertNotContains(r, "baris penyusunnya")

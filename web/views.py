@@ -1,6 +1,7 @@
 import os
 import re
 import zipfile
+from urllib.parse import quote
 from datetime import date as date_cls, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -2091,10 +2092,24 @@ def fr_koreksi_form(request):
         return HttpResponseBadRequest("kolom tidak dikenal")
     koreksi = FRKoreksi.objects.filter(
         toko=active, tanggal=tanggal, account=account, kolom=kolom).first()
+    # Jalan pintas ke rinciannya DI DALAM panel yang sudah terbuka, bukan sebagai
+    # menu pilihan sebelum panel: koreksi adalah pekerjaan harian dan harus tetap
+    # satu klik; melihat rincian sifatnya sesekali. Saldo awal/akhir sengaja tak
+    # dapat tautan — keduanya angka posisi saldo, bukan jumlah dari baris mana pun.
+    rincian = None
+    if kolom not in _FR_KOLOM_SALDO:
+        d = hitung_detail_fr(active, tanggal, akun=account, kategori=kolom)
+        rincian = {
+            "n": d["jumlah"],
+            "url": (
+                f"{reverse('bracket_detail')}?dari={tanggal:%Y-%m-%d}"
+                f"&sampai={tanggal:%Y-%m-%d}&akun={quote(account)}&kategori={quote(kolom)}"
+            ),
+        }
     return render(request, "web/_fr_koreksi_form.html", {
         "tanggal": tanggal, "account": account, "kolom": kolom,
         "label": _fr_label_kolom(kolom),
-        "asli": asli,
+        "asli": asli, "rincian": rincian,
         "koreksi": koreksi, "pilihan_alasan": FRKoreksi.ALASAN_KOREKSI,
     })
 

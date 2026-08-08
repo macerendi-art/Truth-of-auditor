@@ -119,6 +119,26 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.16.0",
+        tanggal=_dt.date(2026, 8, 8),
+        nama="Dari Angka Langsung ke Isinya",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**Rincian sebuah angka kini bisa dibuka langsung dari selnya.** Klik angka di "
+            "Control Bracket seperti biasa, dan pada panel yang muncul kini ada tautan "
+            "“Lihat sekian baris penyusunnya” — tidak perlu lagi berpindah menu lalu "
+            "memilih ulang rekening, kategori, dan tanggalnya.",
+            "Cara mengoreksi angka **tidak berubah sama sekali**: tetap satu klik, form yang "
+            "sama, di tempat yang sama. Tautan rincian hanyalah tambahan di dalam panel itu, "
+            "bukan langkah baru yang harus dilewati lebih dulu — mengoreksi adalah pekerjaan "
+            "harian dan tidak boleh jadi lebih lambat demi keperluan yang sesekali.",
+            "Kolom **Saldo Awal** dan **Saldo Akhir** sengaja tidak diberi tautan. Keduanya "
+            "adalah posisi saldo pada satu titik waktu, bukan hasil penjumlahan baris mana "
+            "pun, sehingga menautkannya ke sebuah daftar transaksi justru akan menyesatkan.",
+        ),
+    ),
+    Rilis(
         versi="1.15.0",
         tanggal=_dt.date(2026, 8, 8),
         nama="Detail FR/Bracket",
