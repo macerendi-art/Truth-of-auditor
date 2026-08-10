@@ -119,6 +119,30 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.17.2",
+        tanggal=_dt.date(2026, 8, 10),
+        nama="QRIS ZPay Terbukti Cocok 69/69",
+        jenis=PATCH,
+        commit="",
+        sorotan=(
+            "**Laporan QRIS ZPay kini cocok penuh dengan panel.** Diuji pada berkas "
+            "asli 6 Agustus 2026: **69 dari 69 transaksi cocok** lewat nomor tiket — "
+            "nomor tiket, nomor pesanan, dan nominalnya sama persis, dan panel "
+            "menyetujuinya rata-rata 3 detik setelah pembayaran tercatat di ZPay. "
+            "Rekonsiliasi hari itu naik dari 641 menjadi **710 dari 724 transaksi**.",
+            "Penyebab sebelumnya: kolom status di laporan ZPay punya dua nilai yang "
+            "sama-sama berarti uang sungguhan — “paid” (sudah dibayar) dan “settled” "
+            "(dananya sudah cair) — sedangkan aplikasi hanya menerima yang pertama. "
+            "Seluruh isi berkas ikut terbuang tanpa pesan apa pun. Kini keduanya "
+            "diterima.",
+            "**Kegagalan diam-diam seperti itu tidak boleh terulang.** Bila sebuah "
+            "berkas ZPay berisi transaksi tetapi tak satu pun bisa dibaca, aplikasi "
+            "kini menolak berkasnya dan menyebutkan status apa yang ditemukannya — "
+            "jauh lebih baik daripada melaporkan “berhasil diunggah” padahal nol "
+            "baris masuk. Berkas yang memang kosong tetap diterima seperti biasa.",
+        ),
+    ),
+    Rilis(
         versi="1.17.1",
         tanggal=_dt.date(2026, 8, 10),
         nama="Koreksi Jam Laporan QRIS ZPay",

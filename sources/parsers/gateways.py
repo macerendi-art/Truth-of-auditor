@@ -133,9 +133,26 @@ class ZPayParser(BaseParser):
     `Nilai` = bruto yang dibayar pemain (= `Fee` + `Sub Total`, dijaga tes);
     panel mencatat bruto juga, jadi itu yang dipakai sebagai `amount`.
 
-    Hanya baris `Status == "paid"` diambil: QR yang dibuat tapi tak dibayar
-    bukan uang. Sampel pertama (06-08-2026, 48 baris) seragam "paid", jadi
-    penyaring ini ASUMSI yang belum teruji lawan data campuran.
+    **`Status` punya DUA nilai yang sama-sama berarti uang nyata: `paid` dan
+    `settled`** — satu daur hidup, bukan dua hal berbeda (`paid` = sudah
+    dibayar, dananya belum cair; `settled` = sudah cair, `Waktu Settled`-nya
+    sudah lewat). Keduanya terbukti: 69 baris `settled` sampel 06-08-2026
+    cocok dengan panel 69/69 pada tiket, Order ID, DAN nominal. Daftar putih
+    ini sengaja TIDAK ditebak-lebihkan ("success", "complete", dst.) — yang
+    menjaga dari nilai ketiga adalah penjaga nol-hasil di bawah, bukan daftar
+    yang dipanjangkan. Menyaring dengan daftar hitam justru berbahaya: status
+    asing yang lolos masuk MENGARANG uang di aplikasi rekonsiliasi, sementara
+    status asing yang tertahan setidaknya muncul sebagai baris panel tanpa
+    uang di kerja harian.
+
+    **Penjaga nol-hasil:** bila berkas memuat baris transaksi tapi tak satu
+    pun lolos, parser MELEMPAR — bukan mengembalikan daftar kosong. Versi
+    pertama menyaring `== "paid"` saja dan menelan bulat-bulat 69 baris
+    berstatus `settled`: berkas dilaporkan "berhasil diunggah" dengan nol
+    baris, kegagalan senyap yang sama persis dengan bug QR Flyer. Ini bukan
+    dugaan berbasis kebiasaan seperti `web/penjaga.py` (yang sengaja hanya
+    memperingatkan) melainkan kepastian — ada baris, tak ada hasil — jadi
+    memblokir memang tepat. Berkas tanpa baris transaksi tetap sah kosong.
 
     **Jam laporan ZETPAY adalah UTC, panel WIB — WAJIB digeser +7 jam.**
     Buktinya berlapis pada sampel 06-08-2026 dan tak punya penjelasan lain:
@@ -156,6 +173,7 @@ class ZPayParser(BaseParser):
 
     source_key = "gateway"
     UTC_KE_WIB = timedelta(hours=7)
+    STATUS_UANG = ("paid", "settled")
 
     @staticmethod
     def _username(order_id):
@@ -165,13 +183,17 @@ class ZPayParser(BaseParser):
     def parse(self, path, flow=""):
         with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
             rows = list(csv.DictReader(f))
-        out = []
+        out, kandidat, status_terlihat = [], 0, []
         for r in rows:
-            if str(r.get("Status", "") or "").strip().lower() != "paid":
-                continue
             order = str(r.get("Order ID", "") or "").strip()
             ticket = str(r.get("Tiket Number", "") or "").strip()
             if not order and not ticket:
+                continue  # judul/penutup, bukan baris transaksi
+            kandidat += 1
+            status = str(r.get("Status", "") or "").strip().lower()
+            if status not in status_terlihat:
+                status_terlihat.append(status)
+            if status not in self.STATUS_UANG:
                 continue
             amt = abs(parse_decimal(r.get("Nilai")))
             occurred = parse_dt(r.get("Paid At")) or parse_dt(r.get("Created At"))
@@ -197,6 +219,15 @@ class ZPayParser(BaseParser):
             }
             row["row_hash"] = row_hash("zpay", [order, ticket, amt])
             out.append(row)
+        if kandidat and not out:
+            raise ValueError(
+                "Berkas ZPay memuat %d baris transaksi tetapi tak satu pun "
+                "berstatus uang. Status yang ditemukan: %s. Status yang dikenal: "
+                "%s. Kemungkinan vendor mengganti penamaan status — laporkan ke "
+                "pengembang agar daftarnya ditambah."
+                % (kandidat, ", ".join(repr(s) for s in status_terlihat),
+                   ", ".join(self.STATUS_UANG))
+            )
         return out
 
 

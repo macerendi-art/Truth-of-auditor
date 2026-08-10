@@ -208,11 +208,39 @@ class ZPayTest(SimpleTestCase):
 
         self.assertEqual(r["username"], "budi-santoso")
 
-    def test_hanya_baris_paid(self):
+    def test_paid_DAN_settled_sama_sama_uang(self):
+        """Satu daur hidup: `paid` = dibayar, `settled` = dananya sudah cair.
+
+        Versi pertama hanya menerima "paid" dan menelan bulat-bulat 69 baris
+        "settled" berkas 06-08-2026 — yang justru terbukti cocok dgn panel 69/69.
+        """
         rows = self._parse([ZPAY,
                             _baris_zpay(ticket="D1", status="paid"),
-                            _baris_zpay(ticket="D2", status="pending"),
-                            _baris_zpay(ticket="D3", status="expired")])
+                            _baris_zpay(ticket="D2", status="settled"),
+                            _baris_zpay(ticket="D3", status="pending"),
+                            _baris_zpay(ticket="D4", status="expired")])
+
+        self.assertEqual([r["ticket_no"] for r in rows], ["D1", "D2"])
+
+    def test_semua_status_asing_MELEMPAR_bukan_diam(self):
+        """Kegagalan senyap adalah musuhnya: ada baris, tak ada hasil = salah."""
+        with self.assertRaises(ValueError) as ctx:
+            self._parse([ZPAY, _baris_zpay(ticket="D1", status="lunas"),
+                         _baris_zpay(ticket="D2", status="lunas")])
+
+        pesan = str(ctx.exception)
+        self.assertIn("2", pesan)            # berapa baris yang tertahan
+        self.assertIn("'lunas'", pesan)      # status yang ditemukan
+        self.assertIn("settled", pesan)      # status yang dikenal
+
+    def test_berkas_tanpa_baris_transaksi_sah_kosong(self):
+        """Hanya header (atau penutup) — bukan kegagalan, jangan melempar."""
+        self.assertEqual(self._parse([ZPAY]), [])
+
+    def test_sebagian_status_asing_tidak_melempar(self):
+        """Penjaga hanya berbunyi bila NOL hasil; campuran normal tetap lewat."""
+        rows = self._parse([ZPAY, _baris_zpay(ticket="D1", status="settled"),
+                            _baris_zpay(ticket="D2", status="lunas")])
 
         self.assertEqual([r["ticket_no"] for r in rows], ["D1"])
 
