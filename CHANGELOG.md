@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.16.1** · 27 rilis (1 besar, 16 fitur, 6 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.17.0** · 28 rilis (1 besar, 17 fitur, 6 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.17.0 — QRIS ZPay & Laporan Flyer Versi Vendor
+*Rilis fitur · 10 Agustus 2026*
+
+- **Laporan QR Flyer versi vendor kini terbaca kembali.** Sejak laporan itu tidak bisa diunduh sendiri dan harus diminta ke vendor, penamaan kolomnya berubah — isinya tetap sama, hanya nama kolomnya. Aplikasi kini mengenali kedua bentuk sekaligus, jadi berkas lama maupun baru sama-sama masuk. Diuji pada berkas asli 6 Agustus 2026: **120 dari 120 transaksi cocok dengan panel**.
+- Kegagalan sebelumnya memang sulit disadari: berkasnya tetap dilaporkan “berhasil diunggah”, tetapi nol baris masuk, karena aplikasi tidak menemukan satu pun kolom yang dikenalnya lalu menganggap seluruh isi berkas sebagai baris penutup. Kini berkas versi vendor dikenali langsung dari kolomnya, bukan sekadar dari nama file.
+- **Gateway QRIS baru — ZPay (ZETPAY) — kini didukung.** Nomor tiketnya dibaca sebagai kunci pencocokan utama, lengkap dengan nominal bruto, biaya, dan nama pemain yang diambil dari nomor pesanan. Catatan penting: pada berkas contoh pertama, seluruh tiket ZPay belum ditemukan di ekspor panel yang menyertainya, sehingga transaksinya akan tampil sebagai “uang tanpa panel” sampai ekspor panel yang memuatnya ikut diunggah.
 
 ## v1.16.1 — Angka pada Tombol Pilihan Kini Jujur
 *Perbaikan · 8 Agustus 2026*

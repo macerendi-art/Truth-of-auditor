@@ -96,6 +96,11 @@ def detect_source(path, filename=""):
             add("bracket", 0.95)
         if _has(t, "client reference") and (_has(t, "settlement time") or _has(t, "txn id")):
             add("qrflyer", 0.90)
+        # QR FLYER format vendor (snake_case, sejak Agustus 2026). Tanpa tanda
+        # tangan ini berkasnya cuma lolos lewat aturan nama-file berkeyakinan
+        # 0.85 — cukup untuk masuk, tapi tidak untuk dipercaya.
+        if _has(t, "client_reference") and _has(t, "total_amount"):
+            add("qrflyer", 0.95)
         if _has(t, "qris") or _has(t, "qr flyer") or "qrflyer" in fn or "qris" in fn or "qr flyer" in fn:
             add("qrflyer", 0.85)
         if _has(t, "e-statement") or _has(t, "rekening koran") or "mandiri" in fn:
@@ -123,6 +128,8 @@ def detect_source(path, filename=""):
             add("rpay_wd", 0.95)  # RafflesPay WD/disbursement (BBS/BO7)
         if "whitelabel transaction id" in c:
             add("qhoki", 0.95)  # sebagian brand ekspor laporan QRIS-HOKI sbg CSV
+        if "tiket number" in c and ("status settled" in c or "confirmed bot at" in c):
+            add("zpay", 0.95)  # QRIS ZPay/ZETPAY ("Tiket" memang ejaan aslinya)
     elif ext == ".pdf":
         key = _pdf_key(_pdf_text(path))
         add(key, 0.9 if key == "bni_pdf" else 0.75)

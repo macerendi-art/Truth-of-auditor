@@ -27,6 +27,7 @@ from .parsers.gateways import (
     NXPayParser,
     QRFlyerParser,
     QHokiParser,
+    ZPayParser,
     RPayGatewayParser,
     RPayWDGatewayParser,
     RPayDPXlsxParser,
@@ -54,6 +55,7 @@ PARSERS = {
     "rpay_xlsx": RPayDPXlsxParser,
     "rpay_wd_xlsx": RPayWDXlsxParser,
     "qhoki": QHokiParser,
+    "zpay": ZPayParser,
     "panel_bonus": PanelBonusParser,
     "bracket_bonus": BracketBonusParser,
 }

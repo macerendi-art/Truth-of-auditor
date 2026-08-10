@@ -46,17 +46,56 @@ class NXPayParser(BaseParser):
 
 
 class QRFlyerParser(BaseParser):
+    """QR FLYER — DUA format, dipilih per berkas dari headernya.
+
+    Sejak Agustus 2026 laporan Flyer tidak bisa diunduh sendiri lagi; operator
+    memintanya langsung ke vendor, dan yang datang memakai penamaan kolom
+    snake_case. Isinya sama, hanya berganti nama:
+
+        TXN ID                     -> transaction_id      (tiket panel, kunci join)
+        Client Reference           -> client_reference
+        Transaction Value          -> total_amount
+        Transaction Date           -> trans_date_time
+        Settlement Time            -> bot_success_time
+        Customer ID / User Account -> username
+        Payment Status             -> status
+
+    Kegagalannya dulu senyap dan itu yang bikin bingung: deteksi tetap mengenali
+    berkasnya sebagai `qrflyer` lewat nama file, lalu parser lama tak menemukan
+    `TXN ID` MAUPUN `Client Reference` di baris mana pun sehingga SEMUA baris
+    dianggap footer dan dilewati — berkas "berhasil" diunggah dengan 0 baris.
+
+    `row_hash` sengaja memakai resep yang SAMA untuk kedua format (nilainya
+    identik), supaya berkas yang sama diekspor ulang dalam format baru tetap
+    terdeteksi duplikat terhadap unggahan format lama.
+    """
+
     source_key = "gateway"
 
+    #: nama kolom lama -> nama kolom format baru
+    _BARU = {
+        "TXN ID": "transaction_id",
+        "Client Reference": "client_reference",
+        "Transaction Value": "total_amount",
+        "Transaction Date": "trans_date_time",
+        "Settlement Time": "bot_success_time",
+        "Customer ID / User Account": "username",
+        "Payment Status": "status",
+    }
+
     def parse(self, path, flow=""):
-        _, rows = read_xlsx_rows(path, header_row=1)
+        header, rows = read_xlsx_rows(path, header_row=1)
+        # Format ditentukan dari header BERKAS, bukan per baris: berkas campuran
+        # tidak ada, dan menebak per baris hanya menyembunyikan berkas rusak.
+        baru = "transaction_id" in (header or []) and "TXN ID" not in (header or [])
+        kol = (lambda nama: self._BARU[nama]) if baru else (lambda nama: nama)
         out = []
         for r in rows:
-            amt = abs(parse_decimal(r.get("Transaction Value")))
-            occurred = parse_dt(r.get("Transaction Date"))
-            settle = parse_dt(r.get("Settlement Time"))
-            ticket = str(r.get("TXN ID", "") or "").strip()
-            ref = str(r.get("Client Reference", "") or "").strip()
+            amt = abs(parse_decimal(r.get(kol("Transaction Value"))))
+            occurred = parse_dt(r.get(kol("Transaction Date")))
+            settle = parse_dt(r.get(kol("Settlement Time")))
+            ticket = str(r.get(kol("TXN ID"), "") or "").strip()
+            ref = str(r.get(kol("Client Reference"), "") or "").strip()
             if not ticket and not ref:  # skip footer/total
                 continue
             row = {
@@ -71,13 +110,75 @@ class QRFlyerParser(BaseParser):
                 "bonus": Decimal("0"),
                 "balance_after": None,
                 "ticket_no": ticket,
-                "username": str(r.get("Customer ID / User Account", "") or "").strip(),
+                "username": str(r.get(kol("Customer ID / User Account"), "") or "").strip(),
                 "reference": ref,
                 "counterparty": "",
-                "description": f"QRFLYER {r.get('Payment Status','')}".strip(),
+                "description": f"QRFLYER {r.get(kol('Payment Status'), '')}".strip(),
                 "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
             }
             row["row_hash"] = row_hash("qrflyer", [ticket, ref, amt])
+            out.append(row)
+        return out
+
+
+class ZPayParser(BaseParser):
+    """QRIS ZPay / ZETPAY (CSV) — gateway QRIS baru, panel Nexus (mis. M25).
+
+    Kunci exact: kolom `Tiket Number` (D…) = Ticket Number panel → pass 0.
+    `Order ID` berpola ``<BRAND>-<username>-<acak>``; username diambil dari
+    segmen TENGAH — digabung kembali, bukan `split("-")[1]`, karena username
+    boleh memuat tanda hubung.
+
+    `Nilai` = bruto yang dibayar pemain (= `Fee` + `Sub Total`, dijaga tes);
+    panel mencatat bruto juga, jadi itu yang dipakai sebagai `amount`.
+
+    Hanya baris `Status == "paid"` diambil: QR yang dibuat tapi tak dibayar
+    bukan uang. Sampel pertama (06-08-2026, 48 baris) seragam "paid", jadi
+    penyaring ini ASUMSI yang belum teruji lawan data campuran.
+
+    Belum ada sampel WD — `flow` tetap dihormati (arah `money_delta`), tapi
+    jalur itu belum pernah diuji dengan berkas nyata.
+    """
+
+    source_key = "gateway"
+
+    @staticmethod
+    def _username(order_id):
+        bagian = str(order_id or "").split("-")
+        return "-".join(bagian[1:-1]).strip() if len(bagian) >= 3 else ""
+
+    def parse(self, path, flow=""):
+        with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+            rows = list(csv.DictReader(f))
+        out = []
+        for r in rows:
+            if str(r.get("Status", "") or "").strip().lower() != "paid":
+                continue
+            order = str(r.get("Order ID", "") or "").strip()
+            ticket = str(r.get("Tiket Number", "") or "").strip()
+            if not order and not ticket:
+                continue
+            amt = abs(parse_decimal(r.get("Nilai")))
+            occurred = parse_dt(r.get("Paid At")) or parse_dt(r.get("Created At"))
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date() if occurred else None,
+                "jenis": "wd" if flow == "wd" else "depo",
+                "amount": amt,
+                "credit_delta": Decimal("0"),
+                "money_delta": _money(amt, flow),
+                "fee": parse_decimal(r.get("Fee")),
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": ticket,
+                "username": self._username(order),
+                "reference": order,
+                "counterparty": "",
+                "description": f"ZPAY {r.get('Payment Method','')} {r.get('RRN','')}".strip(),
+                "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
+            }
+            row["row_hash"] = row_hash("zpay", [order, ticket, amt])
             out.append(row)
         return out
 

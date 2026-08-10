@@ -119,6 +119,30 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.17.0",
+        tanggal=_dt.date(2026, 8, 10),
+        nama="QRIS ZPay & Laporan Flyer Versi Vendor",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**Laporan QR Flyer versi vendor kini terbaca kembali.** Sejak laporan itu tidak "
+            "bisa diunduh sendiri dan harus diminta ke vendor, penamaan kolomnya berubah — "
+            "isinya tetap sama, hanya nama kolomnya. Aplikasi kini mengenali kedua bentuk "
+            "sekaligus, jadi berkas lama maupun baru sama-sama masuk. Diuji pada berkas asli "
+            "6 Agustus 2026: **120 dari 120 transaksi cocok dengan panel**.",
+            "Kegagalan sebelumnya memang sulit disadari: berkasnya tetap dilaporkan “berhasil "
+            "diunggah”, tetapi nol baris masuk, karena aplikasi tidak menemukan satu pun kolom "
+            "yang dikenalnya lalu menganggap seluruh isi berkas sebagai baris penutup. Kini "
+            "berkas versi vendor dikenali langsung dari kolomnya, bukan sekadar dari nama file.",
+            "**Gateway QRIS baru — ZPay (ZETPAY) — kini didukung.** Nomor tiketnya dibaca "
+            "sebagai kunci pencocokan utama, lengkap dengan nominal bruto, biaya, dan nama "
+            "pemain yang diambil dari nomor pesanan. Catatan penting: pada berkas contoh "
+            "pertama, seluruh tiket ZPay belum ditemukan di ekspor panel yang menyertainya, "
+            "sehingga transaksinya akan tampil sebagai “uang tanpa panel” sampai ekspor panel "
+            "yang memuatnya ikut diunggah.",
+        ),
+    ),
+    Rilis(
         versi="1.16.1",
         tanggal=_dt.date(2026, 8, 8),
         nama="Angka pada Tombol Pilihan Kini Jujur",
