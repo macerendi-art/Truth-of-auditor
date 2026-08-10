@@ -1,5 +1,6 @@
 """Parser gateway pembayaran (sumber UANG, setara bank): NXPAY, QR FLYER, QHOKI, RPAY."""
 import csv
+from datetime import timedelta
 from decimal import Decimal
 
 from .base import BaseParser, parse_decimal, parse_dt, read_xlsx_grid, read_xlsx_rows, row_hash
@@ -136,11 +137,25 @@ class ZPayParser(BaseParser):
     bukan uang. Sampel pertama (06-08-2026, 48 baris) seragam "paid", jadi
     penyaring ini ASUMSI yang belum teruji lawan data campuran.
 
+    **Jam laporan ZETPAY adalah UTC, panel WIB — WAJIB digeser +7 jam.**
+    Buktinya berlapis pada sampel 06-08-2026 dan tak punya penjelasan lain:
+    panel yang mencakup penuh 06-Agu berisi 69 baris QRISZPAY dan NOL dari 48
+    `Order ID` berkas ini; blok tiketnya terputus rapi dan bersambung (panel
+    berhenti D770354, berkas mulai D770355) padahal tiket panel dipakai
+    bersama semua kanal; dan setelah digeser +7 jam D770355 jatuh 1 menit 44
+    detik setelah D770354 — sedangkan tanpa geseran ia mendahuluinya 7 jam.
+    Tiket pun naik monoton mengikuti `Created At` (1 inversi sedetik dari 47
+    pasang). Tanpa koreksi ini uangnya tercatat 7 jam lebih awal daripada
+    kreditnya, sehingga jendela tanggal berarah engine (uang >= kredit)
+    MEMBLOKIR pasangannya — bukan sekadar salah hari. `raw` sengaja menyimpan
+    nilai asli vendor; yang digeser hanya `occurred_at`/`posted_date`.
+
     Belum ada sampel WD — `flow` tetap dihormati (arah `money_delta`), tapi
     jalur itu belum pernah diuji dengan berkas nyata.
     """
 
     source_key = "gateway"
+    UTC_KE_WIB = timedelta(hours=7)
 
     @staticmethod
     def _username(order_id):
@@ -160,6 +175,8 @@ class ZPayParser(BaseParser):
                 continue
             amt = abs(parse_decimal(r.get("Nilai")))
             occurred = parse_dt(r.get("Paid At")) or parse_dt(r.get("Created At"))
+            if occurred:
+                occurred += self.UTC_KE_WIB  # lihat docstring: laporan vendor UTC
             row = {
                 "source_type": "gateway",
                 "occurred_at": occurred,

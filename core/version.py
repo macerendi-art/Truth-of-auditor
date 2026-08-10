@@ -119,6 +119,29 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.17.1",
+        tanggal=_dt.date(2026, 8, 10),
+        nama="Koreksi Jam Laporan QRIS ZPay",
+        jenis=PATCH,
+        commit="",
+        sorotan=(
+            "**Jam pada laporan QRIS ZPay ternyata memakai waktu GMT+0, bukan waktu "
+            "Indonesia Barat.** Aplikasi kini menggesernya 7 jam saat berkas dibaca, "
+            "sehingga setiap transaksi tercatat pada hari dan jam yang sebenarnya. "
+            "Salinan mentah dari vendor tetap disimpan apa adanya untuk keperluan audit.",
+            "Tanpa koreksi ini setoran akan tercatat 7 jam lebih awal daripada catatan "
+            "panelnya sendiri — dan karena aplikasi menolak memasangkan uang yang "
+            "seolah masuk sebelum transaksinya terjadi, pasangannya tidak akan pernah "
+            "ketemu meskipun nomor tiketnya sama persis. Perbaikan ini terbit sebelum "
+            "berkas ZPay pertama diunggah, jadi tidak ada data lama yang perlu diperbaiki.",
+            "Temuan ini sekaligus menjelaskan berkas contoh 6 Agustus 2026: isinya "
+            "sesungguhnya transaksi dini hari **7 Agustus** (00:01–06:52 WIB), bukan "
+            "6 Agustus. Laporan ZPay untuk tanggal 6 Agustus sendiri belum pernah "
+            "dikirim vendor, sehingga masih perlu diminta ulang dengan rentang waktu "
+            "Indonesia yang disebutkan tegas.",
+        ),
+    ),
+    Rilis(
         versi="1.17.0",
         tanggal=_dt.date(2026, 8, 10),
         nama="QRIS ZPay & Laporan Flyer Versi Vendor",

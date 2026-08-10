@@ -8,6 +8,13 @@ Kegagalan Flyer itu SENYAP dan itu bagian terburuknya: deteksi tetap mengenali
 berkasnya lewat nama file, parser lama tak menemukan satu pun kolom yang
 dikenalnya, lalu menganggap SEMUA baris sebagai footer — berkas "berhasil"
 diunggah dengan 0 baris. Tes di bawah mengunci kedua format hidup berdampingan.
+
+Sisi ZPay menyimpan kegagalan senyap kedua: jam laporan vendor ternyata UTC
+sedangkan seluruh aplikasi ini WIB naif. Sampel pertama sempat terbaca seolah
+tiketnya tak ada di berkas mana pun — padahal isinya memang milik hari
+BERIKUTNYA, dan tanpa geseran +7 jam uangnya tercatat mendahului kreditnya
+sehingga jendela tanggal berarah engine memblokir pasangannya. Kelas
+`ZPayTest` mengunci geseran itu pada nilai batas berkas nyata.
 """
 import csv
 import os
@@ -56,8 +63,9 @@ def _baris_baru(ticket="D769946", ref="A260806119200001624", user="maxwin255",
 
 
 def _baris_zpay(ticket="D770434", order="M25-Pawanghujan7-2wltt1fd501yb",
-                nilai="25000", fee="300", sub="24700", status="paid"):
-    return ["2026-08-06 23:52:05", "2026-08-06 23:52:24", order, "QRIS", "M25",
+                nilai="25000", fee="300", sub="24700", status="paid",
+                created="2026-08-06 23:52:05", paid="2026-08-06 23:52:24"):
+    return [created, paid, order, "QRIS", "M25",
             "190384043890", ticket, "87f032b0-5573-45a6", nilai, fee, sub,
             "2026-08-06 23:52:27", status, "ZETPAY", "embed", "Settled",
             "2026-08-08 09:00:00"]
@@ -159,7 +167,36 @@ class ZPayTest(SimpleTestCase):
         self.assertEqual(r["reference"], "M25-Pawanghujan7-2wltt1fd501yb")
         self.assertEqual(str(r["amount"]), "25000")                 # bruto, spt panel
         self.assertEqual(str(r["fee"]), "300")
-        self.assertEqual(r["occurred_at"].strftime("%H:%M:%S"), "23:52:24")  # Paid At
+        # Paid At 23:52:24 UTC -> 06:52:24 WIB keesokan harinya.
+        self.assertEqual(str(r["occurred_at"]), "2026-08-07 06:52:24")
+
+    def test_batas_hari_nyata_utc_ke_wib(self):
+        """Baris PERTAMA berkas nyata 06-08-2026: tiket D770355 @ 17:01:23.
+
+        Panel berhenti di D770354 @ 06-Agu 23:59:39 WIB. Hanya dengan geseran
+        +7 jam tiket berikutnya jatuh SESUDAHNYA (00:01:23, selisih 1m44d);
+        tanpa geseran ia mendahului pendahulunya 7 jam — mustahil.
+        """
+        r = self._parse([ZPAY, _baris_zpay(ticket="D770355",
+                                           created="2026-08-06 17:00:01",
+                                           paid="2026-08-06 17:01:23")])[0]
+
+        self.assertEqual(str(r["occurred_at"]), "2026-08-07 00:01:23")
+        self.assertEqual(str(r["posted_date"]), "2026-08-07")   # ikut hari WIB
+
+    def test_raw_menyimpan_jam_asli_vendor(self):
+        """Jejak audit: yang digeser hanya kolom kanonik, bukan salinan mentah."""
+        r = self._parse([ZPAY, _baris_zpay()])[0]
+
+        self.assertEqual(r["raw"]["Paid At"], "2026-08-06 23:52:24")
+
+    def test_row_hash_tak_terpengaruh_jam(self):
+        """`row_hash` tak memuat waktu — kalau memuat, koreksi zona waktu ini
+        akan membuat berkas yang sama terhitung dua kali."""
+        a = self._parse([ZPAY, _baris_zpay(paid="2026-08-06 17:01:23")])[0]
+        b = self._parse([ZPAY, _baris_zpay(paid="2026-08-06 23:52:24")])[0]
+
+        self.assertEqual(a["row_hash"], b["row_hash"])
 
     def test_username_dari_order_id(self):
         r = self._parse([ZPAY, _baris_zpay()])[0]

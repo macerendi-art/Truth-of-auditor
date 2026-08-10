@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.17.0** · 28 rilis (1 besar, 17 fitur, 6 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.17.1** · 29 rilis (1 besar, 17 fitur, 7 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.17.1 — Koreksi Jam Laporan QRIS ZPay
+*Perbaikan · 10 Agustus 2026*
+
+- **Jam pada laporan QRIS ZPay ternyata memakai waktu GMT+0, bukan waktu Indonesia Barat.** Aplikasi kini menggesernya 7 jam saat berkas dibaca, sehingga setiap transaksi tercatat pada hari dan jam yang sebenarnya. Salinan mentah dari vendor tetap disimpan apa adanya untuk keperluan audit.
+- Tanpa koreksi ini setoran akan tercatat 7 jam lebih awal daripada catatan panelnya sendiri — dan karena aplikasi menolak memasangkan uang yang seolah masuk sebelum transaksinya terjadi, pasangannya tidak akan pernah ketemu meskipun nomor tiketnya sama persis. Perbaikan ini terbit sebelum berkas ZPay pertama diunggah, jadi tidak ada data lama yang perlu diperbaiki.
+- Temuan ini sekaligus menjelaskan berkas contoh 6 Agustus 2026: isinya sesungguhnya transaksi dini hari **7 Agustus** (00:01–06:52 WIB), bukan 6 Agustus. Laporan ZPay untuk tanggal 6 Agustus sendiri belum pernah dikirim vendor, sehingga masih perlu diminta ulang dengan rentang waktu Indonesia yang disebutkan tegas.
 
 ## v1.17.0 — QRIS ZPay & Laporan Flyer Versi Vendor
 *Rilis fitur · 10 Agustus 2026*
