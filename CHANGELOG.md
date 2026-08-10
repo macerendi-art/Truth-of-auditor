@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.17.2** · 30 rilis (1 besar, 17 fitur, 8 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.17.3** · 31 rilis (1 besar, 17 fitur, 9 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.17.3 — Laporan QR Flyer Bentuk Ketiga & Penjaga Kolom
+*Perbaikan · 10 Agustus 2026*
+
+- **Laporan QR Flyer bentuk ketiga kini terbaca penuh.** Vendor kembali mengganti penamaan kolom (`Transaction Id`, `Amount`, `Callback`), dan bentuk ini dipakai beberapa brand sejak awal Agustus. Diuji pada berkas asli HKW 1 Agustus 2026: **1.518 dari 1.519 transaksi cocok** lewat nomor tiket — satu sisanya memang tidak ada di panel.
+- Kegagalan sebelumnya jauh lebih berbahaya daripada sekadar tidak terbaca: berkasnya **masuk**, tetapi seluruh isinya kosong — tanpa nomor tiket, nominal Rp0, tanpa tanggal. Data yang mengaku data. Akibatnya deposit QRIS Flyer tampak tidak punya uang masuk sama sekali; pada satu batch saja 1.517 transaksi tertahan di daftar “Tidak Cocok”.
+- **Kolom kini dikenali dari daftar nama yang mungkin, bukan satu bentuk tetap** — jadi penggantian nama berikutnya tidak otomatis merusak. Dan bila kolom nomor tiket atau nominal benar-benar tidak ditemukan, aplikasi **menolak berkasnya** sambil menyebutkan kolom apa saja yang ada di dalamnya, alih-alih memasukkan baris kosong diam-diam.
 
 ## v1.17.2 — QRIS ZPay Terbukti Cocok 69/69
 *Perbaikan · 10 Agustus 2026*

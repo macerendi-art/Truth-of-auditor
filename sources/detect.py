@@ -101,6 +101,11 @@ def detect_source(path, filename=""):
         # 0.85 — cukup untuk masuk, tapi tidak untuk dipercaya.
         if _has(t, "client_reference") and _has(t, "total_amount"):
             add("qrflyer", 0.95)
+        # QR FLYER bentuk ketiga (RRN/Transaction Id/Callback, Agustus 2026).
+        # Tak bentrok: rpay_xlsx menuntut "payment gateway" + "amount (chip)",
+        # cor_panel_qris menuntut "requested date" — ketiganya absen di sini.
+        if _has(t, "client reference") and _has(t, "rrn") and _has(t, "callback"):
+            add("qrflyer", 0.95)
         if _has(t, "qris") or _has(t, "qr flyer") or "qrflyer" in fn or "qris" in fn or "qr flyer" in fn:
             add("qrflyer", 0.85)
         if _has(t, "e-statement") or _has(t, "rekening koran") or "mandiri" in fn:

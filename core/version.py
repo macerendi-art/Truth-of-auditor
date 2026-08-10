@@ -119,6 +119,30 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.17.3",
+        tanggal=_dt.date(2026, 8, 10),
+        nama="Laporan QR Flyer Bentuk Ketiga & Penjaga Kolom",
+        jenis=PATCH,
+        commit="",
+        sorotan=(
+            "**Laporan QR Flyer bentuk ketiga kini terbaca penuh.** Vendor kembali "
+            "mengganti penamaan kolom (`Transaction Id`, `Amount`, `Callback`), dan "
+            "bentuk ini dipakai beberapa brand sejak awal Agustus. Diuji pada berkas "
+            "asli HKW 1 Agustus 2026: **1.518 dari 1.519 transaksi cocok** lewat nomor "
+            "tiket — satu sisanya memang tidak ada di panel.",
+            "Kegagalan sebelumnya jauh lebih berbahaya daripada sekadar tidak terbaca: "
+            "berkasnya **masuk**, tetapi seluruh isinya kosong — tanpa nomor tiket, "
+            "nominal Rp0, tanpa tanggal. Data yang mengaku data. Akibatnya deposit "
+            "QRIS Flyer tampak tidak punya uang masuk sama sekali; pada satu batch "
+            "saja 1.517 transaksi tertahan di daftar “Tidak Cocok”.",
+            "**Kolom kini dikenali dari daftar nama yang mungkin, bukan satu bentuk "
+            "tetap** — jadi penggantian nama berikutnya tidak otomatis merusak. Dan "
+            "bila kolom nomor tiket atau nominal benar-benar tidak ditemukan, "
+            "aplikasi **menolak berkasnya** sambil menyebutkan kolom apa saja yang "
+            "ada di dalamnya, alih-alih memasukkan baris kosong diam-diam.",
+        ),
+    ),
+    Rilis(
         versi="1.17.2",
         tanggal=_dt.date(2026, 8, 10),
         nama="QRIS ZPay Terbukti Cocok 69/69",

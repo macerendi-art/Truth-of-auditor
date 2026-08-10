@@ -47,56 +47,83 @@ class NXPayParser(BaseParser):
 
 
 class QRFlyerParser(BaseParser):
-    """QR FLYER — DUA format, dipilih per berkas dari headernya.
+    """QR FLYER — TIGA bentuk header, dipetakan lewat daftar alias.
 
-    Sejak Agustus 2026 laporan Flyer tidak bisa diunduh sendiri lagi; operator
-    memintanya langsung ke vendor, dan yang datang memakai penamaan kolom
-    snake_case. Isinya sama, hanya berganti nama:
+    Vendornya mengganti penamaan kolom berulang kali sejak Agustus 2026, jadi
+    kolom dikenali dari DAFTAR nama yang mungkin, bukan dua cabang mati:
 
-        TXN ID                     -> transaction_id      (tiket panel, kunci join)
-        Client Reference           -> client_reference
-        Transaction Value          -> total_amount
-        Transaction Date           -> trans_date_time
-        Settlement Time            -> bot_success_time
-        Customer ID / User Account -> username
-        Payment Status             -> status
+        tiket panel  : TXN ID | transaction_id | Transaction Id
+        referensi    : Client Reference | client_reference
+        pemain       : Customer ID / User Account | username | Username
+        nominal      : Transaction Value | total_amount | Amount
+        waktu buat   : Transaction Date | trans_date_time | Created At
+        waktu settle : Settlement Time | bot_success_time | Callback
 
-    Kegagalannya dulu senyap dan itu yang bikin bingung: deteksi tetap mengenali
-    berkasnya sebagai `qrflyer` lewat nama file, lalu parser lama tak menemukan
-    `TXN ID` MAUPUN `Client Reference` di baris mana pun sehingga SEMUA baris
-    dianggap footer dan dilewati — berkas "berhasil" diunggah dengan 0 baris.
+    Ketiga bentuk memakai jam WIB — dibuktikan pada bentuk ketiga (HKW
+    01-08-2026): `Created At` merentang penuh 00:00:36–23:59:45 dan panel
+    menyetujui median 4 detik setelah `Callback`. Tak ada geseran, tidak
+    seperti ZPay.
 
-    `row_hash` sengaja memakai resep yang SAMA untuk kedua format (nilainya
-    identik), supaya berkas yang sama diekspor ulang dalam format baru tetap
-    terdeteksi duplikat terhadap unggahan format lama.
+    **Penjaga header:** bila kolom tiket ATAU nominal tak ditemukan, parser
+    MELEMPAR sambil menyebut header yang benar-benar ada. Ini pelajaran mahal
+    dan bentuknya berbeda dari penjaga nol-hasil ZPay: bentuk ketiga tetap
+    punya `Client Reference`, jadi baris TIDAK dilewati sebagai footer —
+    parser menghasilkan 1.519 baris LENGKAP tapi kosong melompong (tiket ''),
+    nominal Rp0, tanpa tanggal. Sampah yang lolos jauh lebih berbahaya
+    daripada nol baris: ia mengaku data. Lima unggahan di empat toko sudah
+    terlanjur memasukkan 6.118 baris seperti itu ke produksi (untung inert —
+    nol terpakai batch, nol hasil pencocokan) sebelum ini ketahuan.
+
+    `row_hash` sengaja memakai resep yang SAMA untuk semua bentuk (nilainya
+    identik), supaya berkas yang sama diekspor ulang dalam bentuk lain tetap
+    terdeteksi duplikat terhadap unggahan sebelumnya.
     """
 
     source_key = "gateway"
 
-    #: nama kolom lama -> nama kolom format baru
-    _BARU = {
-        "TXN ID": "transaction_id",
-        "Client Reference": "client_reference",
-        "Transaction Value": "total_amount",
-        "Transaction Date": "trans_date_time",
-        "Settlement Time": "bot_success_time",
-        "Customer ID / User Account": "username",
-        "Payment Status": "status",
+    #: bidang kanonik -> nama kolom yang mungkin dipakai vendor, urut prioritas
+    _ALIAS = {
+        "ticket": ("TXN ID", "transaction_id", "Transaction Id"),
+        "ref": ("Client Reference", "client_reference"),
+        "username": ("Customer ID / User Account", "username", "Username"),
+        "amount": ("Transaction Value", "total_amount", "Amount"),
+        "created": ("Transaction Date", "trans_date_time", "Created At"),
+        "settled": ("Settlement Time", "bot_success_time", "Callback"),
+        "status": ("Payment Status", "status"),
+        "fee": ("Fee",),
     }
+    #: tanpa kedua ini berkasnya bukan laporan Flyer yang bisa dipercaya
+    _WAJIB = ("ticket", "amount")
+
+    @classmethod
+    def _petakan(cls, header):
+        """{bidang kanonik: nama kolom nyata} untuk yang ketemu di header."""
+        ada = [h for h in (header or []) if h]
+        return {bidang: next((n for n in nama if n in ada), None)
+                for bidang, nama in cls._ALIAS.items()}
 
     def parse(self, path, flow=""):
         header, rows = read_xlsx_rows(path, header_row=1)
-        # Format ditentukan dari header BERKAS, bukan per baris: berkas campuran
-        # tidak ada, dan menebak per baris hanya menyembunyikan berkas rusak.
-        baru = "transaction_id" in (header or []) and "TXN ID" not in (header or [])
-        kol = (lambda nama: self._BARU[nama]) if baru else (lambda nama: nama)
+        peta = self._petakan(header)
+        hilang = [b for b in self._WAJIB if not peta[b]]
+        if hilang:
+            raise ValueError(
+                "Laporan QR Flyer tak dikenali: kolom %s tidak ditemukan. "
+                "Header berkas: %s. Kolom yang dikenal untuk %s. Kirimkan "
+                "berkasnya ke pengembang agar bentuk barunya ditambahkan."
+                % (" dan ".join(hilang),
+                   ", ".join(repr(h) for h in (header or []) if h) or "(kosong)",
+                   "; ".join("%s = %s" % (b, "/".join(self._ALIAS[b]))
+                             for b in self._WAJIB))
+            )
+        kol = lambda bidang: peta[bidang] or "\x00"  # noqa: E731 - kolom absen = selalu None
         out = []
         for r in rows:
-            amt = abs(parse_decimal(r.get(kol("Transaction Value"))))
-            occurred = parse_dt(r.get(kol("Transaction Date")))
-            settle = parse_dt(r.get(kol("Settlement Time")))
-            ticket = str(r.get(kol("TXN ID"), "") or "").strip()
-            ref = str(r.get(kol("Client Reference"), "") or "").strip()
+            amt = abs(parse_decimal(r.get(kol("amount"))))
+            occurred = parse_dt(r.get(kol("created")))
+            settle = parse_dt(r.get(kol("settled")))
+            ticket = str(r.get(kol("ticket"), "") or "").strip()
+            ref = str(r.get(kol("ref"), "") or "").strip()
             if not ticket and not ref:  # skip footer/total
                 continue
             row = {
@@ -107,14 +134,14 @@ class QRFlyerParser(BaseParser):
                 "amount": amt,
                 "credit_delta": Decimal("0"),
                 "money_delta": _money(amt, flow),
-                "fee": Decimal("0"),
+                "fee": parse_decimal(r.get(kol("fee"))),
                 "bonus": Decimal("0"),
                 "balance_after": None,
                 "ticket_no": ticket,
-                "username": str(r.get(kol("Customer ID / User Account"), "") or "").strip(),
+                "username": str(r.get(kol("username"), "") or "").strip(),
                 "reference": ref,
                 "counterparty": "",
-                "description": f"QRFLYER {r.get(kol('Payment Status'), '')}".strip(),
+                "description": f"QRFLYER {r.get(kol('status'), '')}".strip(),
                 "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
             }
             row["row_hash"] = row_hash("qrflyer", [ticket, ref, amt])

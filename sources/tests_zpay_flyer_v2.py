@@ -50,6 +50,9 @@ FLYER_LAMA = ["Transaction Date", "Settlement Time", "TXN ID", "Client Reference
               "Customer ID / User Account", "Payment Status", "Transaction Value"]
 FLYER_BARU = ["created_date", "client_reference", "transaction_id", "username",
               "status", "trans_date_time", "bot_success_time", "total_amount"]
+# Bentuk KETIGA, berkas HKW 01-08-2026 — jam WIB, tanpa geseran.
+FLYER_KETIGA = ["RRN", "Transaction Id", "Client Reference", "Username",
+                "Amount", "Fee", "Fee Pct", "Created At", "Callback"]
 ZPAY = ["Created At", "Paid At", "Order ID", "Payment Method", "Nama Merchant",
         "RRN", "Tiket Number", "User ID", "Nilai", "Fee", "Sub Total",
         "Confirmed Bot At", "Status", "Gateway", "Source", "Status Settled",
@@ -137,6 +140,80 @@ class FlyerFormatBaruTest(SimpleTestCase):
 
         self.assertEqual(r["jenis"], "wd")
         self.assertEqual(str(r["money_delta"]), "-100000.00")
+
+    def test_bentuk_KETIGA_terbaca_penuh(self):
+        """Header HKW 01-08-2026. Sebelumnya bentuk ini lolos SEBAGIAN dan itu
+        justru bencananya: `Client Reference` ada sehingga baris tidak dianggap
+        footer, lalu 1.519 baris masuk dengan tiket '', Rp0, tanpa tanggal."""
+        r = self._parse([FLYER_KETIGA,
+                         ["0115000BLP24", "D4632563", "B260801120500000125",
+                          "susisai3", 500000, 6000, 1.2,
+                          "2026-08-01 00:00:36", "2026-08-01 00:01:01"]])[0]
+
+        self.assertEqual(r["ticket_no"], "D4632563")
+        self.assertEqual(r["reference"], "B260801120500000125")
+        self.assertEqual(r["username"], "susisai3")
+        self.assertEqual(str(r["amount"]), "500000")
+        self.assertEqual(str(r["fee"]), "6000")
+        self.assertEqual(str(r["posted_date"]), "2026-08-01")   # dari Callback
+        self.assertEqual(str(r["occurred_at"]), "2026-08-01 00:00:36")
+
+    def test_bentuk_ketiga_TANPA_geseran_jam(self):
+        """Beda dengan ZPay: jam Flyer sudah WIB. Panel HKW menyetujui median
+        4 detik setelah `Callback` — geseran apa pun akan merusaknya."""
+        r = self._parse([FLYER_KETIGA,
+                         ["R1", "D1", "C1", "budi", 50000, 600, 1.2,
+                          "2026-08-01 23:59:45", "2026-08-02 00:00:15"]])[0]
+
+        self.assertEqual(str(r["occurred_at"]), "2026-08-01 23:59:45")
+
+    def test_header_tanpa_kolom_tiket_MELEMPAR(self):
+        """Kolom kunci hilang = berkas tak bisa dipercaya. Melempar, bukan
+        menghasilkan baris kosong yang mengaku data."""
+        with self.assertRaises(ValueError) as ctx:
+            self._parse([["RRN", "Client Reference", "Username", "Amount"],
+                         ["R1", "C1", "budi", 50000]])
+
+        pesan = str(ctx.exception)
+        self.assertIn("ticket", pesan)
+        self.assertIn("Client Reference", pesan)   # header nyata disebut
+        self.assertIn("TXN ID", pesan)             # yang dikenal disebut
+
+    def test_header_tanpa_kolom_nominal_MELEMPAR(self):
+        """Penggantian nama SEBAGIAN adalah langkah vendor berikutnya."""
+        with self.assertRaises(ValueError) as ctx:
+            self._parse([["RRN", "Transaction Id", "Client Reference",
+                          "Username", "Nilai Transaksi", "Created At"],
+                         ["R1", "D1", "C1", "budi", 50000, "2026-08-01 00:00:36"]])
+
+        self.assertIn("amount", str(ctx.exception))
+
+    def test_row_hash_SAMA_di_bentuk_ketiga(self):
+        """Satu transaksi logis, tiga bentuk berkas, satu hash — kalau tidak,
+        satu hari bisa terhitung dua kali saat vendor ganti format lagi."""
+        lama = self._parse([FLYER_LAMA,
+                            ["2026-08-01 00:00:36", "2026-08-01 00:01:01",
+                             "D4632563", "B260801120500000125", "susisai3",
+                             "SUCCESS", "500000"]])[0]
+        ketiga = self._parse([FLYER_KETIGA,
+                              ["0115000BLP24", "D4632563", "B260801120500000125",
+                               "susisai3", 500000, 6000, 1.2,
+                               "2026-08-01 00:00:36", "2026-08-01 00:01:01"]])[0]
+
+        self.assertEqual(lama["row_hash"], ketiga["row_hash"])
+
+    def test_deteksi_bentuk_ketiga(self):
+        path = _xlsx([FLYER_KETIGA,
+                      ["R1", "D1", "C1", "budi", 50000, 600, 1.2,
+                       "2026-08-01 00:00:36", "2026-08-01 00:01:01"]])
+        try:
+            hasil = detect_source(path, "laporan vendor.xlsx")  # nama TANPA "qris"
+        finally:
+            os.remove(path)
+
+        self.assertEqual(hasil[0]["parser_key"], "qrflyer")
+        self.assertGreaterEqual(hasil[0]["confidence"], 0.9)
+        self.assertNotIn("rpay_xlsx", [h["parser_key"] for h in hasil])
 
     def test_deteksi_format_baru_berkeyakinan_tinggi(self):
         """Tanpa tanda tangan header, berkas ini cuma lolos lewat nama file
