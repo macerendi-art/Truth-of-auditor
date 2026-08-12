@@ -353,3 +353,124 @@ class ZPayTest(SimpleTestCase):
             os.remove(path)
 
         self.assertNotIn("qhoki", kunci)
+
+    # --- Penamaan status KETIGA vendor: `done` (berkas STN 11-08-2026) ------
+
+    def test_status_DONE_terbaca_penuh_dan_unpaid_dilewati(self):
+        """Vendor mengganti penamaan statusnya lagi: 565 baris `done` (uang)
+        berdampingan dengan 42 `unpaid` (QRIS ditinggalkan pemain).
+
+        `done` sekelas `paid`/`settled`: 564 dari 565 baris itu berpasangan
+        dengan panel 11-08-2026 pada tiket, nominal, username, DAN Order
+        ID-nya muncul di kolom Remarks panel — nol beda. Yang satu lagi
+        (D3298751, dibayar 23:59:59 WIB) memang milik panel 12-Agustus.
+        Campuran begini TIDAK boleh melempar: ada hasil, penjaga diam.
+        """
+        rows = self._parse([ZPAY,
+                            _baris_zpay(ticket="D3298751", status="done",
+                                        order="STN-jourseva-wa1bb3itoieux"),
+                            _baris_zpay(ticket="", paid="", status="unpaid",
+                                        order="STN-dienboele-s1o8sesqs933a"),
+                            _baris_zpay(ticket="D3298750", status="done",
+                                        order="STN-Golexrezeki-6lxh4f13mnpbn")])
+
+        self.assertEqual([r["ticket_no"] for r in rows], ["D3298751", "D3298750"])
+        self.assertEqual(rows[0]["username"], "jourseva")
+
+    def test_baris_done_tetap_kena_geseran_utc_ke_wib(self):
+        """Penamaan statusnya berubah, zona waktunya tidak.
+
+        Baris pertama berkas nyata STN: Paid At 16:59:59 = 23:59:59 WIB,
+        masih hari 11-Agustus. Tanpa geseran ia jatuh 16:59 dan uangnya
+        mendahului kreditnya tujuh jam — pasangannya diblokir jendela
+        tanggal berarah engine.
+        """
+        r = self._parse([ZPAY, _baris_zpay(ticket="D3298751", status="done",
+                                           created="2026-08-11 16:58:48",
+                                           paid="2026-08-11 16:59:59")])[0]
+
+        self.assertEqual(str(r["occurred_at"]), "2026-08-11 23:59:59")
+        self.assertEqual(str(r["posted_date"]), "2026-08-11")
+        # Jejak audit: salinan mentah tetap jam asli vendor (UTC).
+        self.assertEqual(r["raw"]["Paid At"], "2026-08-11 16:59:59")
+        self.assertEqual(r["raw"]["Status"], "done")
+
+    def test_row_hash_done_SAMA_dengan_paid(self):
+        """Satu transaksi logis, dua penamaan status → satu hash. Kalau tidak,
+        hari yang sama yang diekspor ulang dengan penamaan baru masuk DUA
+        KALI alih-alih terdeteksi duplikat."""
+        a = self._parse([ZPAY, _baris_zpay(ticket="D3298750", status="paid")])[0]
+        b = self._parse([ZPAY, _baris_zpay(ticket="D3298750", status="done")])[0]
+
+        self.assertEqual(a["row_hash"], b["row_hash"])
+
+    def test_berkas_SELURUHNYA_unpaid_tetap_MELEMPAR(self):
+        """Keputusan sadar, bukan kelalaian.
+
+        `unpaid` = QRIS yang ditinggalkan pemain (42 baris berkas nyata: nol
+        tiket, nol Paid At, nol RRN) — bukan uang, memang ditahan. Tapi ia
+        tetap membawa `Order ID`, jadi tetap terhitung baris transaksi:
+        berkas yang isinya cuma itu tak membawa uang SAMA SEKALI, dan
+        gagal-berisik lebih baik daripada unggahan "berhasil" berisi nol
+        baris — kegagalan senyap yang persis bug QR Flyer. Pengguna melihat
+        pesannya lalu mengunggah ekspor yang lengkap.
+        """
+        with self.assertRaises(ValueError) as ctx:
+            self._parse([ZPAY,
+                         _baris_zpay(ticket="", paid="", status="unpaid",
+                                     order="STN-dienboele-s1o8sesqs933a"),
+                         _baris_zpay(ticket="", paid="", status="unpaid",
+                                     order="STN-rahmadani-9k2jd0slam3x")])
+
+        pesan = str(ctx.exception)
+        self.assertIn("2", pesan)            # berapa baris yang tertahan
+        self.assertIn("'unpaid'", pesan)     # status yang ditemukan
+
+    def test_pesan_berkas_unpaid_TIDAK_menuduh_vendor(self):
+        """Diagnosis yang salah lebih berbahaya daripada tak ada pesan.
+
+        `unpaid` SUDAH dikenal dan sengaja ditahan. Menyuruh pengguna
+        "laporkan ke pengembang agar daftarnya ditambah" mengarahkan rantai
+        yang berakhir fatal: operator melapor "vendor ganti status jadi
+        unpaid" → `unpaid` masuk `STATUS_UANG` → 42 baris QRIS yang tak
+        pernah dibayar berubah jadi baris uang. Uang dikarang — persis yang
+        dicegah rancangan daftar putih ini. Pesannya harus mengatakan apa
+        adanya: berkasnya memang tak memuat pembayaran sukses.
+        """
+        with self.assertRaises(ValueError) as ctx:
+            self._parse([ZPAY,
+                         _baris_zpay(ticket="", paid="", status="unpaid",
+                                     order="STN-dienboele-s1o8sesqs933a"),
+                         _baris_zpay(ticket="", paid="", status="UNPAID",
+                                     order="STN-rahmadani-9k2jd0slam3x")])
+
+        pesan = str(ctx.exception)
+        self.assertIn("pembayaran sukses", pesan)   # diagnosis yang benar
+        self.assertNotIn("laporkan", pesan.lower())  # jangan menuduh vendor
+        self.assertNotIn("ditambah", pesan.lower())
+        self.assertNotIn("done", pesan)              # daftar putih tak relevan
+
+    def test_status_asing_SESUDAH_done_tetap_MELEMPAR(self):
+        """Pelindung dari penamaan KEEMPAT tetap penjaga nol-hasil ini, bukan
+        daftar putih yang dipanjangkan menebak-nebak."""
+        with self.assertRaises(ValueError) as ctx:
+            self._parse([ZPAY, _baris_zpay(ticket="D1", status="refunded")])
+
+        pesan = str(ctx.exception)
+        self.assertIn("'refunded'", pesan)   # status yang ditemukan disebut
+        self.assertIn("done", pesan)         # daftar putih terbaru disebut
+        self.assertIn("laporkan", pesan.lower())  # jalur yang benar utk kasus ini
+
+    def test_campuran_unpaid_dan_status_ASING_dianggap_kasus_asing(self):
+        """Satu status asing sudah cukup: yang tak dikenal itulah beritanya,
+        dan `unpaid` di sebelahnya tak boleh menyembunyikannya di balik pesan
+        "tak ada pembayaran sukses"."""
+        with self.assertRaises(ValueError) as ctx:
+            self._parse([ZPAY,
+                         _baris_zpay(ticket="", paid="", status="unpaid",
+                                     order="STN-dienboele-s1o8sesqs933a"),
+                         _baris_zpay(ticket="D1", status="refunded")])
+
+        pesan = str(ctx.exception)
+        self.assertIn("'refunded'", pesan)
+        self.assertIn("laporkan", pesan.lower())

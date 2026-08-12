@@ -160,17 +160,27 @@ class ZPayParser(BaseParser):
     `Nilai` = bruto yang dibayar pemain (= `Fee` + `Sub Total`, dijaga tes);
     panel mencatat bruto juga, jadi itu yang dipakai sebagai `amount`.
 
-    **`Status` punya DUA nilai yang sama-sama berarti uang nyata: `paid` dan
-    `settled`** — satu daur hidup, bukan dua hal berbeda (`paid` = sudah
-    dibayar, dananya belum cair; `settled` = sudah cair, `Waktu Settled`-nya
-    sudah lewat). Keduanya terbukti: 69 baris `settled` sampel 06-08-2026
-    cocok dengan panel 69/69 pada tiket, Order ID, DAN nominal. Daftar putih
-    ini sengaja TIDAK ditebak-lebihkan ("success", "complete", dst.) — yang
-    menjaga dari nilai ketiga adalah penjaga nol-hasil di bawah, bukan daftar
-    yang dipanjangkan. Menyaring dengan daftar hitam justru berbahaya: status
-    asing yang lolos masuk MENGARANG uang di aplikasi rekonsiliasi, sementara
-    status asing yang tertahan setidaknya muncul sebagai baris panel tanpa
-    uang di kerja harian.
+    **`Status` punya TIGA nilai yang sama-sama berarti uang nyata: `paid`,
+    `settled`, dan `done`** — satu daur hidup, bukan hal-hal berbeda (`paid`
+    = sudah dibayar, dananya belum cair; `settled` = sudah cair, `Waktu
+    Settled`-nya sudah lewat; `done` = penamaan baru vendor sejak Agustus
+    2026, sekelas keduanya). Ketiganya terbukti dengan data nyata: 69 baris
+    `settled` sampel 06-08-2026 cocok dengan panel 69/69 pada tiket, Order
+    ID, DAN nominal; berkas STN 11-08-2026 berisi 565 baris `done` yang
+    564 di antaranya cocok dengan panel hari itu pada tiket, nominal,
+    username, DAN Order ID-nya muncul di Remarks panel — nol beda (sisa
+    satu, D3298751, dibayar 23:59:59 WIB dan memang milik panel 12-Agustus).
+
+    Lawannya di berkas yang sama adalah `unpaid` (42 baris): QRIS yang
+    ditinggalkan pemain — nol tiket, nol `Paid At`, nol RRN, `Status
+    Settled` = Unsettled. Itu BUKAN uang dan sengaja ditahan.
+
+    Daftar putih ini sengaja TIDAK ditebak-lebihkan ("success", "complete",
+    dst.) — yang menjaga dari nilai keempat adalah penjaga nol-hasil di
+    bawah, bukan daftar yang dipanjangkan. Menyaring dengan daftar hitam
+    justru berbahaya: status asing yang lolos masuk MENGARANG uang di
+    aplikasi rekonsiliasi, sementara status asing yang tertahan setidaknya
+    muncul sebagai baris panel tanpa uang di kerja harian.
 
     **Penjaga nol-hasil:** bila berkas memuat baris transaksi tapi tak satu
     pun lolos, parser MELEMPAR — bukan mengembalikan daftar kosong. Versi
@@ -180,6 +190,27 @@ class ZPayParser(BaseParser):
     dugaan berbasis kebiasaan seperti `web/penjaga.py` (yang sengaja hanya
     memperingatkan) melainkan kepastian — ada baris, tak ada hasil — jadi
     memblokir memang tepat. Berkas tanpa baris transaksi tetap sah kosong.
+    Saat vendor mengganti nama status jadi `done`, penjaga inilah yang
+    BERBUNYI dan memunculkan laporan penggunanya — berkas 11-08-2026 ditolak
+    dengan pesan yang menyebut status yang ditemukan, bukan diterima diam-diam
+    berisi nol baris. Rancangannya bekerja persis seperti maksudnya. Karena
+    itu pula berkas yang SELURUH barisnya `unpaid` tetap melempar: ia memang
+    tak membawa uang sama sekali, dan gagal-berisik lebih baik daripada
+    unggahan "berhasil" yang kosong.
+
+    **Penjaga itu punya DUA pesan, dan memilih yang salah berbahaya.** Bila
+    semua status yang ditemukan ada di `STATUS_BUKAN_UANG` (kini hanya
+    `unpaid`), berkasnya memang tak memuat satu pun pembayaran sukses —
+    lazim pada tarikan setengah hari, jam sepi, atau merchant baru. Pesannya
+    harus mengatakan itu apa adanya dan TIDAK menyuruh menambah daftar
+    status: `unpaid` sudah dikenal dan sengaja ditahan. Pesan "vendor
+    mengganti penamaan status, laporkan ke pengembang" pada kasus ini
+    mengarahkan rantai yang berakhir fatal — operator melapor "vendor ganti
+    status jadi unpaid", `unpaid` masuk `STATUS_UANG`, dan 42 baris QRIS yang
+    tak pernah dibayar berubah jadi baris uang. Uang dikarang, persis yang
+    dicegah rancangan daftar putih ini. Pesan lapor-pengembang tetap dipakai
+    (dan hanya) saat ada status yang benar-benar asing — termasuk campuran
+    `unpaid` + status asing, karena yang tak dikenal itulah beritanya.
 
     **Jam laporan ZETPAY adalah UTC, panel WIB — WAJIB digeser +7 jam.**
     Buktinya berlapis pada sampel 06-08-2026 dan tak punya penjelasan lain:
@@ -200,7 +231,13 @@ class ZPayParser(BaseParser):
 
     source_key = "gateway"
     UTC_KE_WIB = timedelta(hours=7)
-    STATUS_UANG = ("paid", "settled")
+    STATUS_UANG = ("paid", "settled", "done")
+    # Status yang DIKENAL tapi memang bukan uang: QRIS yang dibuat lalu
+    # ditinggalkan pemain (42 baris berkas STN 11-08-2026 — nol tiket, nol
+    # `Paid At`, nol RRN, `Status Settled` = Unsettled). Dipisahkan dari status
+    # asing semata-mata supaya penjaga nol-hasil di bawah tidak salah
+    # mendiagnosis; ia TIDAK ikut menentukan baris mana yang lolos.
+    STATUS_BUKAN_UANG = ("unpaid",)
 
     @staticmethod
     def _username(order_id):
@@ -247,13 +284,25 @@ class ZPayParser(BaseParser):
             row["row_hash"] = row_hash("zpay", [order, ticket, amt])
             out.append(row)
         if kandidat and not out:
+            terlihat = ", ".join(repr(s) for s in status_terlihat)
+            if all(s in self.STATUS_BUKAN_UANG for s in status_terlihat):
+                # Semua statusnya dikenal dan memang ditahan — bukan salah
+                # vendor, bukan salah daftar. Jangan pernah mengarahkan ke
+                # "tambahkan statusnya": lihat docstring, ujungnya uang dikarang.
+                raise ValueError(
+                    "Berkas ZPay memuat %d baris transaksi tetapi tak satu pun "
+                    "berisi pembayaran sukses — semuanya berstatus %s, yaitu QRIS "
+                    "yang dibuat lalu ditinggalkan pemain (tanpa nomor tiket, "
+                    "tanpa waktu bayar). Tidak ada yang bisa dicatat. Periksa "
+                    "apakah periode atau berkas yang diunduh sudah benar."
+                    % (kandidat, terlihat)
+                )
             raise ValueError(
                 "Berkas ZPay memuat %d baris transaksi tetapi tak satu pun "
                 "berstatus uang. Status yang ditemukan: %s. Status yang dikenal: "
                 "%s. Kemungkinan vendor mengganti penamaan status — laporkan ke "
                 "pengembang agar daftarnya ditambah."
-                % (kandidat, ", ".join(repr(s) for s in status_terlihat),
-                   ", ".join(self.STATUS_UANG))
+                % (kandidat, terlihat, ", ".join(self.STATUS_UANG))
             )
         return out
 
