@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.17.3** · 31 rilis (1 besar, 17 fitur, 9 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.17.4** · 32 rilis (1 besar, 17 fitur, 10 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.17.4 — QRIS ZPay Penamaan Status Baru & Peringatan Gateway Lebih Tenang
+*Perbaikan · 12 Agustus 2026*
+
+- **Laporan QRIS ZPay terbaca lagi.** Vendor mengganti penamaan status transaksinya (dari `paid`/`settled` menjadi `done`/`unpaid`), sehingga berkas 11 Agustus ditolak seluruhnya. Diuji pada berkas asli STN 11 Agustus 2026: **564 dari 564 deposit QRIS ZPay cocok** lewat nomor tiket — nomor tiket di laporan ZPay memang sudah menjadi acuan utama sejak awal, tanpa perlu mencocokkan nama pemain atau kode RRN. Batch hari itu naik dari 360 menjadi 924 transaksi cocok.
+- Penolakannya sendiri bekerja sebagaimana mestinya: aplikasi berhenti sambil menyebutkan status apa saja yang ditemukannya, alih-alih melaporkan “berhasil” dengan nol baris. Status `unpaid` (QRIS yang dibuat lalu ditinggalkan pemain) tetap **sengaja tidak dihitung sebagai uang**, dan pesannya kini membedakan berkas yang memang tak berisi pembayaran sukses dari berkas berpenamaan asing.
+- **Peringatan oranye “kode transaksi tidak dikenal panel” tidak lagi muncul palsu.** Sebelumnya peringatan itu bisa menuduh berkas gateway yang sepenuhnya benar hanya karena kebetulan diunggah sebelum berkas panel hari yang sama — pada satu kiriman nyata, 224 transaksi dituduh asing padahal ke-224-nya ada di panel yang masuk beberapa detik kemudian. Peringatan kini menunggu panel arah yang sama untuk tanggal itu, sehingga urutan unggah tidak lagi mengubah putusannya.
 
 ## v1.17.3 — Laporan QR Flyer Bentuk Ketiga & Penjaga Kolom
 *Perbaikan · 10 Agustus 2026*
