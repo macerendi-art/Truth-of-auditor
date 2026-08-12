@@ -13,6 +13,17 @@ berhari-hari kemudian:
 3. **Irisan kode transaksi dengan panel** — file gateway yang tak satu pun
    kode transaksinya dikenal panel hari itu; pada kasus nyata seluruh 9.156
    barisnya milik merchant lain dan melahirkan 9.618 baris "uang tanpa panel".
+   Pemeriksaan ini BERJANGKAR: ia hanya boleh menuduh bila panel dengan ARAH
+   YANG SAMA (DP/WD) untuk tanggal berkas itu sudah ada. Sebelum itu penjaga
+   diam, karena satu kiriman berisi belasan berkas dua arah dan urutannya
+   sembarang. Yang dijamin persis sebatas itu — bukan "urutan unggah tak
+   pernah mengubah putusan". Sisa lubangnya jujur disebut: pada toko yang
+   panel se-arahnya terpecah beberapa berkas di hari yang sama (Vigor/TMG:
+   "PANEL DP" sisi bank ±140 baris DAN "PANEL QRIS DP" ±6.900 baris), berkas
+   panel se-arah MANA PUN sudah membuka jangkar, jadi berkas gateway yang
+   pasangannya belum masuk masih bisa dituduh. Arah salahnya aman —
+   peringatan muncul terlalu dini, tak pernah tertelan — dan jalur ini toh
+   hanya memperingatkan.
 
 **Kenapa hanya peringatan.** Ketiganya menyimpulkan dari kebiasaan, dan
 kebiasaan itu belum ada pada brand baru, merchant baru, atau hari pertama
@@ -215,6 +226,12 @@ def periksa_irisan_kunci(kunci_file, kunci_panel, ambang=AMBANG_IRISAN, minimum=
     Diam saat panel pembanding kosong (panelnya memang belum diupload) atau saat
     file tak membawa kunci sama sekali — RafflesPay sengaja tanpa `reference`,
     dan itu bukan kesalahan.
+
+    Kolam kosong bukan satu-satunya bentuk "panel belum diupload": kolam yang
+    melebar ±1 hari bisa terisi panel KEMARIN saja, atau panel ARAH LAIN hari
+    itu (tiket W… tak akan pernah memuat tiket D…). Jangkar tanggal+arahnya ada
+    di `_periksa` — satu-satunya yang bicara dengan DB dan karenanya satu-satunya
+    yang bisa tahu.
     """
     if len(kunci_file) < minimum or not kunci_panel:
         return None
@@ -309,24 +326,60 @@ def _periksa(up):
         )
 
     if up.source_type.key == "gateway" and isi_dari and isi_sampai:
-        refs = _kunci(milik, "reference") | _kunci(terduplikat, "reference")
-        tix = _kunci(milik, "ticket_no") | _kunci(terduplikat, "ticket_no")
-        kunci_file = refs if len(refs) >= len(tix) else tix
         # Sisi panel diambil TANPA menyaring status konsumsi: panel hari itu
         # lazim sudah dikonsumsi batch, dan penjaga yang cuma melihat baris
         # aktif akan buta tepat pada kasus tersibuk. Kedua kolom kunci diambil
         # (superset) supaya beda konvensi antar-panel tak jadi salah tuduh.
         panel = Transaction.objects.filter(
             toko=up.toko, source_type__key="panel", is_duplicate=False,
-            occurred_at__date__gte=isi_dari - timedelta(days=1),
-            occurred_at__date__lte=isi_sampai + timedelta(days=1),
         )
-        h = periksa_irisan_kunci(kunci_file, _kunci(panel, "reference") | _kunci(panel, "ticket_no"))
-        if h:
-            pesan.append(
-                f'"{nama}" — {_ribu(h["total"] - h["cocok"])} dari {_ribu(h["total"])} '
-                f'kode transaksinya tidak dikenal panel tanggal itu '
-                f'({h["rasio"]:.0%} cocok, biasanya hampir 100%). '
-                "Kemungkinan file ini bukan dari akun gateway toko ini."
+        # JANGKAR — panel harus punya baris pada tanggal berkas ini SENDIRI dan
+        # DENGAN ARAH YANG SAMA, tanpa pelebaran. Satu kiriman berisi belasan
+        # berkas dan urutannya sembarang: bila berkas gateway masuk lebih dulu,
+        # kolam pembanding yang melebar ±1 hari TIDAK kosong melainkan berisi
+        # panel KEMARIN, tiketnya beda semua, 0% — dan perlindungan "panelnya
+        # memang belum diupload" milik `periksa_irisan_kunci` bocor lewat celah
+        # itu. Kasus nyata STN 11-08-2026: 224 dari 224 kode dituduh asing,
+        # padahal ke-224-nya ada di panel hari itu yang diunggah sesaat kemudian.
+        #
+        # Tanggal saja tidak cukup, karena satu kiriman memuat DUA arah. Pada
+        # kiriman STN yang sama, "STN WD PANEL" masuk sebelum "STN DP NXPAY":
+        # panel WD hari itu membuka jangkar untuk berkas DP yang tiket D…-nya
+        # mustahil ada di sana, jadi tuduhan 0% lahir lagi — cuma bergeser
+        # syaratnya. Berkas "WD NXPAY" hari itu lolos semata-mata karena isinya
+        # 5 baris (di bawah MIN_KUNCI), bukan karena penjaganya benar.
+        #
+        # `flow` KOSONG (arah tak terdeteksi) sengaja kembali ke perilaku lama
+        # "arah apa pun": menebak arah dari isi berkas cuma menambah sumber
+        # kesalahan baru pada jalur yang toh hanya memperingatkan. Nilai `flow`
+        # dipetakan, bukan dipakai langsung — sisi DP bernama "dp" di Upload
+        # tetapi "depo" di Transaction.jenis.
+        arah = {"dp": "depo", "wd": "wd"}.get((up.flow or "").strip().lower())
+        jangkar_qs = panel.filter(
+            occurred_at__date__gte=isi_dari, occurred_at__date__lte=isi_sampai
+        )
+        if arah:
+            jangkar_qs = jangkar_qs.filter(jenis=arah)
+        jangkar = jangkar_qs.exists()
+        if jangkar:
+            refs = _kunci(milik, "reference") | _kunci(terduplikat, "reference")
+            tix = _kunci(milik, "ticket_no") | _kunci(terduplikat, "ticket_no")
+            kunci_file = refs if len(refs) >= len(tix) else tix
+            # Pelebaran ±1 hari tetap dipakai untuk MENGUMPULKAN pembandingnya —
+            # itu benar dan disengaja: deposit larut malam D-1 lazim di-approve
+            # panel tanggal D, dan sebaliknya.
+            pembanding = panel.filter(
+                occurred_at__date__gte=isi_dari - timedelta(days=1),
+                occurred_at__date__lte=isi_sampai + timedelta(days=1),
             )
+            h = periksa_irisan_kunci(
+                kunci_file, _kunci(pembanding, "reference") | _kunci(pembanding, "ticket_no")
+            )
+            if h:
+                pesan.append(
+                    f'"{nama}" — {_ribu(h["total"] - h["cocok"])} dari {_ribu(h["total"])} '
+                    f'kode transaksinya tidak dikenal panel tanggal itu '
+                    f'({h["rasio"]:.0%} cocok, biasanya hampir 100%). '
+                    "Kemungkinan file ini bukan dari akun gateway toko ini."
+                )
     return pesan

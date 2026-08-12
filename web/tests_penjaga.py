@@ -254,6 +254,159 @@ class PeriksaUploadTest(TestCase):
         up = self._upload(self.gw, "06-08-2026 GATEWAY.xlsx")
         self.assertEqual(periksa_upload(up), [])
 
+    # --- Jangkar tanggal pemeriksaan irisan -------------------------------
+    # Satu kiriman berisi belasan berkas dan urutannya sembarang. Pelebaran
+    # ±1 hari pada kolam pembanding membuat perlindungan "panel belum diupload"
+    # bocor: kolamnya tidak kosong, melainkan berisi panel KEMARIN.
+
+    def test_gateway_diunggah_sebelum_panel_hari_itu_diam(self):
+        """Regresi STN 11-08-2026: berkas gateway masuk lebih dulu, panel hari
+        itu menyusul beberapa detik kemudian dalam kiriman yang sama.
+
+        Kolam pembanding saat itu tidak kosong — isinya panel 10-08, yang
+        tiketnya jelas beda semua. Penjaga menuduh "224 dari 224 kode transaksi
+        tidak dikenal panel" padahal ke-224-nya ada di panel 11-08 yang belum
+        sempat diunggah."""
+        kemarin = self._upload(self.panel, "10-08-2026 STN DP PANEL.xlsx")
+        self._baris(kemarin, self.panel, date(2026, 8, 10), ref="panel-kemarin-", n=30)
+        gu = self._upload(self.gw, "11-08-2026 STN DP NXPAY.xlsx", n_baris=30)
+        self._baris(gu, self.gw, date(2026, 8, 11), ref="nxpay-", n=30)
+
+        self.assertEqual(periksa_upload(gu), [])
+
+    def test_merchant_asing_dengan_panel_hari_itu_tetap_berbunyi(self):
+        """Jangkarnya tak boleh menumpulkan penjaga: begitu panel tanggal itu
+        ADA, berkas milik merchant lain harus tetap ketahuan — kasus W25
+        06-08-2026 (9.156 baris, tak satu pun kodenya dikenal)."""
+        pu = self._upload(self.panel, "06-08-2026 PANEL W25.xlsx")
+        self._baris(pu, self.panel, date(2026, 8, 6), ref="panel-uuid-", n=30)
+        gu = self._upload(self.gw, "06-08-2026 W25 DP QRIS UNOPAY.xlsx", n_baris=30)
+        self._baris(gu, self.gw, date(2026, 8, 6), ref="merchant-lain-", n=30)
+
+        pesan = periksa_upload(gu)
+        self.assertTrue(any("tidak dikenal panel" in p for p in pesan), pesan)
+
+    def test_urutan_unggah_dalam_satu_kiriman_tidak_mengubah_putusan(self):
+        """Kelas cacat yang sama dengan kolam kebiasaan v1.14.0: berkas yang
+        sah dinilai berbeda hanya karena giliran prosesnya. Panel KEMARIN
+        sengaja sudah ada — itulah yang membuat kolam pembanding tampak
+        "terisi" padahal panel hari itu belum masuk."""
+        kemarin = self._upload(self.panel, "10-08-2026 STN DP PANEL.xlsx")
+        self._baris(kemarin, self.panel, date(2026, 8, 10), ref="panel-kemarin-", n=30)
+
+        # Penjaga dipanggil TEPAT setelah tiap berkas selesai di-ingest —
+        # menirunya harus selang-seling, bukan "buat semua lalu periksa semua".
+        def ingest_panel():
+            up = self._upload(self.panel, "11-08-2026 STN DP PANEL.xlsx")
+            self._baris(up, self.panel, date(2026, 8, 11), ref="nxpay-", n=30)
+            return up, periksa_upload(up)
+
+        def ingest_gateway():
+            up = self._upload(self.gw, "11-08-2026 STN DP NXPAY.xlsx", n_baris=30)
+            self._baris(up, self.gw, date(2026, 8, 11), ref="nxpay-", n=30)
+            return up, periksa_upload(up)
+
+        # Urutan A: panel dulu, gateway menyusul.
+        pu, panel_a = ingest_panel()
+        gu, gateway_a = ingest_gateway()
+
+        Upload.objects.filter(pk__in=[pu.pk, gu.pk]).delete()  # transaksinya ikut (CASCADE)
+
+        # Urutan B: gateway dulu, panel menyusul.
+        _, gateway_b = ingest_gateway()
+        _, panel_b = ingest_panel()
+
+        self.assertEqual(gateway_a, gateway_b, "urutan unggah mengubah putusan")
+        self.assertEqual((panel_a, gateway_a), ([], []))
+        self.assertEqual((panel_b, gateway_b), ([], []))
+
+    # --- Jangkar ARAH (DP vs WD) ------------------------------------------
+    # Jangkar tanggal saja masih bergantung urutan unggah: satu kiriman berisi
+    # berkas DP dan WD sekaligus, dan berkas panel WD yang lebih dulu masuk
+    # "membuka" jangkar untuk berkas gateway DP yang tiketnya jelas tak mungkin
+    # ada di panel WD. Arahnya harus ikut dicocokkan.
+
+    def test_panel_arah_LAIN_hari_itu_tidak_membuka_jangkar(self):
+        """Regresi STN 11-08-2026 (urutan nyata dalam satu kiriman): panel WD
+        hari itu sudah masuk, panel DP-nya belum.
+
+        Tiket W… di panel WD mustahil memuat tiket D… milik berkas gateway DP,
+        jadi irisannya pasti 0% — tuduhan yang lahir semata-mata dari giliran
+        proses. Berkas "WD NXPAY" nyata lolos hari itu hanya karena isinya 5
+        baris (di bawah MIN_KUNCI), bukan karena penjaganya benar."""
+        pw = self._upload(self.panel, "11-08-2026 STN WD PANEL.xlsx", flow="wd")
+        self._baris(pw, self.panel, date(2026, 8, 11), ref="panel-wd-", n=30,
+                    jenis="wd")
+        gu = self._upload(self.gw, "11-08-2026 STN DP NXPAY.xlsx", flow="dp",
+                          n_baris=30)
+        self._baris(gu, self.gw, date(2026, 8, 11), ref="nxpay-dp-", n=30)
+
+        self.assertEqual(periksa_upload(gu), [])
+
+    def test_panel_arah_SAMA_hari_itu_tetap_berbunyi(self):
+        """Jangkar arah tak boleh menumpulkan tuduhan yang sah: begitu panel DP
+        hari itu ada, berkas gateway DP milik merchant lain harus tetap
+        ketahuan — kasus W25 06-08-2026."""
+        pd = self._upload(self.panel, "11-08-2026 STN DP PANEL.xlsx", flow="dp")
+        self._baris(pd, self.panel, date(2026, 8, 11), ref="panel-dp-", n=30,
+                    jenis="depo")
+        gu = self._upload(self.gw, "11-08-2026 STN DP NXPAY.xlsx", flow="dp",
+                          n_baris=30)
+        self._baris(gu, self.gw, date(2026, 8, 11), ref="merchant-lain-", n=30)
+
+        pesan = periksa_upload(gu)
+        self.assertTrue(any("tidak dikenal panel" in p for p in pesan), pesan)
+
+    def test_flow_kosong_memakai_jangkar_arah_APA_PUN(self):
+        """Arah yang tak terdeteksi tidak boleh mematikan pemeriksaan.
+
+        Bandingkan dengan `test_panel_arah_LAIN_hari_itu_tidak_membuka_jangkar`:
+        satu-satunya beda adalah `flow` berkas gateway. Tanpa arah, penjaga
+        kembali ke perilaku lama (panel arah apa pun membuka jangkar) — sengaja,
+        karena menebak arah dari isi berkas justru menambah sumber kesalahan
+        baru pada jalur yang cuma memperingatkan."""
+        pw = self._upload(self.panel, "11-08-2026 STN WD PANEL.xlsx", flow="wd")
+        self._baris(pw, self.panel, date(2026, 8, 11), ref="panel-wd-", n=30,
+                    jenis="wd")
+        gu = self._upload(self.gw, "11-08-2026 STN NXPAY.xlsx", flow="",
+                          n_baris=30)
+        self._baris(gu, self.gw, date(2026, 8, 11), ref="nxpay-", n=30)
+
+        pesan = periksa_upload(gu)
+        self.assertTrue(any("tidak dikenal panel" in p for p in pesan), pesan)
+
+    def test_arah_cocok_tapi_tanggal_beda_tetap_diam(self):
+        """Saringan arah menempel PADA jangkar tanggal, bukan menggantikannya:
+        panel DP kemarin tetap tidak boleh membuka jangkar berkas hari ini."""
+        pd = self._upload(self.panel, "10-08-2026 STN DP PANEL.xlsx", flow="dp")
+        self._baris(pd, self.panel, date(2026, 8, 10), ref="panel-kemarin-",
+                    n=30, jenis="depo")
+        gu = self._upload(self.gw, "11-08-2026 STN DP NXPAY.xlsx", flow="dp",
+                          n_baris=30)
+        self._baris(gu, self.gw, date(2026, 8, 11), ref="nxpay-", n=30)
+
+        self.assertEqual(periksa_upload(gu), [])
+
+    def test_irisan_lintas_tengah_malam_tetap_dihitung(self):
+        """Jangkar cuma menentukan BOLEH-TIDAKNYA memeriksa; kolam pembandingnya
+        tetap melebar ±1 hari. Deposit larut malam 10-08 lazim di-approve panel
+        tanggal 11-08, jadi sebagian besar kode berkas ini memang hanya ada di
+        panel hari sebelumnya — wajar, bukan temuan.
+
+        Angkanya sengaja diskriminatif: tanpa pelebaran cuma 2 dari 30 (7%)
+        yang cocok, di bawah ambang 10% — pemeriksaan akan berbunyi."""
+        kemarin = self._upload(self.panel, "10-08-2026 STN DP PANEL.xlsx")
+        self._baris(kemarin, self.panel, date(2026, 8, 10), ref="nx-malam-", n=28)
+        pu = self._upload(self.panel, "11-08-2026 STN DP PANEL.xlsx")
+        self._baris(pu, self.panel, date(2026, 8, 11), ref="nx-siang-", n=2)
+        self._baris(pu, self.panel, date(2026, 8, 11), ref="panel-lain-", n=25)
+
+        gu = self._upload(self.gw, "11-08-2026 STN DP NXPAY.xlsx", n_baris=30)
+        self._baris(gu, self.gw, date(2026, 8, 11), ref="nx-siang-", n=2)
+        self._baris(gu, self.gw, date(2026, 8, 11), ref="nx-malam-", n=28)
+
+        self.assertEqual(periksa_upload(gu), [])
+
     def test_panel_pembanding_diambil_lintas_status_konsumsi(self):
         """Panel hari itu lazim SUDAH dikonsumsi batch sebelumnya; kalau hanya
         baris aktif yang dilihat, penjaga jadi buta tepat pada kasus tersibuk."""
