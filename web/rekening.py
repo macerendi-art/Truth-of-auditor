@@ -55,11 +55,28 @@ def rekening_breakdown(toko, dari, sampai=None):
         .order_by("occurred_at", "id")
     )
 
+    # --- Memo label, HIDUP HANYA SELAMA PANGGILAN INI (jangan pernah global:
+    # aplikasi keuangan, label harus ikut data terbaru tiap request). Rentang
+    # lebar menyentuh puluhan ribu baris tapi hanya ratusan upload, sedangkan
+    # `source_label_full` adalah FUNGSI MURNI dari kunci di bawah — dihitung
+    # sekali per kombinasi, hasilnya identik dengan per-baris.
+    #
+    # Kuncinya BERTIGA (source_type, account, upload) karena ketiganya menentukan
+    # label: `source_type` memilih jalur bank/gateway vs generik, `account.provider`
+    # MENANG atas provider upload, dan upload menyumbang provider + nama file +
+    # `owner_name`. Kalau kuncinya kurang — misalnya hanya `upload_id` — dua baris
+    # dengan rekening berbeda dari satu file akan lebur jadi SATU baris rekening,
+    # dan mutasi/saldonya tercatat di rekening yang salah.
+    _label = {}  # (source_type_id, account_id, upload_id) → label rekening
+
     per = {}  # label → {"items": [...], "is_gateway": bool}
     count = 0
     for t in rows:
         count += 1
-        label = t.source_label_full
+        kunci_label = (t.source_type_id, t.account_id, t.upload_id)
+        if kunci_label not in _label:
+            _label[kunci_label] = t.source_label_full
+        label = _label[kunci_label]
         slot = per.setdefault(label, {"items": [], "is_gateway": False})
         if t.source_type.key == "gateway":
             slot["is_gateway"] = True

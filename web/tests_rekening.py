@@ -5,12 +5,14 @@ Kembaran Breakdown Bracket untuk mutasi bank nyata: Deposit / Withdraw / Admin
 """
 from datetime import date, datetime
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from sources.models import SourceType, Toko, Upload
+import transactions.models as tx_models
+from sources.models import Account, SourceType, Toko, Upload
 from transactions.models import Transaction
 from web.rekening import rekening_breakdown
 
@@ -34,7 +36,7 @@ class _MoneyData(TestCase):
         return self._uploads[key]
 
     def mv(self, st, provider, owner, money, saldo, jam=10, jenis="depo", tanggal=TGL,
-           menit=0, detik=0):
+           menit=0, detik=0, account=None):
         """Satu baris mutasi uang. `money` bertanda, `saldo`=balance_after (str|None)."""
         self._n += 1
         return Transaction.objects.create(
@@ -42,7 +44,7 @@ class _MoneyData(TestCase):
             jenis=jenis, amount=abs(Decimal(money)), money_delta=Decimal(money),
             balance_after=None if saldo is None else Decimal(saldo),
             occurred_at=datetime(tanggal.year, tanggal.month, tanggal.day, jam, menit, detik),
-            row_hash=f"mv{self._n}",
+            row_hash=f"mv{self._n}", account=account,
         )
 
 
@@ -179,6 +181,47 @@ class RekeningRentangTests(_MoneyData):
         satu28 = rekening_breakdown(self.toko, d28)
         self.assertEqual(satu28["count"], 1)
         self.assertEqual(satu28["accounts"][0]["deposit"], Decimal("100"))
+
+
+class LabelMemoTests(_MoneyData):
+    """Memoisasi label rekening: kecepatan boleh berubah, labelnya tidak."""
+
+    def test_label_tetap_beda_untuk_upload_berbeda(self):
+        self.mv(self.bank, "BCA", "HENDI", "500000", None, jam=9)
+        self.mv(self.bank, "BRI", "PANCA", "700000", None, jam=9)
+        labels = {a["label"] for a in rekening_breakdown(self.toko, TGL)["accounts"]}
+        self.assertEqual(labels, {"BCA a/n HENDI", "BRI a/n PANCA"})
+
+    def test_label_beda_untuk_rekening_berbeda_di_upload_sama(self):
+        """Kunci memo TIDAK boleh cuma upload — `account.provider` menang."""
+        acc = Account.objects.create(
+            kind="bank", provider="BRI", name="BRI HENDI", toko=self.toko)
+        self.mv(self.bank, "BCA", "HENDI", "500000", None, jam=9)
+        self.mv(self.bank, "BCA", "HENDI", "300000", None, jam=10, account=acc)
+        accounts = rekening_breakdown(self.toko, TGL)["accounts"]
+        hasil = {a["label"]: a["deposit"] for a in accounts}
+        self.assertEqual(
+            hasil, {"BCA a/n HENDI": Decimal("500000"),
+                    "BRI a/n HENDI": Decimal("300000")})
+
+    def test_label_tidak_dihitung_ulang_per_baris(self):
+        acc = Account.objects.create(
+            kind="bank", provider="BRI", name="BRI HENDI", toko=self.toko)
+        for i in range(4):                                     # kombinasi 1
+            self.mv(self.bank, "BCA", "HENDI", "1000", None, jam=9, menit=i)
+        for i in range(3):                                     # kombinasi 2
+            self.mv(self.bank, "BRI", "PANCA", "1000", None, jam=10, menit=i)
+        for i in range(2):                                     # kombinasi 3
+            self.mv(self.bank, "BCA", "HENDI", "1000", None, jam=11, menit=i,
+                    account=acc)
+
+        asli = tx_models.specific_source_label
+        with patch("transactions.models.specific_source_label", wraps=asli) as m:
+            data = rekening_breakdown(self.toko, TGL)
+
+        self.assertEqual(data["count"], 9)
+        # 3 kombinasi (source_type, account, upload), bukan 9 baris
+        self.assertEqual(m.call_count, 3)
 
 
 class RekeningViewTests(_MoneyData):
