@@ -266,3 +266,120 @@ class DetectBonusTests(SimpleTestCase):
         finally:
             os.remove(p)
         self.assertNotIn("bracket_bonus", keys)
+
+
+COR_BONUS_HEADER = ["#", "Date", "Username", "Event Type", "Event Name",
+                    "Amount", "Description"]
+COR_BONUS_BARIS = [1, "04 Aug 2026 00:00:13", "bodatt", "Bonus Cashback",
+                   "BONUS ROLLINGAN SLOT HARIAN 0.5%", "85,770",
+                   "Free Bet: BONUS ROLLINGAN SLOT HARIAN 0.5% (85,770)"]
+
+
+class DetectCORBonusTests(SimpleTestCase):
+    """Deteksi bonus panel keluarga COR (Vigor/TM Gaming).
+
+    Dua penjaga negatif (`date & time`, `transaction id`) memagari dua bentuk
+    yang hidup di DOMAIN YANG SAMA — merekalah yang paling mungkin bertabrakan
+    saat vendor mengganti nama kolom. `transaction id` sekaligus memisahkan
+    dari `cor_panel_qris`, satu-satunya aturan lain yang juga menuntut
+    `username`.
+    """
+
+    def _deteksi(self, rows, nama="04-08-2026 W25 BONUS PANEL.xlsx"):
+        p = _xlsx(rows)
+        try:
+            return detect_source(p, nama)
+        finally:
+            os.remove(p)
+
+    def test_deteksi_cor_panel_bonus(self):
+        hasil = self._deteksi([COR_BONUS_HEADER, COR_BONUS_BARIS])
+
+        self.assertEqual(hasil[0]["parser_key"], "cor_panel_bonus")
+        self.assertGreaterEqual(hasil[0]["confidence"], 0.95)
+
+    def test_berkas_bonus_cor_bukan_qrflyer(self):
+        """Aturan nama-berkas 0.85 tak boleh ikut menyala."""
+        keys = [d["parser_key"] for d in
+                self._deteksi([COR_BONUS_HEADER, COR_BONUS_BARIS])]
+
+        self.assertNotIn("qrflyer", keys)
+
+    def test_menang_atas_aturan_nama_berkas(self):
+        """Nama berkas memuat 'QRIS' (memicu aturan 0.85); tanda tangan header
+        berkeyakinan 0.95 harus tetap di posisi 0."""
+        hasil = self._deteksi([COR_BONUS_HEADER, COR_BONUS_BARIS],
+                              nama="04-08-2026 W25 BONUS QRIS PANEL.xlsx")
+
+        self.assertEqual(hasil[0]["parser_key"], "cor_panel_bonus")
+
+    def test_tidak_menabrak_panel_bonus_nexus(self):
+        hasil = self._deteksi(
+            [["Credit Balance Report"],
+             ["No.", "Brand", "Date & Time", "Description", "Remarks",
+              "Payment Type", "Payment Details", "Amt.",
+              "Current Credit Balance"],
+             [1, "M77", "15-Jul-2026 00:00:09.927", "Adjustment: M77Fff",
+              "", "", "", -5, 9965]],
+            nama="CREDIT_BALANCE_M77.xlsx")
+
+        self.assertEqual(hasil[0]["parser_key"], "panel_bonus")
+        self.assertNotIn("cor_panel_bonus", [d["parser_key"] for d in hasil])
+
+    def test_tidak_menabrak_bracket_bonus(self):
+        for header, baris in (
+            (["Transaction ID", "Date", "Category", "Description", "Nominal",
+              "Deleted", "Created By"],
+             ["TID1", "15-Jul-2026 06:00:00", "BONUS LOYALTY", "Player: hhh",
+              25000, "No", "adminx"]),
+            (["Transaction ID", "Date", "Description", "Nominal", "Deleted",
+              "Created By"],
+             ["TID2", "15-Jul-2026 05:05:00", "K-BLD\nPlayer: Ggg", 30000,
+              "No", "adminx"]),
+        ):
+            with self.subTest(header=header):
+                hasil = self._deteksi([header, baris], nama="CREDIT_BONUS.xlsx")
+
+                self.assertEqual(hasil[0]["parser_key"], "bracket_bonus")
+                self.assertNotIn("cor_panel_bonus",
+                                 [d["parser_key"] for d in hasil])
+
+    def test_tidak_menabrak_keluarga_cor_dan_panel(self):
+        """`cor_panel_qris` juga menuntut `username` — inilah tetangga terdekat."""
+        for nama_kunci, header in (
+            ("cor_panel_qris",
+             ["Transaction ID", "Username", "Requested Date", "Amount"]),
+            ("cor_panel_bank",
+             ["From Bank", "Destination Bank", "Approved Date", "Amount"]),
+            ("cor_qris_gateway", ["OrderId", "GrandTotal", "BranchNominal"]),
+            ("cor_qris_wd_gateway",
+             ["Order ID (Merchant)", "RecipientName", "AccountNumber"]),
+            ("qhoki", ["Whitelabel Transaction ID", "NMID", "Amount"]),
+            ("panel", ["Ticket Number", "User Name", "Deposit Amount"]),
+            ("bracket", ["Kategori", "Credit Awal", "Credit Akhir"]),
+        ):
+            with self.subTest(kunci=nama_kunci):
+                keys = [d["parser_key"] for d in
+                        self._deteksi([header, ["x"] * len(header)],
+                                      nama="lain.xlsx")]
+
+                self.assertNotIn("cor_panel_bonus", keys)
+                self.assertIn(nama_kunci, keys)
+
+    def test_tidak_menabrak_empat_bentuk_qrflyer(self):
+        for i, header in enumerate((
+            ["TXN ID", "Client Reference", "Transaction Value",
+             "Settlement Time"],
+            ["transaction_id", "client_reference", "total_amount",
+             "trans_date_time"],
+            ["Transaction Id", "Client Reference", "RRN", "Callback", "Amount"],
+            ["transaction_id", "Client Reff", "total_amount", "net_amount",
+             "date"],
+        )):
+            with self.subTest(bentuk=i + 1):
+                keys = [d["parser_key"] for d in
+                        self._deteksi([header, ["x"] * len(header)],
+                                      nama="flyer.xlsx")]
+
+                self.assertNotIn("cor_panel_bonus", keys)
+                self.assertIn("qrflyer", keys)

@@ -92,6 +92,15 @@ def detect_source(path, filename=""):
             add("panel_bonus", 0.95)  # Panel Credit Balance (ledger kredit; bonus)
         if _has(t, "transaction id") and _has(t, "nominal") and _has(t, "deleted") and _has(t, "created by"):
             add("bracket_bonus", 0.95)  # Bracket Credit/Non-Credit Bonus
+        # Bonus panel keluarga COR (Vigor/TM Gaming). Dua penjaga negatif
+        # memagari bentuk yang hidup di DOMAIN SAMA — yang paling mungkin
+        # bertabrakan kalau vendor mengganti nama kolom: "date & time" memisah
+        # dari `panel_bonus` (Credit Balance Nexus), "transaction id" memisah
+        # dari `bracket_bonus` DAN sekaligus dari `cor_panel_qris`, satu-satunya
+        # aturan lain yang juga menuntut "username".
+        if _has(t, "event type") and _has(t, "event name") and _has(t, "username") \
+                and not _has(t, "date & time") and not _has(t, "transaction id"):
+            add("cor_panel_bonus", 0.95)
         if _has(t, "kategori") and (_has(t, "credit awal") or _has(t, "credit akhir")):
             add("bracket", 0.95)
         if _has(t, "client reference") and (_has(t, "settlement time") or _has(t, "txn id")):
