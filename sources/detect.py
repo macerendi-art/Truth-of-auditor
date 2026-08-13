@@ -106,6 +106,12 @@ def detect_source(path, filename=""):
         # cor_panel_qris menuntut "requested date" — ketiganya absen di sini.
         if _has(t, "client reference") and _has(t, "rrn") and _has(t, "callback"):
             add("qrflyer", 0.95)
+        # QR FLYER bentuk keempat (LTN 12-08-2026): 'Client Reff' + net_amount +
+        # rate_merchant. "client reff" BUKAN substring "client reference"
+        # (huruf ke-11 beda: 'f' vs 'e'), jadi aturan ini tak menabrak yang di
+        # atas. Sebelum ini bentuk keempat cuma lolos lewat nama file (0,85).
+        if _has(t, "client reff") and (_has(t, "total_amount") or _has(t, "net_amount")):
+            add("qrflyer", 0.95)
         if _has(t, "qris") or _has(t, "qr flyer") or "qrflyer" in fn or "qris" in fn or "qr flyer" in fn:
             add("qrflyer", 0.85)
         if _has(t, "e-statement") or _has(t, "rekening koran") or "mandiri" in fn:

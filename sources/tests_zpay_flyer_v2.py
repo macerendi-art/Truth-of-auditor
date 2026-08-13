@@ -53,6 +53,12 @@ FLYER_BARU = ["created_date", "client_reference", "transaction_id", "username",
 # Bentuk KETIGA, berkas HKW 01-08-2026 — jam WIB, tanpa geseran.
 FLYER_KETIGA = ["RRN", "Transaction Id", "Client Reference", "Username",
                 "Amount", "Fee", "Fee Pct", "Created At", "Callback"]
+# Bentuk KEEMPAT, berkas LTN 12-08-2026. Tiket + nominal tetap terbaca (nama
+# kolomnya sudah dikenal), tapi `date`/`Client Reff`/`charges` TIDAK — dan
+# karena tak ada kolom waktu yang cocok, 339 baris masuk TANPA tanggal sama
+# sekali sehingga tak pernah terlihat oleh jendela tanggal mana pun.
+FLYER_KEEMPAT = ["date", "Client Reff", "transaction_id", "rrn", "username",
+                 "total_amount", "charges", "net_amount", "rate_merchant"]
 ZPAY = ["Created At", "Paid At", "Order ID", "Payment Method", "Nama Merchant",
         "RRN", "Tiket Number", "User ID", "Nilai", "Fee", "Sub Total",
         "Confirmed Bot At", "Status", "Gateway", "Source", "Status Settled",
@@ -219,6 +225,134 @@ class FlyerFormatBaruTest(SimpleTestCase):
         """Tanpa tanda tangan header, berkas ini cuma lolos lewat nama file
         (0,85) — cukup untuk masuk, tidak cukup untuk dipercaya."""
         path = _xlsx([FLYER_BARU, _baris_baru()])
+        try:
+            hasil = detect_source(path, "laporan vendor.xlsx")   # nama TANPA "qris"
+        finally:
+            os.remove(path)
+
+        self.assertEqual(hasil[0]["parser_key"], "qrflyer")
+        self.assertGreaterEqual(hasil[0]["confidence"], 0.9)
+
+
+# Baris nyata pertama berkas LTN 12-08-2026.
+def _baris_keempat(ticket="D2506425", ref="D260812119700084141", user="Pablo007",
+                   total="50000.00", charges="600.00", net="49400.00",
+                   tanggal="2026-08-12 13:30:59.0"):
+    return [tanggal, ref, ticket, "1r8yujw12322", user, total, charges, net, "1.2"]
+
+
+class FlyerBentukKeempatTest(SimpleTestCase):
+    """Bentuk KEEMPAT (LTN 12-08-2026) — kegagalan senyap ketiga vendor ini.
+
+    Berbeda dari dua kegagalan sebelumnya, dan justru itu pelajarannya:
+    kolom tiket (`transaction_id`) dan nominal (`total_amount`) SUDAH dikenal,
+    jadi penjaga header bentuk ketiga lolos dan 339 baris masuk dengan tiket,
+    nominal, dan username yang BENAR SEMUA. Yang hilang cuma `date` — dan itu
+    sudah cukup untuk melenyapkan uangnya: `posted_date` NULL membuat baris tak
+    terlihat oleh jendela tanggal mana pun, sehingga 339 baris panel LTN
+    berhenti di "Belum ada uang masuk" padahal uangnya ada di database.
+    """
+
+    def _parse(self, rows, flow="dp"):
+        path = _xlsx(rows)
+        try:
+            return QRFlyerParser().parse(path, flow=flow)
+        finally:
+            os.remove(path)
+
+    def test_bentuk_KEEMPAT_terbaca_penuh(self):
+        r = self._parse([FLYER_KEEMPAT, _baris_keempat()])[0]
+
+        self.assertEqual(r["ticket_no"], "D2506425")
+        self.assertEqual(r["reference"], "D260812119700084141")   # 'Client Reff'
+        self.assertEqual(r["username"], "Pablo007")
+        self.assertEqual(str(r["amount"]), "50000.00")            # BRUTO, bukan net
+        self.assertEqual(str(r["fee"]), "600.00")                 # 'charges'
+        self.assertEqual(str(r["occurred_at"]), "2026-08-12 13:30:59")
+        self.assertEqual(str(r["posted_date"]), "2026-08-12")
+
+    def test_nominal_diambil_dari_bruto_BUKAN_net_amount(self):
+        """`net_amount` (bruto − charges) ada di kolom sebelahnya. Panel mencatat
+        bruto; salah ambil = tiap baris meleset sebesar fee dan pass 0 gagal."""
+        r = self._parse([FLYER_KEEMPAT, _baris_keempat()])[0]
+
+        self.assertEqual(str(r["amount"]), "50000.00")
+        self.assertNotEqual(str(r["amount"]), "49400.00")
+
+    def test_bentuk_keempat_TANPA_geseran_jam(self):
+        """Jam sudah WIB — dibuktikan pada 339 baris LTN 12-08-2026: panel
+        menyetujui median +3 detik setelah `date`, p10/p90 +2/+6 detik, dan NOL
+        baris bernilai negatif. Geseran +7 jam ala ZPay akan membalik semuanya
+        jadi negatif dan memblokir pass 0 lewat jendela tanggal berarah."""
+        r = self._parse([FLYER_KEEMPAT,
+                         _baris_keempat(tanggal="2026-08-12 23:59:17.0")])[0]
+
+        self.assertEqual(str(r["occurred_at"]), "2026-08-12 23:59:17")
+        self.assertEqual(str(r["posted_date"]), "2026-08-12")
+
+    def test_row_hash_SAMA_dengan_bentuk_lama(self):
+        """Satu transaksi logis, empat bentuk berkas, satu hash."""
+        lama = self._parse([FLYER_LAMA,
+                            ["2026-08-12 13:30:59", "2026-08-12 13:31:02",
+                             "D2506425", "D260812119700084141", "Pablo007",
+                             "SUCCESS", "50000.00"]])[0]
+        keempat = self._parse([FLYER_KEEMPAT, _baris_keempat()])[0]
+
+        self.assertEqual(lama["row_hash"], keempat["row_hash"])
+
+    def test_beda_huruf_besar_kecil_dan_pemisah_TAK_lagi_soal(self):
+        """Inti pertahanan barunya: kolom dicocokkan setelah dinormalkan
+        (huruf kecil, tanpa spasi/garis bawah/tanda baca). `Date`, `date`,
+        `DATE`, dan `Total_Amount` karena itu tak perlu entri baru — dan bentuk
+        yang SUDAH ada di produksi (BSW/M25 memakai `Date`) ikut sembuh."""
+        r = self._parse([["DATE", "CLIENT_REFF", "Transaction_ID", "RRN",
+                          "USERNAME", "Total Amount", "Charges", "net_amount",
+                          "rate_merchant"],
+                         _baris_keempat()])[0]
+
+        self.assertEqual(r["ticket_no"], "D2506425")
+        self.assertEqual(r["reference"], "D260812119700084141")
+        self.assertEqual(r["username"], "Pablo007")
+        self.assertEqual(str(r["amount"]), "50000.00")
+        self.assertEqual(str(r["posted_date"]), "2026-08-12")
+
+    def test_normalisasi_TIDAK_boleh_mencocokkan_sebagian(self):
+        """`net_amount` menormal jadi 'netamount', BUKAN 'amount'. Kalau
+        pencocokan diubah jadi substring, kolom net akan menelan kolom bruto
+        dan tiap baris meleset sebesar fee — tanpa error di mana pun."""
+        peta = QRFlyerParser._petakan(["net_amount", "total_amount"])
+
+        self.assertEqual(peta["amount"], "total_amount")
+
+    def test_header_tanpa_kolom_waktu_APA_PUN_melempar(self):
+        """Justru gerbang yang absen saat bentuk keempat datang. Tanpa waktu,
+        baris yang dihasilkan mustahil dicocokkan — dan diamnya jauh lebih
+        mahal daripada unggahan yang ditolak."""
+        with self.assertRaises(ValueError) as ctx:
+            self._parse([["Client Reff", "transaction_id", "rrn", "username",
+                          "total_amount", "charges"],
+                         ["D260812", "D2506425", "r1", "Pablo007", "50000", "600"]])
+
+        pesan = str(ctx.exception)
+        self.assertIn("waktu", pesan.lower())
+        self.assertIn("transaction_id", pesan)   # header nyata disebut
+        self.assertIn("Created At", pesan)       # yang dikenal disebut
+
+    def test_kolom_settlement_SAJA_tidak_melempar(self):
+        """`posted_date` = (settled or created), jadi berkas yang hanya membawa
+        waktu settlement tetap sah. Gerbangnya 'salah satu', bukan 'created'."""
+        r = self._parse([["Callback", "Transaction Id", "Client Reference",
+                          "Username", "Amount"],
+                         ["2026-08-12 13:31:02", "D2506425",
+                          "D260812119700084141", "Pablo007", 50000]])[0]
+
+        self.assertEqual(str(r["posted_date"]), "2026-08-12")
+        self.assertIsNone(r["occurred_at"])
+
+    def test_deteksi_bentuk_keempat_berkeyakinan_tinggi(self):
+        """Sebelum ini bentuk keempat cuma lolos lewat aturan nama file (0,85)
+        — celah yang sama persis dengan bentuk ketiga dulu."""
+        path = _xlsx([FLYER_KEEMPAT, _baris_keempat()])
         try:
             hasil = detect_source(path, "laporan vendor.xlsx")   # nama TANPA "qris"
         finally:

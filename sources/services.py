@@ -107,6 +107,50 @@ def _decrypt_to_temp(path, password):
     return tmp.name
 
 
+def periksa_hasil_bertanggal(rows, parser_key):
+    """Gerbang lintas-parser: baris tanpa waktu SAMA SEKALI bukan data.
+
+    Ini penerapan umum dari pelajaran QR Flyer bentuk keempat. Penjaga header
+    per-parser hanya melindungi parser yang sudah tahu bentuk barunya; gerbang
+    ini menangkap kelas kegagalannya di satu tempat, untuk SEMUA parser: vendor
+    mengganti nama kolom waktu, parser tak menemukannya, lalu menghasilkan
+    baris yang tiket dan nominalnya benar tapi tak punya tanggal.
+
+    Baris begitu **inert, dan diamnya itulah kerusakannya**: `occurred_at` NULL
+    membuatnya tak terlihat oleh jendela tanggal mesin pencocokan (engine
+    menyaring `occurred_at__date`), `posted_date` NULL menghilangkannya dari
+    seluruh halaman laporan. Unggahannya dilaporkan BERHASIL dengan sekian ribu
+    baris, sementara sisi panelnya berhenti di "Belum ada uang masuk" — persis
+    yang terjadi pada 1.705 baris di LTN dan BSW.
+
+    Sengaja menuntut KEDUA kolom kosong di SELURUH baris sebelum melempar:
+
+    * Kosong dua-duanya = pasti rusak. Tak ada satu pun parser yang sengaja
+      menghasilkan baris begitu — semuanya menurunkan `posted_date` dari
+      timestamp yang di-parse, jadi NULL selalu berarti pembacaan gagal.
+    * Sebagian kosong = belum tentu rusak (baris footer/pending yang memang tak
+      bertanggal), jadi tidak digerbang. Bukti produksinya: 6,1 juta baris,
+      hanya satu baris di luar insiden Flyer yang tak bertanggal.
+
+    Ini gerbang KEPASTIAN, sekelas penjaga nol-hasil ZPay — bukan tebakan
+    kebiasaan seperti `web/penjaga.py` yang sengaja hanya memperingatkan.
+    Fakta "ada baris masuk, nol di antaranya bisa dipakai" tak butuh sejarah
+    toko untuk dinilai, jadi memblokir di sini tak bisa salah menuduh brand
+    baru.
+    """
+    if not rows:
+        return                      # berkas tanpa baris transaksi tetap sah
+    if any(r.get("posted_date") or r.get("occurred_at") for r in rows):
+        return
+    raise ValueError(
+        "Berkas terbaca %d baris tapi TIDAK SATU PUN punya tanggal, jadi tak "
+        "ada yang bisa dicocokkan maupun muncul di laporan. Hampir selalu ini "
+        "berarti vendor mengganti nama kolom tanggalnya dan parser '%s' belum "
+        "mengenal nama barunya. Kirimkan berkasnya ke pengembang — jangan "
+        "diunggah ulang, hasilnya akan sama." % (len(rows), parser_key)
+    )
+
+
 def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=None, toko=None, provider="", password="", original_name=""):
     """Parse `file_path` dengan parser `parser_key`, simpan sebagai Transaction.
 
@@ -128,6 +172,7 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
         parse_path = tmp_path
     try:
         rows = parser.parse(parse_path, flow=flow)
+        periksa_hasil_bertanggal(rows, parser_key)   # sebelum apa pun ditulis
         st = SourceType.objects.get(key=parser.source_key)
         # Pemilik rekening: header file (BCA/Mandiri) dulu, fallback nama file (BRI).
         # getattr: parser double di test boleh tanpa .meta.

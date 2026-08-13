@@ -1,5 +1,6 @@
 """Parser gateway pembayaran (sumber UANG, setara bank): NXPAY, QR FLYER, QHOKI, RPAY."""
 import csv
+import re
 from datetime import timedelta
 from decimal import Decimal
 
@@ -47,32 +48,52 @@ class NXPayParser(BaseParser):
 
 
 class QRFlyerParser(BaseParser):
-    """QR FLYER — TIGA bentuk header, dipetakan lewat daftar alias.
+    """QR FLYER — EMPAT bentuk header, dipetakan lewat daftar alias ternormalkan.
 
     Vendornya mengganti penamaan kolom berulang kali sejak Agustus 2026, jadi
-    kolom dikenali dari DAFTAR nama yang mungkin, bukan dua cabang mati:
+    kolom dikenali dari DAFTAR nama yang mungkin, bukan cabang mati per bentuk:
 
         tiket panel  : TXN ID | transaction_id | Transaction Id
-        referensi    : Client Reference | client_reference
+        referensi    : Client Reference | client_reference | Client Reff
         pemain       : Customer ID / User Account | username | Username
         nominal      : Transaction Value | total_amount | Amount
-        waktu buat   : Transaction Date | trans_date_time | Created At
+        waktu buat   : Transaction Date | trans_date_time | Created At | date
         waktu settle : Settlement Time | bot_success_time | Callback
+        biaya        : Fee | charges
 
-    Ketiga bentuk memakai jam WIB — dibuktikan pada bentuk ketiga (HKW
-    01-08-2026): `Created At` merentang penuh 00:00:36–23:59:45 dan panel
-    menyetujui median 4 detik setelah `Callback`. Tak ada geseran, tidak
-    seperti ZPay.
+    **Pencocokan kolom dinormalkan** (huruf kecil, spasi/garis bawah/tanda baca
+    dibuang) lalu dibandingkan PERSIS. Normalisasi itu meredam satu kelas
+    penggantian nama tanpa perlu rilis baru — `Date`/`date`/`DATE` dan
+    `total_amount`/`Total Amount` jatuh ke entri yang sama. Persis, BUKAN
+    substring, dan itu penting: `net_amount` menormal jadi 'netamount' sehingga
+    tak pernah tertukar dengan `amount`. Kalau tertukar, tiap baris meleset
+    sebesar fee dan pass 0 gagal tanpa satu pun pesan error.
 
-    **Penjaga header:** bila kolom tiket ATAU nominal tak ditemukan, parser
-    MELEMPAR sambil menyebut header yang benar-benar ada. Ini pelajaran mahal
-    dan bentuknya berbeda dari penjaga nol-hasil ZPay: bentuk ketiga tetap
-    punya `Client Reference`, jadi baris TIDAK dilewati sebagai footer —
-    parser menghasilkan 1.519 baris LENGKAP tapi kosong melompong (tiket ''),
-    nominal Rp0, tanpa tanggal. Sampah yang lolos jauh lebih berbahaya
-    daripada nol baris: ia mengaku data. Lima unggahan di empat toko sudah
-    terlanjur memasukkan 6.118 baris seperti itu ke produksi (untung inert —
-    nol terpakai batch, nol hasil pencocokan) sebelum ini ketahuan.
+    Keempat bentuk memakai jam WIB — dibuktikan pada bentuk ketiga (HKW
+    01-08-2026: panel menyetujui median 4 detik setelah `Callback`) dan diuji
+    ulang mandiri pada bentuk keempat (LTN 12-08-2026: 339 baris, median +3
+    detik, p10/p90 +2/+6, NOL selisih negatif). Tak ada geseran, tidak seperti
+    ZPay.
+
+    **Penjaga header — tiga bidang, dan bidang ketiganya ditambahkan mahal.**
+    Bila kolom tiket, nominal, ATAU seluruh kolom waktu tak ditemukan, parser
+    MELEMPAR sambil menyebut header yang benar-benar ada. Dua kegagalan senyap
+    mengajarkan bentuknya:
+
+    * Bentuk ketiga (v1.17): `Client Reference` masih ada sehingga baris tidak
+      dilewati sebagai footer — parser menghasilkan 1.519 baris LENGKAP tapi
+      kosong melompong (tiket '', Rp0, tanpa tanggal). Penjaga tiket+nominal
+      lahir dari sini; 6.118 baris seperti itu sudah terlanjur masuk produksi.
+    * Bentuk keempat (v1.18.1): tiket DAN nominal justru terbaca benar semua,
+      jadi penjaga itu lolos dengan tenang. Yang hilang cuma `date` — dan itu
+      saja sudah cukup: `posted_date` NULL membuat baris tak terlihat oleh
+      jendela tanggal mana pun, sehingga 339 baris panel LTN berhenti di
+      "Belum ada uang masuk" padahal uangnya sudah ada di database. 1.705 baris
+      di dua toko (LTN 339, BSW 1.366) hilang begitu sebelum ini ketahuan.
+
+    Gerbang waktunya "salah satu", bukan `created`: `posted_date` diturunkan
+    dari `(settled or created)`, jadi berkas yang hanya membawa waktu
+    settlement tetap sah.
 
     `row_hash` sengaja memakai resep yang SAMA untuk semua bentuk (nilainya
     identik), supaya berkas yang sama diekspor ulang dalam bentuk lain tetap
@@ -81,32 +102,50 @@ class QRFlyerParser(BaseParser):
 
     source_key = "gateway"
 
-    #: bidang kanonik -> nama kolom yang mungkin dipakai vendor, urut prioritas
+    #: bidang kanonik -> nama kolom yang mungkin dipakai vendor, urut prioritas.
+    #: Dibandingkan setelah `_norm`, jadi varian huruf besar/kecil dan
+    #: spasi-vs-garis-bawah TIDAK perlu entri sendiri.
     _ALIAS = {
         "ticket": ("TXN ID", "transaction_id", "Transaction Id"),
-        "ref": ("Client Reference", "client_reference"),
+        "ref": ("Client Reference", "Client Reff"),
         "username": ("Customer ID / User Account", "username", "Username"),
         "amount": ("Transaction Value", "total_amount", "Amount"),
-        "created": ("Transaction Date", "trans_date_time", "Created At"),
+        # `date` paling belakang: nama paling umum, jadi paling gampang salah
+        # rebut kalau berkasnya kebetulan punya kolom waktu yang lebih spesifik.
+        "created": ("Transaction Date", "trans_date_time", "Created At", "date"),
         "settled": ("Settlement Time", "bot_success_time", "Callback"),
         "status": ("Payment Status", "status"),
-        "fee": ("Fee",),
+        "fee": ("Fee", "charges"),
     }
-    #: tanpa kedua ini berkasnya bukan laporan Flyer yang bisa dipercaya
+    #: tanpa ketiganya berkasnya bukan laporan Flyer yang bisa dipercaya
     _WAJIB = ("ticket", "amount")
+    #: minimal SALAH SATU harus ada — tanpa waktu, barisnya mustahil dicocokkan
+    _WAJIB_WAKTU = ("created", "settled")
+
+    @staticmethod
+    def _norm(nama):
+        """'Client Reff' / 'client_reff' / 'CLIENT REFF' -> 'clientreff'."""
+        return re.sub(r"[^a-z0-9]", "", str(nama or "").lower())
 
     @classmethod
     def _petakan(cls, header):
         """{bidang kanonik: nama kolom nyata} untuk yang ketemu di header."""
-        ada = [h for h in (header or []) if h]
-        return {bidang: next((n for n in nama if n in ada), None)
+        ada = {}
+        for h in (header or []):
+            if h:
+                ada.setdefault(cls._norm(h), h)   # kemunculan pertama menang
+        return {bidang: next((ada[k] for k in (cls._norm(n) for n in nama)
+                              if k in ada), None)
                 for bidang, nama in cls._ALIAS.items()}
 
     def parse(self, path, flow=""):
         header, rows = read_xlsx_rows(path, header_row=1)
         peta = self._petakan(header)
         hilang = [b for b in self._WAJIB if not peta[b]]
+        if not any(peta[b] for b in self._WAJIB_WAKTU):
+            hilang.append("waktu (%s)" % "/".join(self._WAJIB_WAKTU))
         if hilang:
+            dikenal = list(self._WAJIB) + list(self._WAJIB_WAKTU)
             raise ValueError(
                 "Laporan QR Flyer tak dikenali: kolom %s tidak ditemukan. "
                 "Header berkas: %s. Kolom yang dikenal untuk %s. Kirimkan "
@@ -114,7 +153,7 @@ class QRFlyerParser(BaseParser):
                 % (" dan ".join(hilang),
                    ", ".join(repr(h) for h in (header or []) if h) or "(kosong)",
                    "; ".join("%s = %s" % (b, "/".join(self._ALIAS[b]))
-                             for b in self._WAJIB))
+                             for b in dikenal))
             )
         kol = lambda bidang: peta[bidang] or "\x00"  # noqa: E731 - kolom absen = selalu None
         out = []
