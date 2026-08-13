@@ -15,7 +15,8 @@ from .models import SourceType, Upload
 from .parsers.banks import BCACSVParser, BRIParser, MandiriParser
 from .parsers.bca_pdf import BCAPDFParser
 from .parsers.bni_pdf import BNIPDFParser
-from .parsers.bonus import BracketBonusParser, PanelBonusParser
+from .parsers.bonus import (BracketBonusParser, CORPanelBonusParser,
+                            PanelBonusParser)
 from .parsers.bracket import BracketParser
 from .parsers.cor import (
     CORPanelBankParser,
@@ -57,6 +58,7 @@ PARSERS = {
     "qhoki": QHokiParser,
     "zpay": ZPayParser,
     "panel_bonus": PanelBonusParser,
+    "cor_panel_bonus": CORPanelBonusParser,
     "bracket_bonus": BracketBonusParser,
 }
 
