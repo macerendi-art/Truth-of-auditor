@@ -22,6 +22,22 @@ def _reference(toko):
     ).order_by("-recon_date").values_list("recon_date", flat=True).first() or date_cls.today()
 
 
+def _batas_settlement(d, window):
+    """`d + window` yang MENEMPEL di ujung kalender, bukan meledak.
+
+    Kembaran `web/views.py::_geser_hari` — sengaja disalin dan bukan diimpor:
+    `views` mengimpor modul ini, jadi impor baliknya akan melingkar. `d` di
+    sini berasal dari `occurred_at` hasil ingest, bukan dari form; satu tanggal
+    rusak di file sumber (tahun 9999) sudah cukup membuat `d + window`
+    melempar `OverflowError` dan mematikan seluruh halaman /settlement/.
+    Untuk tanggal waras hasilnya persis `d + timedelta(days=window)`.
+    """
+    try:
+        return d + timedelta(days=window)
+    except OverflowError:
+        return date_cls.max if window > 0 else date_cls.min
+
+
 def pending_settlement_rows(toko, reference=None):
     """List baris menunggu settlement, urut TERTUA dulu."""
     if reference is None:
@@ -32,7 +48,7 @@ def pending_settlement_rows(toko, reference=None):
         home = res.run.batch
         window = home.tolerance.date_window_days if home and home.tolerance_id else 1
         d = tx.occurred_at.date() if tx.occurred_at else None
-        batas = (d + timedelta(days=window)) if d else None
+        batas = _batas_settlement(d, window) if d else None
         rows.append({
             "tx_id": tx_id,
             "tanggal": d,

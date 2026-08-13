@@ -239,6 +239,114 @@ class BySourceTests(_Base):
         self.assertEqual(saring.context["tx_total"], 5)
 
 
+class UrutanSeriTests(_Base):
+    """Urutan batang saat dua sumber punya jumlah baris SAMA.
+
+    Tanpa pemecah seri eksplisit, urutannya milik rencana eksekusi database:
+    `order_by("-n")` saja tak mengatakan apa pun tentang baris ber-`n` sama.
+    Dulu pengelompokan `(name, key)` kebetulan mengeluarkannya urut nama;
+    setelah pindah ke `source_type_id` ia kebetulan urut id — dan di Postgres
+    "kebetulan" itu bahkan tak dijamin sama antar-eksekusi. Nilai `n` dan
+    `tx_total` tak pernah berbeda; yang bergoyang cuma urutannya, yang untuk
+    aplikasi audit tetap mengganggu (halaman yang sama, urutan lain).
+
+    Fixture-nya sengaja dibuat agar urutan PEMBUATAN (=id) berlawanan dengan
+    urutan NAMA: kalau tidak, tes ini akan sama-sama hijau untuk kedua
+    perilaku dan tak membuktikan apa pun.
+    """
+
+    def test_urutan_stabil_saat_jumlah_seri(self):
+        # id menaik: zeta → alfa → beta  (nama menaik: alfa → beta → zeta)
+        zeta = SourceType.objects.create(key="z_zeta", name="Zeta")
+        alfa = SourceType.objects.create(key="a_alfa", name="Alfa")
+        beta = SourceType.objects.create(key="b_beta", name="Beta")
+        self.assertLess(zeta.id, alfa.id)  # fixture memang melawan urutan nama
+        self.assertLess(alfa.id, beta.id)
+        for st in (zeta, alfa, beta):
+            for _ in range(2):  # n SAMA persis untuk ketiganya → seri
+                self.buat_tx(st, jenis="lainnya")
+        # satu sumber ber-n lebih besar: memastikan kunci utama tetap `-n`
+        for _ in range(5):
+            self.buat_tx(self.panel)
+
+        r = self.get()
+        self.assertEqual(
+            [s["source_type__key"] for s in r.context["by_source"]],
+            ["panel", "a_alfa", "b_beta", "z_zeta"],
+        )
+        self.assertEqual([s["n"] for s in r.context["by_source"]], [5, 2, 2, 2])
+        self.assertEqual(r.context["tx_total"], 11)
+
+
+class SumberYatimTests(_Base):
+    """Baris yang `source_type_id`-nya menunjuk `SourceType` yang tak ada.
+
+    Lewat ORM ini mustahil (`source_type` FK non-null `PROTECT`); butuh
+    kerusakan di tingkat DB — restore parsial, hapus manual lewat psql,
+    migrasi yang gagal separuh. Justru karena begitu, kejanggalannya harus
+    TERLIHAT, bukan mematikan halaman: menaikkan `_sumber[...]` jadi `KeyError`
+    membuat SELURUH dashboard 500, bukan cuma kartunya — mode gagal terburuk
+    yang mungkin dari sebuah diagram batang.
+
+    Kode lama pun tidak benar (INNER JOIN membuang baris yatim dari
+    `by_source` sementara `tx.count()` tetap menghitungnya, jadi bar-nya
+    berbohong tanpa peringatan). Kontrak yang benar: baris yatim TETAP
+    terhitung di `tx_total` DAN tampil dengan label pengganti.
+    """
+
+    def _yatimkan(self, tx):
+        """Tunjuk `source_type_id` ke id yang tak ada — SQL mentah, karena
+        `save()` akan ditolak FK. Aman di SQLite: Django membuat FK-nya
+        DEFERRABLE INITIALLY DEFERRED dan `TestCase` tak pernah commit."""
+        hantu = SourceType.objects.order_by("-id").first().id + 999
+        with connection.cursor() as cur:
+            cur.execute(
+                "UPDATE transactions_transaction SET source_type_id = %s WHERE id = %s",
+                [hantu, tx.id],
+            )
+        # dikembalikan lagi di akhir tes: jangan sampai pemeriksaan constraint
+        # saat teardown yang meledak, bukan kode yang sedang diuji.
+        self.addCleanup(self._pulihkan, tx.id, tx.source_type_id)
+        return hantu
+
+    def _pulihkan(self, tx_id, source_type_id):
+        with connection.cursor() as cur:
+            cur.execute(
+                "UPDATE transactions_transaction SET source_type_id = %s WHERE id = %s",
+                [source_type_id, tx_id],
+            )
+
+    def test_sumber_yatim_tidak_mematikan_dashboard(self):
+        for _ in range(3):
+            self.buat_tx(self.panel)
+        rusak = self.buat_tx(self.bank)
+        self._yatimkan(rusak)
+
+        r = self.get()  # ← `self.get` sudah meng-assert 200
+        # barisnya TIDAK boleh hilang diam-diam: tetap ikut penyebut bar
+        self.assertEqual(r.context["tx_total"], 4)
+        self.assertEqual(r.context["tx_total"],
+                         sum(s["n"] for s in r.context["by_source"]))
+        # ...dan kejanggalannya kelihatan di layar, bukan disembunyikan
+        yatim = [s for s in r.context["by_source"] if s["source_type__key"] == "?"]
+        self.assertEqual(len(yatim), 1)
+        self.assertEqual(yatim[0]["n"], 1)
+        self.assertEqual(yatim[0]["source_type__name"], "(sumber tak dikenal)")
+        self.assertContains(r, "(sumber tak dikenal)")
+
+    def test_bentuk_dict_tetap_sama_untuk_baris_yatim(self):
+        """Label pengganti tetap harus memenuhi kontrak template (3 kunci,
+        `n` int, dua sisanya str) — kalau tidak, kartunya merender kosong."""
+        rusak = self.buat_tx(self.panel)
+        self._yatimkan(rusak)
+        r = self.get()
+        for s in r.context["by_source"]:
+            self.assertEqual(set(s), {"source_type__key", "source_type__name", "n"})
+            self.assertIsInstance(s["n"], int)
+            self.assertIsInstance(s["source_type__key"], str)
+            self.assertIsInstance(s["source_type__name"], str)
+
+
 class DashboardSumberQueryTests(_Base):
     """Jumlah query dashboard harus KONSTAN terhadap jumlah BARIS — itu justru
     alasan sensus `Transaction` diganti agregat `Upload`: bukan jumlah query-nya

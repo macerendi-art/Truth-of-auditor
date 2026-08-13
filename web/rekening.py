@@ -7,7 +7,7 @@ Net / Trx / Saldo Awal / Saldo Akhir / Selisih Kontrol. Saldo memakai
 dengan breakdown FR (`_saldo_batas`) — kebal acak urutan. Sumber tanpa saldo
 (gateway QRIS, BCA PDF) → saldo & selisih "—".
 """
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from transactions.models import Transaction
@@ -45,11 +45,29 @@ def rekening_breakdown(toko, dari, sampai=None):
     # `CAST(occurred_at AS DATE) BETWEEN dari AND sampai` == `dari 00:00:00 <=
     # occurred_at < (sampai+1) 00:00:00`; baris `occurred_at` NULL sama-sama gugur.
     # Batasnya dikunci `test_batas_tengah_malam_ikut_terhitung` — jangan "dirapikan".
+    #
+    # Ujung kalender ditangani TERPISAH: `date.max` (9999-12-31) + 1 hari melempar
+    # `OverflowError` — di Python, SEBELUM query dibentuk — jadi yang muncul bukan
+    # tabel kosong melainkan HTTP 500 untuk seluruh halaman. Tanggal itu bisa
+    # dicapai lewat UI biasa: `<input type="date">` di rekening.html tak punya
+    # atribut `max` dan spinner tahun bawaan browser sampai 9999, sementara
+    # `web/views.py::_parse_date` (`date.fromisoformat`) menerimanya sebagai
+    # tanggal sah. Pembatasan di template bukan penjaga; penjaganya di sini.
+    # Di ujung itu batas EKSKLUSIF `sampai+1 00:00:00` diganti batas INKLUSIF
+    # `datetime.max` — semantiknya sama persis ("sampai akhir hari terakhir yang
+    # bisa diwakili") tanpa aritmetika yang bisa meluap, dan untuk tanggal waras
+    # mana pun cabang ini tak pernah diambil sehingga tak satu angka pun berubah.
+    if sampai >= date.max:
+        batas_atas = {"occurred_at__lte": datetime.max}
+    else:
+        batas_atas = {
+            "occurred_at__lt": datetime.combine(sampai + timedelta(days=1), time.min)
+        }
     rows = (
         Transaction.objects.filter(
             toko=toko, source_type__key__in=MONEY_KEYS,
             occurred_at__gte=datetime.combine(dari, time.min),
-            occurred_at__lt=datetime.combine(sampai + timedelta(days=1), time.min),
+            **batas_atas,
         )
         .select_related("source_type", "upload", "account", "upload__account")
         .order_by("occurred_at", "id")

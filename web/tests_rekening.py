@@ -273,3 +273,32 @@ class RekeningViewTests(_MoneyData):
         r = self.client.get(reverse("rekening_breakdown"), {"date": "2026-06-28"})
         self.assertEqual(r.status_code, 200)
         self.assertIn("BCA a/n HENDI", r.content.decode())
+
+    def test_tanggal_ekstrem_tidak_meledak(self):
+        """`?sampai=9999-12-31` harus merender halaman, bukan 500.
+
+        Batas atas rentang dihitung `sampai + 1 hari`; pada `date.max`
+        penjumlahan itu melempar `OverflowError` di PYTHON, sebelum query
+        dibentuk — jadi bukan halaman kosong melainkan seluruh view mati.
+        Bisa dicapai lewat UI biasa: `<input type="date">` di
+        `web/templates/web/rekening.html` tanpa atribut `max`, dan spinner
+        tahun bawaan browser sampai 9999. Pembatasan di template BUKAN
+        penjaga — penjaganya harus di `rekening_breakdown`.
+        """
+        self.mv(self.bank, "BCA", "HENDI", "500000", "500000", jam=9,
+                tanggal=date(2026, 6, 28))
+        r = self.client.get(reverse("rekening_breakdown"),
+                            {"dari": "2026-06-28", "sampai": "9999-12-31"})
+        self.assertEqual(r.status_code, 200)
+        # rentangnya benar-benar mencakup barisnya, bukan sekadar tak meledak
+        self.assertIn("BCA a/n HENDI", r.content.decode())
+
+    def test_tanggal_ekstrem_langsung_ke_fungsi(self):
+        """Panggilan langsung `rekening_breakdown(toko, date.max)` juga aman —
+        view bukan satu-satunya pemakai (sheet export per-batch juga)."""
+        self.mv(self.bank, "BCA", "HENDI", "500000", "500000", jam=9,
+                tanggal=date(2026, 6, 28))
+        data = rekening_breakdown(self.toko, date(9999, 12, 31))
+        self.assertEqual(data["count"], 0)  # 1 hari di tahun 9999: kosong
+        data = rekening_breakdown(self.toko, date(2026, 6, 28), date(9999, 12, 31))
+        self.assertEqual(data["count"], 1)

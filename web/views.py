@@ -97,6 +97,32 @@ REL_AMOUNT_LABELS = {
 }
 
 
+def _geser_hari(d, hari):
+    """`d + hari` yang MENEMPEL di ujung kalender alih-alih meledak.
+
+    `date` Python hanya mewakili 0001-01-01…9999-12-31; melewati salah satu
+    ujungnya melempar `OverflowError` — di Python, SEBELUM query dibentuk —
+    sehingga yang muncul bukan halaman kosong (yang benar) melainkan HTTP 500
+    untuk seluruh view. Di dashboard bahkan seluruh dashboard mati, gara-gara
+    loop kalender 14 hari yang mundur dari `?sampai`.
+
+    Ujung kalender itu BUKAN URL rakitan: tiap bar filter memakai
+    `<input type="date">` tanpa atribut `min`/`max` (spinner tahun bawaan
+    browser turun sampai 0001 dan naik sampai 9999) dan `_parse_date`
+    menerimanya sebagai tanggal sah. Satu jalur bahkan tanpa parameter sama
+    sekali: `next_date` digeser dari `recon_date` batch terakhir, yang berasal
+    dari tanggal baris panel hasil ingest.
+
+    Menempel, bukan melempar: halaman di tanggal mustahil boleh menampilkan
+    apa adanya (kosong), tak boleh mati. Untuk tanggal waras mana pun hasilnya
+    persis `d + timedelta(days=hari)` — tak satu angka pun berubah.
+    """
+    try:
+        return d + timedelta(days=hari)
+    except OverflowError:
+        return date_cls.max if hari > 0 else date_cls.min
+
+
 class AuditorLoginView(auth_views.LoginView):
     """LoginView dengan tagline profesional acak per GET (rotasi tiap refresh)."""
 
@@ -454,7 +480,7 @@ def _dashboard_semua(request, f_dari=None, f_sampai=None):
     urut_st = {"": 0, "ok": 1, "warn": 2, "bad": 3}
     kal = []
     for i in range(13, -1, -1):
-        d = anchor - timedelta(days=i)
+        d = _geser_hari(anchor, -i)
         harian = per_hari.get(d, [])
         st = ""
         for b in harian:
@@ -555,12 +581,34 @@ def dashboard(request):
     # berbeda antara toko kosong dan toko berisi. Kartu ini selalu tepat dua
     # query; tabelnya belasan baris, jadi harga keseragaman itu nol.
     _sumber = SourceType.objects.in_bulk()
-    by_source = [
-        {"source_type__name": _sumber[r["source_type_id"]].name,
-         "source_type__key": _sumber[r["source_type_id"]].key,
-         "n": r["n"]}
-        for r in _per_sumber
-    ]
+    # `.get()` dengan label pengganti, BUKAN `_sumber[...]`: baris yang
+    # `source_type_id`-nya menunjuk SourceType yang tak ada bikin `KeyError`,
+    # dan yang mati bukan kartunya melainkan SELURUH dashboard — mode gagal
+    # terburuk yang mungkin dari sebuah diagram batang. Lewat ORM keadaan itu
+    # mustahil (FK non-null `PROTECT`), jadi ia hanya lahir dari kerusakan di
+    # tingkat DB (restore parsial, hapus manual lewat psql) — justru karena
+    # begitu ia harus TERLIHAT, bukan disembunyikan: barisnya tetap ikut
+    # `tx_total` (penyebut `widthratio`) dan muncul sebagai "(sumber tak
+    # dikenal)". Menyaringnya diam-diam adalah cacat kode LAMA: INNER JOIN
+    # membuangnya dari `by_source` sementara `tx.count()` tetap menghitungnya,
+    # jadi semua bar memendek tanpa satu pun peringatan.
+    YATIM = ("?", "(sumber tak dikenal)")
+    by_source = []
+    for r in _per_sumber:
+        st = _sumber.get(r["source_type_id"])
+        key, name = (st.key, st.name) if st is not None else YATIM
+        by_source.append(
+            {"source_type__name": name, "source_type__key": key, "n": r["n"]}
+        )
+    # Pemecah seri EKSPLISIT, di Python. `order_by("-n")` saja meninggalkan
+    # urutan dua sumber ber-`n` sama pada rencana eksekusi database (di Postgres
+    # tak terdefinisi; di sini dulu tak sengaja urut nama, lalu — setelah
+    # grouping pindah ke `source_type_id` — tak sengaja urut id). Nilainya
+    # identik, hanya urutan batangnya yang bergoyang tanpa sebab. Sortirnya
+    # SENGAJA tidak dikembalikan ke SQL: `order_by("source_type__name")` akan
+    # menambah lagi JOIN ke `sources_sourcetype` yang justru dibuang di atas,
+    # dan Django akan menyeret kolom itu masuk GROUP BY.
+    by_source.sort(key=lambda s: (-s["n"], s["source_type__name"]))
     tx_total = sum(r["n"] for r in _per_sumber)
 
     # Semua id batch toko — TERMASUK yang recon_date-nya NULL, karena nomor urut
@@ -592,7 +640,7 @@ def dashboard(request):
         anchor = max(batches[-1].recon_date, today) if batches else today
     kal = []
     for i in range(13, -1, -1):
-        d = anchor - timedelta(days=i)
+        d = _geser_hari(anchor, -i)
         b = by_date.get(d)
         if b is None:
             st = ""
@@ -611,7 +659,7 @@ def dashboard(request):
         tren_src = rentang
     else:
         rentang = None
-        tren_cutoff = anchor - timedelta(days=29)
+        tren_cutoff = _geser_hari(anchor, -29)
         tren_src = [b for b in batches if b.recon_date and b.recon_date >= tren_cutoff]
     mx = max((selisih(b) for b in tren_src), default=0) or 1
     tren = []
@@ -699,7 +747,7 @@ def dashboard(request):
     if live_last is not None:
         _um_live = (live_last.summary or {}).get("unmatched_money") or {}
         um_d_live = _um_live.get("d") or {}
-    next_date = (live_last.recon_date + timedelta(days=1)) if live_last else today
+    next_date = _geser_hari(live_last.recon_date, 1) if live_last else today
 
     # tabel "Rekonsiliasi Terkini": mode filter menampilkan run milik jendela
     runs_tampil = runs.select_related("batch").order_by("-id")
@@ -1990,10 +2038,10 @@ def bracket_breakdown(request):
         # toko fallback. Bar mode Semua Toko harus bernada peringatan, sama
         # seperti /upload/ dan /rekonsiliasi/.
         "semua_toko_tulis": mode_semua(request),
-        "prev_dari": dari - timedelta(days=span),
-        "prev_sampai": sampai - timedelta(days=span),
-        "next_dari": dari + timedelta(days=span),
-        "next_sampai": sampai + timedelta(days=span),
+        "prev_dari": _geser_hari(dari, -span),
+        "prev_sampai": _geser_hari(sampai, -span),
+        "next_dari": _geser_hari(dari, span),
+        "next_sampai": _geser_hari(sampai, span),
     })
 
 
@@ -2025,8 +2073,8 @@ def bracket_detail(request):
     span = (sampai - dari).days + 1
     return render(request, "web/detail_fr.html", {
         "data": data, "dari": dari, "sampai": sampai, "latest": latest,
-        "prev_dari": dari - timedelta(days=span), "prev_sampai": sampai - timedelta(days=span),
-        "next_dari": dari + timedelta(days=span), "next_sampai": sampai + timedelta(days=span),
+        "prev_dari": _geser_hari(dari, -span), "prev_sampai": _geser_hari(sampai, -span),
+        "next_dari": _geser_hari(dari, span), "next_sampai": _geser_hari(sampai, span),
     })
 
 
@@ -2247,7 +2295,7 @@ def hutang_piutang(request):
     if target is None:
         return render(request, "web/no_toko.html")
     sampai = _parse_date(request.GET.get("sampai", "")) or date_cls.today()
-    dari = _parse_date(request.GET.get("dari", "")) or sampai - timedelta(days=30)
+    dari = _parse_date(request.GET.get("dari", "")) or _geser_hari(sampai, -30)
     data = hitung_hutang_piutang(target, dari=dari, sampai=sampai)
     page = Paginator(data["rows"], 40).get_page(request.GET.get("page"))
     return render(request, "web/hutang_piutang.html", {
@@ -2264,7 +2312,7 @@ def rincian_biaya(request):
     if active is None:
         return render(request, "web/no_toko.html")
     sampai = _parse_date(request.GET.get("sampai", "")) or date_cls.today()
-    dari = _parse_date(request.GET.get("dari", "")) or sampai - timedelta(days=30)
+    dari = _parse_date(request.GET.get("dari", "")) or _geser_hari(sampai, -30)
     data = hitung_rincian_biaya(active, dari=dari, sampai=sampai)
     page = Paginator(data["rows"], 40).get_page(request.GET.get("page"))
     return render(request, "web/biaya_admin.html", {
@@ -2279,7 +2327,7 @@ def bonus_recon(request):
     if active is None:
         return render(request, "web/no_toko.html")
     sampai = _parse_date(request.GET.get("sampai", "")) or date_cls.today()
-    dari = _parse_date(request.GET.get("dari", "")) or sampai - timedelta(days=30)
+    dari = _parse_date(request.GET.get("dari", "")) or _geser_hari(sampai, -30)
     kategori = (request.GET.get("kategori") or "").strip()
     data = hitung_rekonsiliasi_bonus(active, dari=dari, sampai=sampai,
                                      kategori=kategori or None)
