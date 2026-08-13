@@ -119,6 +119,45 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.19.0",
+        tanggal=_dt.date(2026, 8, 14),
+        nama="Bonus Panel Vigor/TM Gaming — Dua Cara Bracket Membukukan Bonus",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**File bonus panel merek Vigor/TM Gaming sekarang bisa diunggah.** "
+            "Sebelumnya tidak bisa sama sekali: bentuk file-nya berbeda dari "
+            "merek lain, sehingga sisi panel tak pernah masuk dan halaman "
+            "Rekonsiliasi Bonus untuk merek itu buta sebelah sejak awal — hanya "
+            "sisi bracket yang pernah terlihat. File 4 Agustus terbaca 677 baris "
+            "senilai Rp1.358.797 — persis sama dengan angka Grand Total yang "
+            "dicetak file itu sendiri.",
+            "**Bonus yang dibukukan gelondongan kini dicocokkan sebagai total, "
+            "bukan per pemain.** Bracket mencatat sebagian bonus sebagai satu "
+            "baris per kategori per hari tanpa nama pemain, sementara panel "
+            "mencatatnya per pemain. Dicocokkan dengan cara lama, satu hari "
+            "menghasilkan ±671 baris \"hanya di panel\" yang semuanya bunyi "
+            "palsu padahal angkanya sebenarnya cocok. Sekarang keduanya "
+            "dibandingkan pada tingkat yang sama, dan baris per pemain tetap "
+            "dicocokkan satu-satu seperti biasa — terbukti 6 dari 6 pada 4 "
+            "Agustus dan 17 dari 17 pada 6 Agustus.",
+            "**Baris gelondongan yang bertuliskan \"TGL 03.08.2026\" dicocokkan "
+            "ke hari yang tertulis**, bukan ke hari pembukuannya, karena bonus "
+            "jenis ini memang dibukukan sehari setelah kejadiannya.",
+            "**Bonus ikut masuk ke berkas ekspor.** Ada lembar Bonus baru di "
+            "workbook hasil rekonsiliasi, dan tombol Export di halaman "
+            "Rekonsiliasi Bonus yang mengikuti rentang tanggal serta filter "
+            "kategori yang sedang dipakai. Berlaku untuk semua merek, dan "
+            "berlaku surut untuk batch lama.",
+            "**File yang jenisnya tak dikenali sekarang berkata tidak tahu.** "
+            "Sebelumnya file asing tampil sebagai tebakan yang terlihat "
+            "meyakinkan — pilihan pertama pada daftar jenis — sehingga sekali "
+            "Simpan ditekan file itu benar-benar terbaca sebagai jenis yang "
+            "salah. Kini jenisnya kosong sampai dipilih, dan penyimpanan "
+            "ditolak dengan pesan yang menyebut nama file-nya.",
+        ),
+    ),
+    Rilis(
         versi="1.18.1",
         tanggal=_dt.date(2026, 8, 13),
         nama="QRIS Flyer Format Baru — Uang yang Hilang Tanpa Pesan",
