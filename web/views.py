@@ -530,14 +530,38 @@ def dashboard(request):
     if active is None:
         return render(request, "web/no_toko.html")
 
-    tx = Transaction.objects.filter(toko=active)
     uploads = Upload.objects.filter(toko=active)
     runs = MatchRun.objects.filter(batch__toko=active)
-    by_source = list(
-        tx.values("source_type__name", "source_type__key")
+
+    # Kartu "Transaksi per Sumber": SATU agregat. Grouping sengaja di
+    # `source_type_id` dan BUKAN `source_type__name` — yang terakhir memaksa
+    # JOIN ke sources_sourcetype dan membuat Postgres menyeret jutaan baris ke
+    # hash join (prod: Parallel Seq Scan 6,1 juta baris / 5,3 GB). Nama & key
+    # diambil dari tabel referensi belasan baris. `tx_total` DITURUNKAN dari
+    # hasil yang sama, bukan query kedua, supaya panjang bar `widthratio` di
+    # dashboard.html mustahil melenceng dari angka yang tertulis.
+    # Angkanya tetap hitungan baris `Transaction` yang nyata: agregat pembukuan
+    # `Upload.rows_parsed` sempat dipertimbangkan lalu DITOLAK — menghapus
+    # transaksi lewat Django admin tak pernah memperbarui `rows_parsed`.
+    _per_sumber = list(
+        Transaction.objects.filter(toko=active)
+        .values("source_type_id")
         .annotate(n=Count("id"))
         .order_by("-n")
     )
+    # in_bulk() TANPA argumen, dan tanpa dijaga `if _per_sumber`: dua-duanya
+    # membuat query-nya dilewati saat daftarnya kosong (`in_bulk(ids)` dan
+    # `id__in=[]` di-short-circuit Django), sehingga jumlah query dashboard
+    # berbeda antara toko kosong dan toko berisi. Kartu ini selalu tepat dua
+    # query; tabelnya belasan baris, jadi harga keseragaman itu nol.
+    _sumber = SourceType.objects.in_bulk()
+    by_source = [
+        {"source_type__name": _sumber[r["source_type_id"]].name,
+         "source_type__key": _sumber[r["source_type_id"]].key,
+         "n": r["n"]}
+        for r in _per_sumber
+    ]
+    tx_total = sum(r["n"] for r in _per_sumber)
 
     # Semua id batch toko — TERMASUK yang recon_date-nya NULL, karena nomor urut
     # batch memakai populasi itu (konvensi sama di web/kelengkapan.py). JANGAN
@@ -693,7 +717,7 @@ def dashboard(request):
 
     ctx = {
         "active_toko": active,
-        "tx_total": tx.count(),
+        "tx_total": tx_total,
         "upload_total": uploads.count(),
         "run_total": runs.count(),
         "by_source": by_source,

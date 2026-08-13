@@ -261,3 +261,41 @@ class DashboardSumberQueryTests(_Base):
         self.assertEqual(
             len(before), len(after),
             f"query tumbuh {len(before)}→{len(after)} saat baris bertambah (N+1)")
+
+
+class BentukKontrakTests(_Base):
+    """Kontrak kartu ini dengan `web/templates/web/dashboard.html` (baris 191-205),
+    ditulis saat bentuk query-nya diubah (grouping pindah ke `source_type_id`
+    agar Postgres tak menyeret jutaan baris ke hash join `sources_sourcetype`).
+    Template membaca kuncinya apa adanya — rename/tambah kunci = kartu diam-diam
+    salah, bukan error."""
+
+    def test_bentuk_dict_by_source_tetap_sama(self):
+        self.buat_tx(self.panel)
+        self.buat_tx(self.bracket, jenis="lainnya")
+        r = self.get()
+        self.assertTrue(r.context["by_source"])
+        for s in r.context["by_source"]:
+            with self.subTest(sumber=s):
+                # PERSIS tiga kunci: tak kurang (template merender kosong) dan
+                # tak lebih (kunci internal yang bocor jadi kontrak dadakan).
+                self.assertEqual(
+                    set(s), {"source_type__key", "source_type__name", "n"})
+                self.assertIsInstance(s["n"], int)
+                self.assertIsInstance(s["source_type__key"], str)
+                self.assertIsInstance(s["source_type__name"], str)
+
+    def test_sumber_tanpa_baris_tidak_muncul(self):
+        """SourceType yang tak punya transaksi di toko ini tak boleh jadi entri
+        n=0. Kartu ini menampilkan sumber yang DIPAKAI toko; entri nol akan
+        merender bar kosong untuk tiap sumber yang pernah ada di seed —
+        dan `{% widthratio 0 tx_total 100 %}` tak akan meneriakkannya."""
+        self.buat_tx(self.panel)
+        # `bank` & `bracket` ada di tabel referensi, tapi tak punya baris di
+        # toko ini (bank punya baris di toko LAIN — jebakan grouping tanpa
+        # filter toko).
+        self.buat_tx(self.bank, toko=self.lain)
+        r = self.get()
+        self.assertEqual(
+            [s["source_type__key"] for s in r.context["by_source"]], ["panel"])
+        self.assertNotIn(0, [s["n"] for s in r.context["by_source"]])
