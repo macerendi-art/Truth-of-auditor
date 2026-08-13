@@ -363,6 +363,43 @@ class CORPanelBonusParserTests(SimpleTestCase):
         self.assertEqual([r["row_hash"] for r in self._parse(rows=bertipe)],
                          [r["row_hash"] for r in self._parse()])
 
+    def test_row_hash_stabil_lintas_format_desimal(self):
+        """Gaya penulisan desimal vendor tak boleh mengubah hash.
+
+        '85,770' / '85,770.00' / 85770 adalah transaksi yang SAMA. Tanpa
+        kanonikalisasi, `str(Decimal)` mempertahankan nol di belakang sehingga
+        ekspor ulang bergaya lain lolos sebagai baris BARU dan harinya
+        terhitung dua kali — cacat yang sudah menduplikasi 1.366 baris BSW di
+        jalur QRIS Flyer, dan di sana tak bisa lagi diperbaiki.
+        """
+        gaya_dua_desimal = [
+            [1, "04 Aug 2026 00:00:13", "bodatt", "Bonus Cashback",
+             "BONUS ROLLINGAN SLOT HARIAN 0.5%", "85,770.00",
+             "Free Bet: BONUS ROLLINGAN SLOT HARIAN 0.5% (85,770)"],
+            [2, "04 Aug 2026 00:05:32", "bulbul26", "Daily Spin Bonus",
+             "Daily Login", "25.00", "Free Bet: Daily Login (25)"],
+            [3, "04 Aug 2026 01:00:00", "w25master", "Manual Freebet",
+             "", "10,000.00", "Free Bet: Manual Freebet (10,000)"],
+            [4, "04 Aug 2026 02:00:00", "zeta9", "", "", "40,351.50",
+             "Free Bet: (40,351.5)"],
+            ["", "", "", "", "Grand Total", "136,146.50"],
+        ]
+
+        self.assertEqual(
+            [r["row_hash"] for r in self._parse(rows=gaya_dua_desimal)],
+            [r["row_hash"] for r in self._parse()])
+
+    def test_desimal_signifikan_tidak_dibulatkan_di_hash(self):
+        """Kanonikalisasi hanya membuang nol di belakang. Dua baris yang beda
+        di desimal ketiga (nyata: '128,472.575') tetap dua hash berbeda."""
+        def satu(nominal):
+            return self._parse(rows=[
+                [1, "04 Aug 2026 00:00:13", "bodatt", "Bonus Cashback",
+                 "BONUS ROLLINGAN SLOT HARIAN 0.5%", nominal, "x"],
+            ])[0]["row_hash"]
+
+        self.assertNotEqual(satu("128,472.575"), satu("128,472.57"))
+
     def test_nomor_urut_tidak_ikut_hash(self):
         """`#` = penghitung relatif-halaman; ekspor ulang menomori ulang."""
         digeser = [["90" + r[0]] + r[1:] for r in COR_ROWS] + COR_FOOTER

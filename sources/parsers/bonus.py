@@ -162,6 +162,28 @@ def _teks(v):
     return "" if v is None else str(v).strip()
 
 
+def _nominal_kunci(d):
+    """Nominal sebagai teks KANONIK untuk `row_hash`.
+
+    `str(Decimal)` mempertahankan nol di belakang, sehingga '40351.5' dan
+    '40351.50' — transaksi yang SAMA, cuma beda gaya penulisan vendor —
+    menghasilkan hash BERBEDA. Akibatnya ekspor ulang hari yang sama lolos
+    sebagai baris baru dan harinya terhitung dua kali. Itu bukan hipotesis:
+    cacat persis ini sudah menduplikasi 1.366 baris BSW di jalur QRIS Flyer
+    (lihat KNOWN DEFECT di CLAUDE.md), dan di sana tak bisa lagi diperbaiki
+    karena mengubah resep hash akan menduplikasi seluruh baris lama.
+
+    Di sini masih bisa: namespace hash `cor_panel_bonus` NOL baris di
+    produksi, jadi sekarang satu-satunya saat perbaikan ini gratis.
+
+    `normalize()` membuang nol di belakang, dan format `'f'` WAJIB menyertainya
+    — tanpa itu bilangan bulat berubah jadi notasi ilmiah
+    (`Decimal('92550').normalize()` adalah `9.255E+4`, yang `str()`-nya bukan
+    '92550'). Desimal signifikan tetap utuh: '128472.575' tidak dibulatkan.
+    """
+    return format(d.normalize(), "f")
+
+
 class CORPanelBonusParser(BaseParser):
     """Bonus panel bentuk kedua: ekspor keluarga COR (Vigor/TM Gaming).
 
@@ -282,7 +304,8 @@ class CORPanelBonusParser(BaseParser):
             # `#` sengaja tak ikut: penghitung relatif-halaman, ekspor ulang
             # menomori ulang -> seluruh baris akan terlihat baru.
             row["row_hash"] = row_hash(
-                MARKER_AGREGAT, [str(occurred), username, kategori, amt])
+                MARKER_AGREGAT,
+                [str(occurred), username, kategori, _nominal_kunci(amt)])
             out.append(row)
 
         # Tie-out. Σ Page Total lebih dipercaya daripada Grand Total: Page Total
