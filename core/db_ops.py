@@ -26,14 +26,36 @@ menemukan index yang sudah ada dan melewatinya, bukan meledak. Kalau index
 ternyata belum ada (mis. DB staging yang baru dibuat), migrasi membangunnya
 sendiri secara concurrent.
 
-**3. Migrasi ini tidak boleh menggagalkan boot, apa pun yang terjadi.**
+**3. Migrasi ini tidak boleh menggagalkan boot, apa pun yang terjadi —
+dan harganya dibayar di sini.**
 Index yang hilang membuat halaman lambat; angkanya tetap benar. Aplikasi yang
 mati jauh lebih mahal daripada halaman lambat. Jadi kegagalan di jalur Postgres
-dicatat sebagai `logger.warning` lalu boot diteruskan. Dua sisinya menyatu:
-``CREATE INDEX CONCURRENTLY`` yang gagal/terputus meninggalkan index **invalid**
-(diabaikan planner, tapi namanya memblokir pembuatan ulang) — kondisi itulah
-yang dideteksi cabang ``indisvalid = false`` pada boot berikutnya, lengkap
-dengan perintah pemulihannya.
+dicatat sebagai `logger.warning` lalu boot diteruskan.
+
+Konsekuensinya harus dikatakan terang-terangan, karena tidak kelihatan dari
+berkas ini saja: `except` di bawah menulis satu `warning` lalu **kembali
+normal**, dan `MigrationExecutor.apply_migration` memanggil
+``record_migration()`` TANPA SYARAT begitu ``apply()`` tidak melempar. Artinya
+migrasi yang gagal separuh tetap **TERCATAT selesai**; boot berikutnya
+melewatinya sama sekali, dan index-nya **tidak akan pernah dibangun ulang
+sendiri**. Yang tersisa adalah halaman yang lambat diam-diam — tanpa satu pun
+keluhan, tanpa deteksi otomatis. Jangan menulis di sini bahwa boot berikutnya
+akan menemukannya; tidak akan.
+
+Cabang ``indisvalid = false`` di bawah **tetap ada dan tetap benar**, tapi
+bukan untuk kasus itu: ia menangkap DB yang **belum pernah** menjalankan
+migrasi ini (staging baru, restore) dan menemukan sisa ``CREATE INDEX
+CONCURRENTLY`` manual yang gagal/terputus — index yang diabaikan planner tapi
+namanya memblokir pembuatan ulang.
+
+Karena tak ada deteksi otomatis, deteksinya **manual dan eksplisit**::
+
+    python manage.py periksa_index
+
+membandingkan `Transaction._meta.indexes` dengan `pg_index`, melaporkan yang
+hilang/invalid beserta perintah pemulihannya, dan keluar dengan kode ≠ 0 bila
+ada temuan. Jalankan setelah deploy yang menyentuh index, dan setiap kali ada
+`warning` dari modul ini di log boot — kedua pesan `warning` itu menyebutkannya.
 
 Karena mewarisi `AddIndex`, `state_forwards` tetap menyinkronkan model state,
 jadi ``makemigrations --check`` tetap bersih tanpa `SeparateDatabaseAndState`.
@@ -112,7 +134,10 @@ class TambahIndexAman(AddIndexConcurrently):
                 "Index %s ADA tapi INVALID — sisa CREATE INDEX CONCURRENTLY yang "
                 "gagal/terputus; planner mengabaikannya, jadi kueri tetap lambat. "
                 "Pulihkan manual lewat psql: DROP INDEX CONCURRENTLY %s; lalu "
-                "bangun ulang. Boot diteruskan.",
+                "bangun ulang. Boot diteruskan. Migrasi ini akan TERCATAT SELESAI "
+                "walau index-nya tak jadi — tak ada boot berikutnya yang akan "
+                "memperbaikinya sendiri; pastikan lewat `python manage.py "
+                "periksa_index`.",
                 self.index.name,
                 self.index.name,
             )
@@ -123,7 +148,12 @@ class TambahIndexAman(AddIndexConcurrently):
             logger.warning(
                 "Gagal membangun index %s secara concurrent — halaman akan lambat, "
                 "angkanya tetap benar. Bangun manual lewat psql; bila tertinggal "
-                "index invalid, DROP INDEX CONCURRENTLY %s; dulu. Boot diteruskan.",
+                "index invalid, DROP INDEX CONCURRENTLY %s; dulu. Boot diteruskan. "
+                "PENTING: migrasi ini tetap TERCATAT SELESAI (record_migration "
+                "dipanggil tanpa syarat karena apply() tidak melempar), jadi "
+                "`migrate` berikutnya TIDAK akan mencobanya lagi — index ini tak "
+                "akan pernah dibangun ulang sendiri. Verifikasi dengan `python "
+                "manage.py periksa_index`.",
                 self.index.name,
                 self.index.name,
                 exc_info=True,
