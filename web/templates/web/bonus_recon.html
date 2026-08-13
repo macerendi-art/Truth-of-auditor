@@ -41,6 +41,68 @@
   </div>
 </div>
 
+{% comment %}
+Seksi bonus gelondongan (modus agregat). Gerbangnya `data.agregat` — DAFTAR,
+bukan `data.ringkas.agregat` yang berupa dict: saat modus menyala tanpa satu
+sel pun terbentuk dict itu tetap ada dan truthy, sehingga seksinya akan
+terbit kosong. Untuk toko Nexus kedua kunci sama sekali tak ada, jadi markup
+halaman mereka tak bergeser satu byte pun. Total tfoot dibaca dari
+`data.ringkas.agregat`, yang selalu hadir bersama daftarnya.
+{% endcomment %}
+{% if data.agregat %}
+<div class="card pad0 reveal" style="margin-bottom:18px">
+  <div style="padding:14px 14px 0">
+    <h2 style="margin:0 0 4px;font-size:15px">Bonus Gelondongan (Agregat)</h2>
+    <p class="faint" style="margin:0 0 12px;font-size:12px">Bracket membukukan sebagian bonus sebagai <b>satu baris gelondongan</b> per kategori per hari, tanpa nama pemain. Baris di bawah karena itu membandingkan <b>total</b> kedua sisi — bukan per pemain.</p>
+  </div>
+  <div class="table-wrap" style="border:none">
+  <table class="selectable">
+    <thead><tr>
+      <th>Tanggal</th><th>Kategori Bracket</th><th>Kategori Panel</th>
+      <th class="num">Baris Panel</th><th class="num">Total Panel</th>
+      <th class="num">Total Bracket</th><th class="num">Selisih</th><th>Status</th>
+    </tr></thead>
+    <tbody>
+    {% for e in data.agregat %}
+    <tr>
+      <td class="mono">{{ e.tanggal|date:"d/m/Y"|default:"—" }}
+        {% if e.tanggal_bracket %}<div class="faint" style="font-size:11px">dibukukan {{ e.tanggal_bracket|date:"d/m/Y" }}</div>{% endif %}</td>
+      <td>{{ e.kategori }}</td>
+      <td>{% for k in e.kategori_panel %}<span class="badge src">{{ k }}</span> {% endfor %}</td>
+      <td class="num mono">{{ e.n_panel|intcomma }}</td>
+      <td class="num mono">{{ e.panel_total|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ e.bracket_total|floatformat:0|intcomma }}</td>
+      {% comment %}
+      Selisih memakai `floatformat:"2g"`, BUKAN `floatformat:2|intcomma`.
+      Kolom lain lolos karena `floatformat:0` menghasilkan string bilangan
+      bulat yang masih bisa di-`int()` oleh intcomma; begitu ada koma desimal
+      lokal, intcomma jatuh ke jalur non-lokal dan menyisipkan koma ribuan di
+      atasnya — "-57875,00" jadi "-57,875,00". Sufiks "g" memaksa pemisah
+      ribuan lokal tanpa perantara intcomma.
+      {% endcomment %}
+      <td class="num mono">{{ e.selisih|floatformat:"2g" }}</td>
+      <td>{% if e.status == 'cocok' %}<span class="badge ok">cocok</span>{% else %}<span class="badge warn">selisih</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+    {% comment %}
+    Kolom "Baris Panel" sengaja tanpa total: jumlahnya tak ada di
+    `ringkas["agregat"]` dan menambah kunci ke sana akan mengubah bentuk dict
+    yang sudah dikunci tes. Sel kosong lebih jujur daripada angka lain yang
+    kebetulan tersedia.
+    {% endcomment %}
+    <tfoot><tr style="font-weight:700">
+      <td>TOTAL</td><td></td><td></td><td></td>
+      <td class="num mono">{{ data.ringkas.agregat.panel_total|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.ringkas.agregat.bracket_total|floatformat:0|intcomma }}</td>
+      <td class="num mono">{{ data.ringkas.agregat.selisih|floatformat:"2g" }}</td>
+      <td>{% if data.ringkas.agregat.selisih_n %}<span class="badge warn">{{ data.ringkas.agregat.selisih_n|intcomma }} selisih</span>{% else %}<span class="badge ok">cocok</span>{% endif %}</td>
+    </tr></tfoot>
+  </table>
+  </div>
+</div>
+{% endif %}
+
 {% if data.ringkas.kategori %}
 <div class="card pad0 reveal" style="margin-bottom:18px">
   <div class="table-wrap" style="border:none">

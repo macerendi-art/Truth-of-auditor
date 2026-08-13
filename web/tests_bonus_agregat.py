@@ -10,10 +10,16 @@ Yang ditegakkan di sini, berurutan menurut kepentingannya:
    kebetulan pemetaan.
 2. Pemetaan kategori lintas-namespace (prefiks batas-kata, bukan subset token).
 3. `TGL dd.mm.yyyy` hanya menyentuh jalur agregat.
+4. Seksi agregat di halaman /bonus/ (`TampilanAgregatTests`) — muncul HANYA
+   bila ada entri, sehingga markup halaman Nexus tak bergeser satu byte pun.
 """
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.contrib.humanize.templatetags.humanize import intcomma
+from django.urls import reverse
 
 from sources.parsers.bonus import MARKER_AGREGAT
 from web.bonus import rekonsiliasi_bonus
@@ -400,3 +406,137 @@ class ToleransiMenskalaTests(_AgregatData):
         from web.bonus import toleransi_agregat
 
         self.assertLess(toleransi_agregat(2000), Decimal("375"))
+
+
+class TampilanAgregatTests(_AgregatData):
+    """Seksi agregat di /bonus/.
+
+    Gerbangnya `data.agregat` (daftar), BUKAN `data.ringkas.agregat` (dict):
+    saat modus menyala tanpa satu sel pun terbentuk, dict itu tetap ada dan
+    truthy di template — seksinya akan terbit kosong. Daftar kosong falsy,
+    jadi halaman hanya menampilkannya bila memang ada yang ditampilkan.
+    """
+
+    JUDUL = "Bonus Gelondongan"
+
+    def setUp(self):
+        super().setUp()
+        u = get_user_model().objects.create_user(
+            username="aud_ag", password="rahasia123", role="auditor")
+        u.allowed_tokos.add(self.toko)
+        self.client.force_login(u)
+        s = self.client.session
+        s["active_toko_id"] = self.toko.id
+        s.save()
+
+    def _html(self, **params):
+        params.setdefault("dari", D3.isoformat())
+        params.setdefault("sampai", D4.isoformat())
+        r = self.client.get(reverse("bonus_recon"), params)
+        self.assertEqual(r.status_code, 200)
+        return r.content.decode()
+
+    def _satu_lump(self):
+        self.panel_cor("a", "500000.00", kategori=KAT_ROLL_PANEL, tanggal=D4)
+        self.panel_cor("b", "538747.20", kategori=KAT_ROLL_PANEL, tanggal=D4)
+        self.lump("1038747.00", KAT_ROLL_BRACKET)
+
+    def test_kolom_dan_nilai_tampil(self):
+        self._satu_lump()
+        html = self._html()
+        self.assertIn(self.JUDUL, html)
+        for kolom in ("Kategori Bracket", "Kategori Panel", "Baris Panel",
+                      "Total Panel", "Total Bracket"):
+            self.assertIn(kolom, html)
+        self.assertIn(KAT_ROLL_BRACKET, html)
+        self.assertIn(KAT_ROLL_PANEL, html)
+        self.assertIn(intcomma(1038747), html)
+
+    def test_penjelasan_lump_ada(self):
+        self._satu_lump()
+        html = self._html()
+        self.assertIn("gelondongan", html)
+
+    def test_tabel_selectable_dan_posisinya(self):
+        # Antara tiga kartu ringkasan dan tabel ringkasan per-kategori, dan
+        # grid kartu TETAP cols-3 (tak ada kartu keempat).
+        self._satu_lump()
+        html = self._html()
+        i = html.index(self.JUDUL)
+        self.assertIn('class="selectable"', html[i:])
+        self.assertLess(html.index("grid cols-3"), i)
+        self.assertLess(i, html.index("<th>Kategori</th>"))
+        # "cols-4" sendirian juga muncul di CSS app_base — yang dijaga adalah
+        # kelas grid yang terpakai di halaman.
+        self.assertNotIn('grid cols-4', html)
+
+    def test_status_cocok_dan_selisih(self):
+        self.panel_cor("a", "100000", kategori=KAT_ROLL_PANEL, tanggal=D3)
+        self.lump("100000", KAT_ROLL_BRACKET, tanggal=D3)
+        self.panel_cor("b", "92550", kategori="Daily Login", tanggal=D4)
+        self.lump("92925", "DAILY LOGIN", tanggal=D4)
+        html = self._html()
+        self.assertIn("badge ok", html)
+        self.assertIn("badge warn", html)
+
+    def test_selisih_berdesimal_tanpa_pemisah_campur(self):
+        # `floatformat:2|intcomma` merusak angka berdesimal lokal:
+        # "-57500,00" jadi "-57,500,00". Kolom Selisih harus memakai
+        # `floatformat:"2g"` sehingga tetap "-57.500,00".
+        self.panel_cor("a", "157500", kategori="Single Deposit", tanggal=D4)
+        self.lump("215000", "SINGLE DEPOSIT")
+        html = self._html()
+        self.assertIn("-57.500,00", html)
+        self.assertNotIn("57,500,00", html)
+
+    def test_tanggal_pembukuan_hanya_saat_bergeser(self):
+        self.panel_cor("a", "92925", kategori="Daily Login", tanggal=D3)
+        self.lump("92925", "DAILY LOGIN", tanggal=D4,
+                  desc="LOGIN & SPIN (DAILY SPIN BONUS) TGL 03.08.2026\nPlayer:")
+        self.assertIn("dibukukan 04/08/2026", self._html())
+
+    def test_tanpa_geseran_tak_ada_baris_dibukukan(self):
+        self._satu_lump()
+        self.assertNotIn("dibukukan", self._html())
+
+    def test_total_tfoot(self):
+        self._satu_lump()
+        html = self._html()
+        ekor = html[html.index(self.JUDUL):]
+        self.assertIn("<tfoot>", ekor)
+        self.assertIn("TOTAL", ekor)
+
+    def test_modus_menyala_tanpa_sel_tak_menerbitkan_seksi(self):
+        # Penanda ada (modus agregat aktif) tapi lump-nya tak berpasangan →
+        # `data["agregat"] == []` sementara `ringkas["agregat"]` tetap ada.
+        self.panel_cor("a", "92550", kategori="Daily Login", tanggal=D4)
+        self.lump("215000", "SINGLE DEPOSIT")
+        data = self.recon()
+        self.assertEqual(data["agregat"], [])
+        self.assertIn("agregat", data["ringkas"])
+        self.assertNotIn(self.JUDUL, self._html())
+
+
+class TampilanNexusTidakBerubahTests(_BonusData):
+    """Toko tanpa baris berpenanda: seksi agregat tak boleh terbit sama sekali."""
+
+    def setUp(self):
+        super().setUp()
+        u = get_user_model().objects.create_user(
+            username="aud_nx", password="rahasia123", role="auditor")
+        u.allowed_tokos.add(self.toko)
+        self.client.force_login(u)
+        s = self.client.session
+        s["active_toko_id"] = self.toko.id
+        s.save()
+
+    def test_halaman_nexus_tanpa_seksi_agregat(self):
+        self.panel_row("budi", "50000", kategori=KAT_ROLL_PANEL)
+        self.bracket_row("", "50000", kategori=KAT_ROLL_BRACKET)
+        r = self.client.get(reverse("bonus_recon"),
+                            {"dari": TGL.isoformat(), "sampai": TGL.isoformat()})
+        self.assertEqual(r.status_code, 200)
+        html = r.content.decode()
+        self.assertNotIn(TampilanAgregatTests.JUDUL, html)
+        self.assertNotIn("Kategori Bracket", html)
+        self.assertNotIn("Total Bracket", html)
