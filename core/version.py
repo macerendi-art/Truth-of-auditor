@@ -119,6 +119,33 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.18.0",
+        tanggal=_dt.date(2026, 8, 13),
+        nama="Percepatan Menyeluruh — Halaman Berat Jadi Ringan",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**Dashboard toko besar terbuka di bawah 1 detik, sebelumnya hampir 15 "
+            "detik.** Data sudah tumbuh ke 6 juta baris, sementara cara aplikasi "
+            "mencari baris masih dirancang saat datanya masih kecil: untuk "
+            "menampilkan ringkasan satu hari, aplikasi membaca seluruh riwayat "
+            "toko. Sekarang ia langsung menuju baris yang dibutuhkan.",
+            "**Semua halaman laporan ikut ringan.** Rincian Rekening 1,9 → 0,4 "
+            "detik, Breakdown Bracket 1,5 → 0,8 detik, Detail FR 1,4 → 0,7 detik, "
+            "Rekap Bulanan 3,3 → 1,4 detik, Rekonsiliasi Bonus 1,0 → 0,6 detik. "
+            "Halaman Settlement Tertunda tak lagi tersendat saat antreannya panjang, "
+            "dan Rincian Biaya berhenti menghitung ulang label sumber untuk setiap "
+            "baris — kini sekali saja per file dan rekening.",
+            "**Tidak ada satu angka pun yang berubah.** Yang dipercepat adalah cara "
+            "aplikasi mencari datanya, bukan cara ia menghitungnya. Setiap angka di "
+            "layar dikunci lebih dulu oleh pengujian sebelum jalurnya disentuh, dan "
+            "dibandingkan lagi sesudahnya pada data produksi yang sama.",
+            "Aplikasi juga sanggup melayani empat kali lebih banyak permintaan "
+            "bersamaan, sehingga beberapa orang yang membuka halaman berat pada "
+            "saat yang sama tak lagi saling menunggu.",
+        ),
+    ),
+    Rilis(
         versi="1.17.4",
         tanggal=_dt.date(2026, 8, 12),
         nama="QRIS ZPay Penamaan Status Baru & Peringatan Gateway Lebih Tenang",

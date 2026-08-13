@@ -3,11 +3,19 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.17.4** · 32 rilis (1 besar, 17 fitur, 10 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.18.0** · 33 rilis (1 besar, 18 fitur, 10 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.18.0 — Percepatan Menyeluruh — Halaman Berat Jadi Ringan
+*Rilis fitur · 13 Agustus 2026*
+
+- **Dashboard toko besar terbuka di bawah 1 detik, sebelumnya hampir 15 detik.** Data sudah tumbuh ke 6 juta baris, sementara cara aplikasi mencari baris masih dirancang saat datanya masih kecil: untuk menampilkan ringkasan satu hari, aplikasi membaca seluruh riwayat toko. Sekarang ia langsung menuju baris yang dibutuhkan.
+- **Semua halaman laporan ikut ringan.** Rincian Rekening 1,9 → 0,4 detik, Breakdown Bracket 1,5 → 0,8 detik, Detail FR 1,4 → 0,7 detik, Rekap Bulanan 3,3 → 1,4 detik, Rekonsiliasi Bonus 1,0 → 0,6 detik. Halaman Settlement Tertunda tak lagi tersendat saat antreannya panjang, dan Rincian Biaya berhenti menghitung ulang label sumber untuk setiap baris — kini sekali saja per file dan rekening.
+- **Tidak ada satu angka pun yang berubah.** Yang dipercepat adalah cara aplikasi mencari datanya, bukan cara ia menghitungnya. Setiap angka di layar dikunci lebih dulu oleh pengujian sebelum jalurnya disentuh, dan dibandingkan lagi sesudahnya pada data produksi yang sama.
+- Aplikasi juga sanggup melayani empat kali lebih banyak permintaan bersamaan, sehingga beberapa orang yang membuka halaman berat pada saat yang sama tak lagi saling menunggu.
 
 ## v1.17.4 — QRIS ZPay Penamaan Status Baru & Peringatan Gateway Lebih Tenang
 *Perbaikan · 12 Agustus 2026*
