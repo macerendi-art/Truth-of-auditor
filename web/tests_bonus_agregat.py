@@ -369,3 +369,34 @@ class BentukNyataW25Tests(_AgregatData):
         self.assertEqual(data["agregat"][0]["kategori_detail"], KAT_ROLL_PANEL)
         self.assertEqual(data["ringkas"]["agregat"]["n"], 1)
         self.assertEqual(len(data["cocok"]), 0)
+
+
+class ToleransiMenskalaTests(_AgregatData):
+    """Ambang selisih adalah batas ARITMETIS artefak pembulatan kolom.
+
+    `Transaction.amount` = DecimalField(decimal_places=2), sedangkan ekspor
+    panel memuat baris berdesimal tiga. Tiap baris bergeser <= 0,005 saat
+    disimpan, jadi sel berisi n baris bergeser <= n x 0,005. Ambang tetap Rp1
+    akan pecah di ~200 baris berdesimal-tiga; ambang yang menskala tidak.
+    """
+
+    def test_lantai_satu_rupiah_untuk_sel_kecil(self):
+        from web.bonus import toleransi_agregat
+
+        # 10 baris -> batas aritmetis 0,05, tapi lantai Rp1 yang berlaku.
+        self.assertEqual(toleransi_agregat(10), Decimal("1"))
+        self.assertEqual(toleransi_agregat(0), Decimal("1"))
+
+    def test_menskala_di_atas_dua_ratus_baris(self):
+        from web.bonus import toleransi_agregat
+
+        # 200 x 0,005 = 1,00 -> titik silang; di atasnya batas aritmetis menang.
+        self.assertEqual(toleransi_agregat(200), Decimal("1.000"))
+        self.assertEqual(toleransi_agregat(2000), Decimal("10.000"))
+
+    def test_selisih_nyata_tetap_terlihat_meski_sel_besar(self):
+        """Ambang menskala tak boleh jadi pintu belakang: 2.000 baris memberi
+        ambang Rp10, dan selisih Rp375 tetap harus berbunyi."""
+        from web.bonus import toleransi_agregat
+
+        self.assertLess(toleransi_agregat(2000), Decimal("375"))

@@ -87,13 +87,33 @@ def _kunci(t):
 # --- Modus agregat -------------------------------------------------------
 
 # Ambang selisih lump. ALASANNYA BUKAN "bracket memangkas desimal" — dugaan itu
-# sudah diukur dan SALAH (artefak pembacaan berformat bulat). Nilai otoritatif
-# produksi: 04-08 panel 1.038.747,200 vs bracket 1.038.747,20; 06-08 panel
-# 1.491.972,250 vs bracket 1.491.972,25 — keduanya cocok SAMPAI SEN, selisih
-# 0,00. Jadi ini pagar pembulatan untuk ekspor masa depan, dan hari ini ia tak
-# mengubah satu pun hasil. Selisih nyata tetap terlihat: 92.550 vs 92.925 ->
-# 375 -> "selisih"; 157.500 vs 215.000 -> 57.500 -> "selisih".
+# sudah diukur dan SALAH (artefak pembacaan berformat bulat). Berkasnya sendiri
+# cocok SAMPAI SEN: 04-08 panel 1.038.747,200 vs bracket 1.038.747,20; 06-08
+# panel 1.491.972,250 vs bracket 1.491.972,25.
+#
+# Yang benar-benar menggeser angka adalah KOLOM KITA SENDIRI.
+# `Transaction.amount` itu `DecimalField(decimal_places=2)`, sedangkan ekspor
+# panel memuat baris berdesimal TIGA (mis. '13435.875' — 10 dari 74 baris
+# rollingan 04-08). Tiap baris dibulatkan saat disimpan, dan jumlah-dari-yang-
+# dibulatkan != pembulatan-dari-jumlah: 1.038.747,200 tersimpan jadi
+# 1.038.747,24. Jadi ambang ini LOAD-BEARING hari ini, bukan pagar masa depan.
+#
+# Karena sumbernya pembulatan per baris, batas atasnya bisa DIBUKTIKAN, bukan
+# ditebak: tiap baris bergeser paling banyak 0,005, jadi sel berisi n baris
+# panel bergeser paling banyak n x 0,005. Ambang tetap Rp1 akan pecah begitu
+# satu brand melewati ~200 baris berdesimal-tiga per kategori per hari (2.000
+# baris -> sampai Rp10 -> "selisih" palsu tiap hari). Karena itu ambangnya
+# menskala: lantai Rp1 (marjin aman yang disetujui) ATAU batas aritmetis
+# pembulatan, mana yang lebih besar. Ia tak pernah bisa menyembunyikan sesuatu
+# yang lebih besar dari artefaknya sendiri — selisih nyata tetap terlihat:
+# 92.550 vs 92.925 -> 375 -> "selisih"; 157.500 vs 215.000 -> 57.500.
 TOLERANSI_AGREGAT = Decimal("1")
+_DRIFT_PER_BARIS = Decimal("0.005")  # setengah dari satu sen (decimal_places=2)
+
+
+def toleransi_agregat(n_panel):
+    """Ambang selisih untuk sel berisi `n_panel` baris panel."""
+    return max(TOLERANSI_AGREGAT, n_panel * _DRIFT_PER_BARIS)
 
 # Jalan keluar manual bila pemetaan otomatis putus (mis. vendor menghapus kata
 # depan "BONUS" sehingga prefiks tak lagi menambat). Kunci DAN nilai keduanya
@@ -220,7 +240,8 @@ def _pisah_agregat(panel, bracket):
             "n_bracket": len(baris),
             "bracket_total": bracket_total,
             "selisih": selisih,
-            "status": "cocok" if abs(selisih) < TOLERANSI_AGREGAT else "selisih",
+            "status": ("cocok" if abs(selisih) < toleransi_agregat(len(pas))
+                       else "selisih"),
             "deskripsi": baris[0].description,
         })
         diklaim.update(p.id for p in pas)
