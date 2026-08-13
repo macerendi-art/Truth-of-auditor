@@ -943,6 +943,21 @@ def upload(request):
                 n_err += 1
                 continue
             if key not in PARSERS:
+                # Perintah yang menolak harus menyebut apa yang ditolaknya:
+                # cabang ini dulu hanya menaikkan `n_err`, sehingga pemakai
+                # cuma melihat "0 file diproses, 1 gagal" tanpa satu pun sebab.
+                # Kosong (deteksi gagal, pengguna belum memilih) dan asing (key
+                # tak dikenal, klien melewati validasi HTML) butuh instruksi
+                # berbeda — jangan disatukan jadi satu pesan generik.
+                nama = (orig_names[i] if i < len(orig_names)
+                        else os.path.basename(path_rel))
+                messages.error(request, (
+                    f"{nama}: jenis berkas belum dipilih. Aplikasi tidak bisa "
+                    "menebaknya — pilih jenisnya di kolom 'Jenis terdeteksi' "
+                    "lalu simpan ulang."
+                ) if not key else (
+                    f"{nama}: jenis '{key}' tidak dikenal, berkas dilewati."
+                ))
                 n_err += 1
                 continue
             try:
