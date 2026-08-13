@@ -1,3 +1,4 @@
+import bisect
 import os
 import re
 import zipfile
@@ -538,12 +539,22 @@ def dashboard(request):
         .order_by("-n")
     )
 
+    # Semua id batch toko — TERMASUK yang recon_date-nya NULL, karena nomor urut
+    # batch memakai populasi itu (konvensi sama di web/kelengkapan.py). JANGAN
+    # dihitung dari `batches` di bawah: daftar itu tersaring recon_date__isnull=
+    # False, jadi nomornya akan bergeser begitu ada batch tanpa tanggal.
+    # bisect_right(terurut, x) === COUNT(id <= x), jadi satu query ini
+    # menggantikan `total_b` DAN sampai 14 COUNT di loop kalender.
+    semua_batch_id = sorted(
+        ReconBatch.objects.filter(toko=active).values_list("id", flat=True)
+    )
+    total_b = len(semua_batch_id)
+
     batches = list(
         ReconBatch.objects.filter(toko=active, recon_date__isnull=False)
         .order_by("recon_date")
     )
     by_date = {b.recon_date: b for b in batches}
-    total_b = ReconBatch.objects.filter(toko=active).count()
 
     def selisih(b):
         return _selisih_summary(b.summary)
@@ -566,7 +577,7 @@ def dashboard(request):
             st = _status_selisih(tot)
         kal.append({
             "d": d, "batch": b, "st": st, "today": d == today,
-            "no": (ReconBatch.objects.filter(toko=active, id__lte=b.id).count() if b else None),
+            "no": (bisect.bisect_right(semua_batch_id, b.id) if b else None),
         })
 
     # --- tren selisih 30 hari kalender terakhir (bar DP/WD + garis total);
