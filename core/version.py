@@ -119,6 +119,38 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.18.1",
+        tanggal=_dt.date(2026, 8, 13),
+        nama="QRIS Flyer Format Baru — Uang yang Hilang Tanpa Pesan",
+        jenis=PATCH,
+        commit="",
+        sorotan=(
+            "**Laporan QRIS Flyer bentuk baru terbaca utuh.** Vendor kembali "
+            "mengganti nama kolom di file ekspornya — kali ini kolom tanggal. "
+            "Tiket dan nominalnya masih terbaca benar, jadi unggahannya "
+            "dilaporkan BERHASIL, tetapi baris tanpa tanggal tak pernah terlihat "
+            "oleh pencocokan maupun laporan. Akibatnya 339 baris LTN 12 Agustus "
+            "berhenti di \"Belum ada uang masuk\" padahal uangnya sudah masuk. "
+            "Setelah diperbaiki: 339 dari 339 cocok, dan Panel ↔ Mutasi Bank hari "
+            "itu naik dari 674 menjadi 1.002 dari 1.148.",
+            "**Ganti nama kolom sekarang jauh lebih sulit menjatuhkan aplikasi.** "
+            "Nama kolom dicocokkan tanpa mempedulikan huruf besar/kecil, spasi, "
+            "maupun garis bawah — sehingga variasi penulisan yang sama tak lagi "
+            "perlu perbaikan program. Satu brand lain yang diam-diam terkena "
+            "masalah serupa ikut pulih tanpa penyesuaian tersendiri.",
+            "**Dan kalau format barunya tetap tak dikenali, aplikasi berhenti dan "
+            "bilang — tidak lagi diam.** Setiap file yang barisnya masuk tanpa "
+            "satu pun tanggal kini ditolak sejak awal, dengan pesan yang menyebut "
+            "nama kolom di file itu dan meminta file dikirim ke pengembang. "
+            "Berlaku untuk semua jenis sumber, bukan cuma QRIS Flyer. Penolakan "
+            "yang terlihat jauh lebih murah daripada uang yang hilang diam-diam.",
+            "**Baris lama yang terlanjur masuk tanpa tanggal bisa dipulihkan di "
+            "tempat**, tanpa mengunggah ulang apa pun, karena aplikasi menyimpan "
+            "seluruh kolom asli setiap file. Pemulihan ini juga menjaga agar file "
+            "yang sama tidak terhitung dua kali bila kelak diunggah lagi.",
+        ),
+    ),
+    Rilis(
         versi="1.18.0",
         tanggal=_dt.date(2026, 8, 13),
         nama="Percepatan Menyeluruh — Halaman Berat Jadi Ringan",
