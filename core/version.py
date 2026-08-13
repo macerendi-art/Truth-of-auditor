@@ -136,7 +136,7 @@ RILIS: tuple[Rilis, ...] = (
             "**Ganti nama kolom sekarang jauh lebih sulit menjatuhkan aplikasi.** "
             "Nama kolom dicocokkan tanpa mempedulikan huruf besar/kecil, spasi, "
             "maupun garis bawah — sehingga variasi penulisan yang sama tak lagi "
-            "perlu perbaikan program. Satu brand lain yang diam-diam terkena "
+            "perlu perbaikan program. Dua brand lain yang diam-diam terkena "
             "masalah serupa ikut pulih tanpa penyesuaian tersendiri.",
             "**Dan kalau format barunya tetap tak dikenali, aplikasi berhenti dan "
             "bilang — tidak lagi diam.** Setiap file yang barisnya masuk tanpa "
