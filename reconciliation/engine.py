@@ -913,8 +913,17 @@ def _carried_qs(tokos):
 
 
 def _carried_results(toko):
-    """left_id → MatchResult no_money carry-over (lihat `_carried_qs`)."""
-    qs = _carried_qs([toko]).select_related("left", "run", "run__batch").order_by("id")
+    """left_id → MatchResult no_money carry-over (lihat `_carried_qs`).
+
+    `run__batch__tolerance` ikut di-select_related meski engine sendiri tak
+    memakainya: `web/settlement.py` membaca `batch.tolerance.date_window_days`
+    PER BARIS untuk menghitung `batas`, dan select_related membuat instance
+    ReconBatch baru tiap baris (cache relasi per-instance) — tanpa ini halaman
+    Settlement Tertunda jadi N+1 (di prod 439 query untuk satu toko besar).
+    Jangan dibuang karena tampak tak terpakai di sini."""
+    qs = _carried_qs([toko]).select_related(
+        "left", "run", "run__batch", "run__batch__tolerance"
+    ).order_by("id")
     return {r.left_id: r for r in qs}  # id terbesar menang (defensif bila ganda)
 
 

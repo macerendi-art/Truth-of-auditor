@@ -3,7 +3,9 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ToleranceProfile
@@ -95,6 +97,30 @@ class PendingRowsTests(_SettleData):
         tx.consumed_by_batch = b
         tx.save()
         self.assertEqual(pending_settlement_rows(self.toko), [])
+
+
+class PendingRowsQueryTests(_SettleData):
+    """Jumlah query halaman Settlement harus KONSTAN terhadap jumlah baris
+    menunggu — di prod toko besar sempat 439 query untuk satu halaman."""
+
+    def test_query_tak_tumbuh_saat_baris_menunggu_bertambah(self):
+        d = date(2026, 6, 28)
+        for i in range(2):
+            self.waiting(d, ticket=f"W-awal{i}")
+        pending_settlement_rows(self.toko)  # pemanasan: cache ContentType dkk.
+        with CaptureQueriesContext(connection) as before:
+            self.assertEqual(len(pending_settlement_rows(self.toko)), 2)
+        # Tanggal SAMA untuk semua baris tambahan: batch/run/toleransinya tak
+        # bertambah, jadi pertumbuhan query apa pun murni PER BARIS.
+        for i in range(20):
+            self.waiting(d, ticket=f"W-tambah{i}")
+        with CaptureQueriesContext(connection) as after:
+            self.assertEqual(len(pending_settlement_rows(self.toko)), 22)
+        self.assertEqual(
+            len(before), len(after),
+            f"query tumbuh {len(before)}→{len(after)} saat baris menunggu "
+            f"bertambah (N+1: toleransi batch asal dibaca per baris)",
+        )
 
 
 class SettlementViewTests(_SettleData):
