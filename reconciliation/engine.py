@@ -340,7 +340,13 @@ class PanelBracketMatcher:
             )),
             dfrom, dto,
         )
-        return list(left), list(right)
+        # ORDER BY EKSPLISIT — alasan sama dengan `_MoneyMatcher.sides()` di
+        # bawah: tanpa ini urutan baris ditentukan query planner. Mode username
+        # sudah punya kunci sort total `(delta, p.id, b.id)`, tapi mode ticket
+        # greedy murni (`next(...)` atas bidx) — kalau satu ticket muncul dobel
+        # di bracket, baris bracket MANA yang diklaim panel bergantung pada
+        # urutan masukan ini.
+        return list(left.order_by("id")), list(right.order_by("id"))
 
     def match(self, run, left, right):
         # Mode dipilih dari RASIO, bukan dari ADA/TIDAKNYA satu baris ber-ticket.
@@ -517,7 +523,22 @@ class _MoneyMatcher:
             )),
             dfrom, dto,
         ).select_related("source_type", "upload")
-        return list(left), list(right)
+        # ORDER BY EKSPLISIT — JANGAN DIHAPUS. `Transaction.Meta` tak punya
+        # `ordering`, jadi tanpa ini urutan barisnya adalah keputusan QUERY
+        # PLANNER: menambah index (atau sekadar pertumbuhan data yang menggeser
+        # statistik Postgres) bisa mengubahnya. Pass 1/2/3 mengiterasi list ini
+        # secara greedy, jadi urutan masukan menentukan siapa yang lebih dulu
+        # mengklaim kandidat yang SERI — artinya jumlah "Cocok" bisa berbeda
+        # antar-run untuk data yang PERSIS SAMA. Sudah terbukti: satu pemain,
+        # 4 baris nominal sama tanggal sama, urutan [P1,P2] → cocok=1 sedangkan
+        # [P2,P1] → cocok=2 (lihat reconciliation/tests_determinisme.py).
+        # `id` dipilih sebagai kunci karena primary key: UNIK (urutannya total,
+        # tak pernah seri), IMUTABEL (stabil antar-run), dan searah urutan
+        # ingest — jadi urutannya juga yang paling masuk akal bagi manusia.
+        # Pass 2 tidak punya sort sama sekali (memilih `best` dengan `>` yang
+        # ketat dan `break` pada kandidat H-1 pertama); determinismenya
+        # BERSANDAR PENUH pada urutan di sini.
+        return list(left.order_by("id")), list(right.order_by("id"))
 
     @staticmethod
     def _identity(p, b):
@@ -704,7 +725,23 @@ class _MoneyMatcher:
                 if s >= tol.fuzzy_threshold:
                     route = _route_ok(expected, owners.get(b.upload_id), b.source_type.key)
                     pairs.append((s, route is True, -delta, p, b))
-        pairs.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+        # KUNCI SORT WAJIB TOTAL — `id` di ekor bukan hiasan. Tanpa pemecah seri
+        # ini kuncinya `(skor, route, -delta)` saja: pasangan yang seri dibiarkan
+        # dipecahkan oleh stabilitas `list.sort`, alias oleh urutan append —
+        # alias oleh urutan queryset `sides()` — alias oleh RENCANA EKSEKUSI
+        # POSTGRES. Sudah terbukti: satu pemain, 4 baris nominal sama tanggal
+        # sama, urutan panel [P1,P2] menghasilkan cocok=1 sedangkan [P2,P1]
+        # menghasilkan cocok=2 (reconciliation/tests_determinisme.py). Menambah
+        # index komposit apa pun — atau sekadar pertumbuhan data yang menggeser
+        # statistik planner — cukup untuk menggeser jumlah "Cocok" pada data
+        # yang PERSIS SAMA. `sides()` kini ber-`order_by("id")`, tapi itu sabuk;
+        # ini bretelnya: hasil tetap sama walau urutan queryset berubah nanti.
+        # `id` dinegasikan supaya di bawah `reverse=True` seri jatuh ke id
+        # TERKECIL lebih dulu — idiom yang sama dengan pass 0c dan mode username
+        # Panel↔Bracket, sekaligus persis perilaku de-facto yang selama ini
+        # berlaku. Ini HANYA memecah seri; siapa yang BOLEH berpasangan tetap
+        # ditentukan aturan anchor di atas, tak satu pun berubah.
+        pairs.sort(key=lambda x: (x[0], x[1], x[2], -x[3].id, -x[4].id), reverse=True)
         for s, _, _, p, b in pairs:
             if p.id in matched or b.id in used:
                 continue
@@ -756,7 +793,9 @@ class _MoneyMatcher:
                     route = _route_ok(expected, owners.get(b.upload_id), b.source_type.key)
                     band_pairs.append((s, route is True, -delta, p, b))
             has_candidate[p.id] = any_cand
-        band_pairs.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+        # Kunci total, alasan identik dengan pass 1 di atas (cacat yang sama
+        # persis, tinggal menunggu data yang seri di pita nama 60–84).
+        band_pairs.sort(key=lambda x: (x[0], x[1], x[2], -x[3].id, -x[4].id), reverse=True)
         for s, _, _, p, b in band_pairs:
             if p.id in matched or b.id in used:
                 continue
