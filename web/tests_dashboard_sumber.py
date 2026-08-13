@@ -1,11 +1,22 @@
 """Dashboard: kartu "Transaksi per Sumber" (`by_source` + `tx_total`).
 
-Jaring pengaman SEBELUM sumber angkanya diganti. Hari ini kedua nilai itu
-sensus tabel `Transaction` (`web/views.py`: `tx.values(...).annotate(n=Count("id"))`
-dan `tx.count()`); sebentar lagi diganti agregat `Upload.rows_parsed` karena
-sensusnya memindai 5,3 GB di produksi. Berkas ini yang harus MEMBUKTIKAN
-angkanya tidak berubah setelah penggantian itu — jadi setiap tes di sini
-ditulis agar tetap hijau di KEDUA implementasi.
+Jaring pengaman yang ditulis SEBELUM bentuk query-nya diubah, dan tetap
+berlaku sesudahnya. Dulu kedua nilai ini dua query terpisah — agregat
+ber-JOIN ke `sources_sourcetype` plus `tx.count()` — yang di produksi jadi
+Parallel Seq Scan 6,1 juta baris (5,3 GB) untuk satu diagram batang.
+Sekarang satu agregat yang dikelompokkan di `source_type_id`, dengan
+`tx_total` diturunkan dari hasil yang sama.
+
+Angkanya TETAP hitungan baris `Transaction` yang nyata. Agregat dari
+pembukuan `Upload.rows_parsed` sempat dipertimbangkan — di data produksi
+keduanya cocok 126/126 — lalu DITOLAK: kecocokan itu membuktikan jalur
+divergensinya belum pernah dijalankan, bukan bahwa jalurnya aman (menghapus
+transaksi lewat Django admin tak pernah memperbarui `rows_parsed`). Untuk
+aplikasi audit, ±0,15 dtk tidak sepadan dengan angka yang bisa basi.
+
+Helper `buat_tx` di bawah tetap memelihara `rows_parsed` seperti ingest
+sungguhan — bukan lagi karena dibutuhkan agregatnya, melainkan supaya
+fixture-nya tetap setia pada keadaan produksi.
 
 Kontrak yang dikunci:
 - bentuk dict `by_source` persis (`source_type__name`/`source_type__key`/`n`),
