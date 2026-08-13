@@ -16,6 +16,8 @@ Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
 - **Semua halaman laporan ikut ringan.** Rincian Rekening 1,9 → 0,4 detik, Breakdown Bracket 1,5 → 0,8 detik, Detail FR 1,4 → 0,7 detik, Rekap Bulanan 3,3 → 1,4 detik, Rekonsiliasi Bonus 1,0 → 0,6 detik. Halaman Settlement Tertunda tak lagi tersendat saat antreannya panjang, dan Rincian Biaya berhenti menghitung ulang label sumber untuk setiap baris — kini sekali saja per file dan rekening.
 - **Tidak ada satu angka pun yang berubah.** Yang dipercepat adalah cara aplikasi mencari datanya, bukan cara ia menghitungnya. Setiap angka di layar dikunci lebih dulu oleh pengujian sebelum jalurnya disentuh, dan dibandingkan lagi sesudahnya pada data produksi yang sama.
 - Aplikasi juga sanggup melayani empat kali lebih banyak permintaan bersamaan, sehingga beberapa orang yang membuka halaman berat pada saat yang sama tak lagi saling menunggu.
+- **Hasil rekonsiliasi kini dijamin sama setiap kali dijalankan.** Pemeriksaan menemukan bahwa ketika dua kemungkinan pasangan sama kuatnya, pemenangnya selama ini ditentukan oleh urutan baris yang kebetulan dikembalikan basis data — sehingga jumlah "Cocok" bisa berbeda antar-penjalanan untuk data yang sama persis. Urutannya kini ditetapkan, dan aturan pencocokannya sendiri tidak berubah sedikit pun.
+- Beberapa halaman juga tak lagi bisa dimatikan oleh tanggal yang ekstrem: memutar tahun di kolom tanggal sampai ujung kalender dulu membuat halaman gagal terbuka; sekarang ia menampilkan hasil kosong sebagaimana mestinya.
 
 ## v1.17.4 — QRIS ZPay Penamaan Status Baru & Peringatan Gateway Lebih Tenang
 *Perbaikan · 12 Agustus 2026*

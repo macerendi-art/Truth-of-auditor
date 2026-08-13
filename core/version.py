@@ -143,6 +143,16 @@ RILIS: tuple[Rilis, ...] = (
             "Aplikasi juga sanggup melayani empat kali lebih banyak permintaan "
             "bersamaan, sehingga beberapa orang yang membuka halaman berat pada "
             "saat yang sama tak lagi saling menunggu.",
+            "**Hasil rekonsiliasi kini dijamin sama setiap kali dijalankan.** "
+            "Pemeriksaan menemukan bahwa ketika dua kemungkinan pasangan sama "
+            "kuatnya, pemenangnya selama ini ditentukan oleh urutan baris yang "
+            "kebetulan dikembalikan basis data — sehingga jumlah \"Cocok\" bisa "
+            "berbeda antar-penjalanan untuk data yang sama persis. Urutannya kini "
+            "ditetapkan, dan aturan pencocokannya sendiri tidak berubah sedikit pun.",
+            "Beberapa halaman juga tak lagi bisa dimatikan oleh tanggal yang "
+            "ekstrem: memutar tahun di kolom tanggal sampai ujung kalender dulu "
+            "membuat halaman gagal terbuka; sekarang ia menampilkan hasil kosong "
+            "sebagaimana mestinya.",
         ),
     ),
     Rilis(
