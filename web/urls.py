@@ -24,6 +24,7 @@ urlpatterns = [
     path("hutang-piutang/", views.hutang_piutang, name="hutang_piutang"),
     path("biaya-admin/", views.rincian_biaya, name="rincian_biaya"),
     path("bonus/", views.bonus_recon, name="bonus_recon"),
+    path("bonus/export/", views.export_bonus, name="export_bonus"),
     path("bulanan/", views.monthly_overview, name="monthly_overview"),
     path("rekap-bulanan/", views.rekap_bulanan_page, name="rekap_bulanan"),
     path("rekap-bulanan/edit/", views.rekap_edit_form, name="rekap_edit_form"),

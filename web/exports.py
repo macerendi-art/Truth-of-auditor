@@ -4,6 +4,7 @@ Satu jalur kode untuk sheet "Hasil" supaya export per-run dan per-batch
 tidak pernah beda format.
 """
 import re
+from decimal import Decimal
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -110,6 +111,77 @@ def rekening_sheet(wb, data, title):
     return d
 
 
+def _tgl_sel(v):
+    """Tanggal untuk sel Excel: teks dd/mm/YYYY (konvensi sheet lain), None→kosong."""
+    return v.strftime("%d/%m/%Y") if v else ""
+
+
+def bonus_sheet(wb, data, title, rentang_label=""):
+    """Sheet Rekonsiliasi Bonus — SATU tabel untuk semua ember.
+
+    `data` = keluaran `web.bonus.rekonsiliasi_bonus`. Halaman /bonus/ punya tiga
+    tab karena itu navigasi layar; di Excel tiga sheet justru menyulitkan —
+    klien bekerja dengan filter kolom. Jadi satu tabel, dan kolom `Status`
+    (`Cocok`/`Hanya Panel`/`Hanya Bracket`/`Agregat`/`Agregat (selisih)`) yang
+    membedakan ember.
+
+    Baris **agregat** (lump bracket per kategori per hari) muat di kolom yang
+    sama tanpa dipaksakan: `Username` kosong karena memang tak ada nama pemain,
+    `Kategori` = kategori BRACKET, dan kedua kolom nominal = total masing-masing
+    sisi. Tanggalnya adalah tanggal EFEKTIF (hasil "TGL dd.mm.yyyy" bila ada),
+    sama dengan yang tampil di halaman.
+
+    Konvensi tanda seragam: `Selisih` = Nominal Panel − Nominal Bracket, persis
+    seperti `selisih` pada entri agregat. Hanya-panel positif, hanya-bracket
+    negatif. Baris `Cocok` boleh berselisih bukan nol — pairing berkunci
+    `int(abs(nominal))`, jadi sen kedua sisi bisa berbeda; angkanya dibiarkan
+    apa adanya, bukan dinolkan.
+
+    Kunci `agregat` dibaca lewat `.get` karena untuk toko Nexus kunci itu SAMA
+    SEKALI tak ada di `data` (lihat `web/bonus.py`).
+    """
+    d = wb.create_sheet(title)
+    if rentang_label:
+        d.append([rentang_label])
+        d["A1"].font = Font(bold=True)
+    d.append(["Tanggal", "Username", "Kategori", "Nominal Panel",
+              "Nominal Bracket", "Selisih", "Status"])
+    for c in d[d.max_row]:
+        c.font = Font(bold=True)
+
+    nol = Decimal("0")
+    tot_panel = tot_bracket = nol
+    for c in data["cocok"]:
+        p, b = c["panel"], c["bracket"]
+        panel, bracket = p["nominal"] or nol, b["nominal"] or nol
+        tot_panel, tot_bracket = tot_panel + panel, tot_bracket + bracket
+        d.append([_tgl_sel(p["tanggal"]), p["username"], p["kategori_detail"],
+                  _num(panel), _num(bracket), _num(panel - bracket), "Cocok"])
+    for r in data["panel_only"]:
+        panel = r["nominal"] or nol
+        tot_panel += panel
+        d.append([_tgl_sel(r["tanggal"]), r["username"], r["kategori_detail"],
+                  _num(panel), _num(None), _num(panel), "Hanya Panel"])
+    for r in data["bracket_only"]:
+        bracket = r["nominal"] or nol
+        tot_bracket += bracket
+        d.append([_tgl_sel(r["tanggal"]), r["username"], r["kategori_detail"],
+                  _num(None), _num(bracket), _num(-bracket), "Hanya Bracket"])
+    for e in data.get("agregat") or ():
+        tot_panel += e["panel_total"]
+        tot_bracket += e["bracket_total"]
+        d.append([_tgl_sel(e["tanggal"]), "", e["kategori"],
+                  _num(e["panel_total"]), _num(e["bracket_total"]),
+                  _num(e["selisih"]),
+                  "Agregat" if e["status"] == "cocok" else "Agregat (selisih)"])
+
+    d.append(["TOTAL", "", "", _num(tot_panel), _num(tot_bracket),
+              _num(tot_panel - tot_bracket), ""])
+    for c in d[d.max_row]:
+        c.font = Font(bold=True)
+    return d
+
+
 def _sheet_title(base, existing):
     """Judul sheet <=31 char, tanpa karakter terlarang openpyxl, anti-duplikat."""
     t = re.sub(r"[\\/*?:\[\]]", "-", base)[:31]
@@ -194,9 +266,11 @@ def build_batch_workbook(batch, batch_no, rel_labels):
         results_sheet(wb, run, _sheet_title(f"Hasil {run.get_relation_display()}", titles), rel_labels)
 
     # Sheet tambahan (query-time, retroaktif): Breakdown Bracket + Rincian
-    # Rekening untuk TANGGAL batch. Hanya ditambahkan bila ada baris — batch
-    # tanpa data FR/rekening tetap identik format lama (Ringkasan + Hasil).
+    # Rekening + Rekonsiliasi Bonus untuk TANGGAL batch. Hanya ditambahkan bila
+    # ada baris — batch tanpa data FR/rekening/bonus tetap identik format lama
+    # (Ringkasan + Hasil).
     if batch.recon_date and batch.toko_id:
+        from web.bonus import rekonsiliasi_bonus
         from web.breakdown import bracket_breakdown
         from web.rekening import rekening_breakdown
 
@@ -207,4 +281,8 @@ def build_batch_workbook(batch, batch_no, rel_labels):
         rk = rekening_breakdown(batch.toko, batch.recon_date)
         if rk["count"]:
             rekening_sheet(wb, rk, _sheet_title("Rincian Rekening", titles))
+        bn = rekonsiliasi_bonus(batch.toko, batch.recon_date, batch.recon_date)
+        if (bn["cocok"] or bn["panel_only"] or bn["bracket_only"]
+                or bn.get("agregat")):
+            bonus_sheet(wb, bn, _sheet_title("Rekonsiliasi Bonus", titles), tgl_label)
     return wb

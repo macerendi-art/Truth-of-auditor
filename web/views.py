@@ -2335,15 +2335,27 @@ def rincian_biaya(request):
     })
 
 
+def _bonus_params(request):
+    """(dari, sampai, kategori) halaman /bonus/ — SATU jalur parsing filter.
+
+    Dipakai bersama `bonus_recon` dan `export_bonus`: berkas ekspor wajib memuat
+    PERSIS baris yang terlihat di layar untuk query yang sama, dan salinan
+    logika filter adalah tempat penyimpangan itu lahir. Ekspor yang menyimpang
+    dari layar lebih buruk daripada tidak ada ekspor — operator memakainya
+    sebagai bukti.
+    """
+    sampai = _parse_date(request.GET.get("sampai", "")) or date_cls.today()
+    dari = _parse_date(request.GET.get("dari", "")) or _geser_hari(sampai, -30)
+    return dari, sampai, (request.GET.get("kategori") or "").strip()
+
+
 @login_required
 def bonus_recon(request):
     """Rekonsiliasi Bonus panel<->bracket — tab panel_only (default)/bracket_only/cocok."""
     active = _active_toko(request)
     if active is None:
         return render(request, "web/no_toko.html")
-    sampai = _parse_date(request.GET.get("sampai", "")) or date_cls.today()
-    dari = _parse_date(request.GET.get("dari", "")) or _geser_hari(sampai, -30)
-    kategori = (request.GET.get("kategori") or "").strip()
+    dari, sampai, kategori = _bonus_params(request)
     data = hitung_rekonsiliasi_bonus(active, dari=dari, sampai=sampai,
                                      kategori=kategori or None)
     tab = request.GET.get("tab") or "panel"
@@ -2359,6 +2371,53 @@ def bonus_recon(request):
         "page": page, "data": data, "dari": dari, "sampai": sampai, "tab": tab,
         "kategori": kategori,
     })
+
+
+@login_required
+def export_bonus(request):
+    """Export XLSX Rekonsiliasi Bonus toko aktif — cerminan halaman /bonus/,
+    menghormati rentang (Dari–Sampai) + filter kategori yang sedang aktif lewat
+    `_bonus_params`. Nama file: bonus_<toko>_<dari>_<sampai>.xlsx.
+
+    Berbeda dari `build_batch_workbook` yang hanya menambah sheet bila ada
+    baris, view ini SELALU menulis sheetnya: workbook tanpa satu sheet pun
+    membuat openpyxl melempar saat save, dan berkas kosong tetap jawaban yang
+    sah untuk rentang tanpa data.
+    """
+    import io
+
+    from openpyxl import Workbook
+
+    from web.exports import XLSX_CT, bonus_sheet, safe_name
+
+    active = _active_toko(request)
+    if active is None:
+        return render(request, "web/no_toko.html")
+    dari, sampai, kategori = _bonus_params(request)
+    data = hitung_rekonsiliasi_bonus(active, dari=dari, sampai=sampai,
+                                     kategori=kategori or None)
+    if dari == sampai:
+        label = dari.strftime("%d/%m/%Y")
+    else:
+        label = f"{dari.strftime('%d/%m/%Y')} – {sampai.strftime('%d/%m/%Y')}"
+    if kategori:
+        label = f"{label} · {kategori}"
+    wb = Workbook()
+    wb.remove(wb.active)
+    bonus_sheet(wb, data, "Rekonsiliasi Bonus", label)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    catat(request.user, "export_bonus",
+          f"{active.name} {dari.isoformat()}..{sampai.isoformat()}"
+          + (f" [{kategori}]" if kategori else ""))
+    resp = HttpResponse(buf.read(), content_type=XLSX_CT)
+    resp["Content-Disposition"] = (
+        f'attachment; filename="bonus_{safe_name(active.name)}_'
+        f'{dari.isoformat()}_{sampai.isoformat()}.xlsx"'
+    )
+    return resp
 
 
 @login_required
