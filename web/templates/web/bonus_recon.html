@@ -116,6 +116,13 @@ halaman mereka tak bergeser satu byte pun. Total tfoot dibaca dari
       <th class="num">Cocok</th><th class="num">Nilai (Rp)</th>
       <th class="num">Hanya Panel</th><th class="num">Nilai (Rp)</th>
       <th class="num">Hanya Bracket</th><th class="num">Nilai (Rp)</th>
+      {% comment %}
+      Kolom agregat hanya muncul saat modus agregat aktif — supaya tabel merek
+      Nexus tetap persis seperti sebelumnya. Tanpa kolom ini, kategori yang
+      SELURUHNYA dicocokkan secara gelondongan tampil 0 di keenam kolom,
+      seolah tak ada apa-apa, padahal jutaan rupiah sudah direkonsiliasi.
+      {% endcomment %}
+      {% if data.ringkas.agregat %}<th class="num">Agregat</th><th class="num">Nilai (Rp)</th>{% endif %}
     </tr></thead>
     <tbody>
     {% for kat, n in data.ringkas.kategori.items %}
@@ -127,6 +134,10 @@ halaman mereka tak bergeser satu byte pun. Total tfoot dibaca dari
       <td class="num mono">{{ n.panel_only_total|floatformat:0|intcomma }}</td>
       <td class="num mono">{{ n.bracket_only|intcomma }}</td>
       <td class="num mono">{{ n.bracket_only_total|floatformat:0|intcomma }}</td>
+      {% if data.ringkas.agregat %}
+      <td class="num mono">{{ n.agregat|default:0|intcomma }}</td>
+      <td class="num mono">{{ n.agregat_panel_total|default:0|floatformat:0|intcomma }}</td>
+      {% endif %}
     </tr>
     {% endfor %}
     </tbody>
@@ -138,6 +149,10 @@ halaman mereka tak bergeser satu byte pun. Total tfoot dibaca dari
       <td class="num mono">{{ data.ringkas.panel_only.total|floatformat:0|intcomma }}</td>
       <td class="num mono">{{ data.ringkas.bracket_only.n|intcomma }}</td>
       <td class="num mono">{{ data.ringkas.bracket_only.total|floatformat:0|intcomma }}</td>
+      {% if data.ringkas.agregat %}
+      <td class="num mono">{{ data.ringkas.agregat.n|intcomma }}</td>
+      <td class="num mono">{{ data.ringkas.agregat.panel_total|floatformat:0|intcomma }}</td>
+      {% endif %}
     </tr></tfoot>
   </table>
   </div>
