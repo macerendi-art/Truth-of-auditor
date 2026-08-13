@@ -285,7 +285,13 @@ def _nilai_auto(toko, dari, sampai):
     nama_lain = []
     kategori = rekonsiliasi_bonus(toko, dari, sampai)["ringkas"]["kategori"]
     for nama, d in kategori.items():
-        total = (d["cocok_total"] or NOL) + (d["panel_only_total"] or NOL)
+        # Suku ketiga = sisi PANEL baris yang diserap modus agregat (lump
+        # bracket per kategori/hari): baris itu keluar dari `cocok` DAN
+        # `panel_only`, jadi tanpa suku ini NET PROFIT menggelembung sebesar
+        # seluruh bonus teragregasi (±1,36 juta/hari/brand). `.get` — kunci
+        # `agregat_*` hanya ada saat modus agregat menyala.
+        total = ((d["cocok_total"] or NOL) + (d["panel_only_total"] or NOL)
+                 + (d.get("agregat_panel_total") or NOL))
         slug = _slug_bonus(nama)
         per_bonus[slug] += total
         if slug == _BONUS_LAIN and total:

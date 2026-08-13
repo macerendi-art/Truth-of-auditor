@@ -13,6 +13,7 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from sources.models import SourceType, Toko, Upload
+from sources.parsers.bonus import MARKER_AGREGAT
 from transactions.models import Transaction
 from web.bonus import rekonsiliasi_bonus
 from web.hutang import hutang_piutang
@@ -612,6 +613,63 @@ class BulanKosongTests(_RekapData):
         self.assertEqual(self.nilai("dp", tahun=2026, bulan=2), _rp("-10"))
         self.panel("depo", "20", tanggal=date(2026, 1, 31))
         self.assertEqual(self.nilai("dp", tahun=2026, bulan=1), _rp("-20"))
+
+
+class AgregatBonusTests(_RekapData):
+    """Modus agregat Rekonsiliasi Bonus tak boleh menguapkan uang di sini.
+
+    Baris panel yang diserap lump bracket keluar dari `cocok` DAN `panel_only`
+    — dua ember yang dijumlahkan `_nilai_auto`. Tanpa suku `agregat_panel_total`
+    di sana, NET PROFIT menggelembung sebesar seluruh bonus teragregasi
+    (±1,36 juta/hari/brand) tanpa error di mana pun. Tes konservasi yang sudah
+    ada tidak menangkapnya: fixture-nya hanya per pemain.
+    """
+
+    KAT_PANEL = "BONUS ROLLINGAN SLOT HARIAN 0.5%"
+    KAT_BRACKET = "BONUS ROLLINGAN"
+
+    def bonus_panel_cor(self, username, amount, kategori=KAT_PANEL, tanggal=TGL):
+        """Baris panel BERPENANDA — hanya parser `cor_panel_bonus` membuatnya."""
+        return self._tx(self.st_pbonus, jenis="bonus", amount=Decimal(amount),
+                        username=username, tanggal=tanggal,
+                        description=f"{kategori} {username}",
+                        raw={"Kategori": kategori, "Sumber": MARKER_AGREGAT})
+
+    def lump_bracket(self, amount, kategori=KAT_BRACKET, tanggal=TGL, desc=None):
+        return self._tx(self.st_bbonus, jenis="bonus", amount=Decimal(amount),
+                        username="", tanggal=tanggal,
+                        description=desc or f"{kategori}\nPlayer:",
+                        raw={"Kategori": kategori})
+
+    def test_agregat_masuk_nilai_bonus_bulanan(self):
+        self.bonus_panel_cor("a", "500000.00")
+        self.bonus_panel_cor("b", "538747.20")
+        self.lump_bracket("1038747.00")
+        b = self.baris()
+        # Nama promo memuat "HARIAN" -> `_slug_bonus` menaruhnya di bonus_harian
+        # (aturan lama, tanpa tambahan apa pun untuk rollingan).
+        self.assertEqual(b["bonus_harian"]["nilai"], _rp("-1038747.20"))
+        self.assertEqual(b["bonus"]["nilai"], _rp("-1038747.20"))
+
+    def test_konservasi_agregat(self):
+        # Tiga jalur berdampingan: lump teragregasi, pasangan per pemain, dan
+        # baris panel tanpa pasangan.
+        self.bonus_panel_cor("a", "1000000")
+        self.lump_bracket("1000000")
+        self.bonus_panel_cor("budi", "15000", kategori="Manual Freebet")
+        self.bonus_bracket("budi", "15000", kategori="BONUS HARIAN")
+        self.bonus_panel("sendy", "20000", kategori="Redemption Coupon")
+
+        kat = rekonsiliasi_bonus(
+            self.toko, date(2026, 6, 1), date(2026, 6, 30))["ringkas"]["kategori"]
+        total = sum((d["cocok_total"] + d["panel_only_total"]
+                     + (d.get("agregat_panel_total") or Decimal("0"))
+                     for d in kat.values()), Decimal("0"))
+        b = self.baris()
+        empat = sum(b[s]["nilai"] for s in
+                    ("bonus_harian", "bonus_mingguan", "lucky_draw", "bonus_lain"))
+        self.assertEqual(total, Decimal("1035000"))
+        self.assertEqual(empat, _rp(-total))
 
 
 class MigrasiTests(TestCase):
