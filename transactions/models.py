@@ -197,6 +197,23 @@ class Transaction(TimeStampedModel):
         indexes = [
             models.Index(fields=["source_type", "occurred_at"]),
             models.Index(fields=["jenis", "amount"]),
+            # Dua index komposit di bawah ini dinamai EKSPLISIT: nama itulah yang
+            # dipakai runbook DDL manual di produksi (dibangun lewat psql dengan
+            # CREATE INDEX CONCURRENTLY sebelum deploy — lihat core/db_ops.py).
+            # Urutan kolom disengaja: `toko` + `source_type` selalu dipakai
+            # sebagai KESETARAAN, tanggal sebagai RENTANG di posisi terakhir.
+            # Pemakai: web/breakdown.py, web/detail_fr.py, web/biaya.py,
+            # web/hutang.py, web/bonus.py, web/rekap.py.
+            models.Index(
+                fields=["toko", "source_type", "posted_date"],
+                name="tx_toko_src_posted_idx",
+            ),
+            # Pemakai: web/rekening.py, web/penjaga.py,
+            # reconciliation/engine.py::_date_filter.
+            models.Index(
+                fields=["toko", "source_type", "occurred_at"],
+                name="tx_toko_src_occurred_idx",
+            ),
         ]
         constraints = [
             # Idempotensi di DB (guard aplikasi di ingest tetap ada): dua proses

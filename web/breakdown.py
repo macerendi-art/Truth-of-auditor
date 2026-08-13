@@ -161,9 +161,11 @@ def _saldo_carry(toko, dari):
     Catatan biaya: agregat (1) tetap MEMINDAI (sisi-DB) semua baris bracket
     toko pra-`dari` — bukan full-scan yang dimaterialisasi ke Python (itu yang
     dibatasi ke hari-hari "last" saja), tapi scan-nya tumbuh dgn sejarah. Satu
-    agregat per render, bukan N+1; ringan pada skala sekarang. Bila baris
-    bracket per toko membengkak (ratusan ribu), tambah indeks komposit
-    (toko, source_type, posted_date) agar jadi index-range-scan.
+    agregat per render, bukan N+1; ringan pada skala sekarang. Syarat "baris
+    bracket per toko membengkak (ratusan ribu)" sudah terpenuhi, jadi indeks
+    komposit (toko, source_type, posted_date) SUDAH DITAMBAHKAN
+    (`tx_toko_src_posted_idx`, lihat transactions/models.py) agar scan ini jadi
+    index-range-scan.
     """
     last = (
         Transaction.objects.filter(
