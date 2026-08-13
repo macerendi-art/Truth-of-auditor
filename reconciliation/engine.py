@@ -615,9 +615,9 @@ class _MoneyMatcher:
         # `id` dipilih sebagai kunci karena primary key: UNIK (urutannya total,
         # tak pernah seri), IMUTABEL (stabil antar-run), dan searah urutan
         # ingest — jadi urutannya juga yang paling masuk akal bagi manusia.
-        # Pass 2 tidak punya sort sama sekali (memilih `best` dengan `>` yang
-        # ketat dan `break` pada kandidat H-1 pertama); determinismenya
-        # BERSANDAR PENUH pada urutan di sini.
+        # Pass 2 memilih `best` dengan kunci total eksplisit (skor, -selisih
+        # nominal, -delta hari, -id) — deterministik sendiri; urutan di sini
+        # tetap penjaga bagi konsumen lain yang mengiterasi pool.
         return list(left.order_by("id")), list(right.order_by("id"))
 
     @staticmethod
@@ -854,18 +854,27 @@ class _MoneyMatcher:
             emit(p, b, MatchResult.Bucket.COCOK, s, "amount+date+name")
 
         # --- pass 2: near-miss identitas kuat (fee kecil & uang H-1) ---
+        # KEBIJAKAN SELEKSI (bukan sekadar determinisme — itu sudah dijamin
+        # `order_by("id")` di `sides()`): saat skor seri, first-hit urutan id
+        # memilih kandidat SEMBARANG di antara yang sama kuat. Kunci eksplisit
+        # memilih yang paling masuk akal — skor tertinggi, lalu selisih nominal
+        # terkecil (fee riil biasanya yang terkecil), lalu tanggal terdekat ke
+        # panel, lalu id terkecil sebagai pemecah akhir.
         for p in left:
             if p.id in matched:
                 continue
             amt = int(abs(p.money_delta))
-            best = None
+            best = None  # (kunci, b, diff); kunci terbesar menang
             for b, delta in kandidat(p, tol_amt=max(FEE_TOL_MIN, amt // 100)):
                 s = self._identity(p, b)
-                if s >= tol.fuzzy_threshold and (best is None or s > best[0]):
-                    best = (s, b)
-            if best:
-                s, b = best
+                if s < tol.fuzzy_threshold:
+                    continue
                 diff = abs(int(abs(b.money_delta)) - amt)
+                key = (s, -diff, -delta, -b.id)
+                if best is None or key > best[0]:
+                    best = (key, b, diff)
+            if best:
+                (s, _, _, _), b, diff = best
                 # Identitas PERSIS (nomor HP/username/nama identik = 100) + selisih
                 # kecil khas biaya transfer → cocok; identitas fuzzy tetap ditinjau.
                 bucket = (MatchResult.Bucket.COCOK if s >= 100
@@ -873,12 +882,15 @@ class _MoneyMatcher:
                 emit(p, b, bucket, s, "amount_fee",
                      f"identitas cocok, selisih nominal {diff:,} (indikasi fee)")
                 continue
+            h1 = None  # H-1: skor tertinggi menang, lalu id terkecil
             for b, delta in kandidat(p, lo=-1, hi=-1):
                 s = self._identity(p, b)
-                if s >= tol.fuzzy_threshold:
-                    emit(p, b, MatchResult.Bucket.TINJAU, s, "date_before",
-                         "uang tiba sehari SEBELUM tanggal panel")
-                    break
+                if s >= tol.fuzzy_threshold and (h1 is None or (s, -b.id) > h1[0]):
+                    h1 = ((s, -b.id), b)
+            if h1:
+                (s, _), b = h1
+                emit(p, b, MatchResult.Bucket.TINJAU, s, "date_before",
+                     "uang tiba sehari SEBELUM tanggal panel")
 
         # --- pass 3: sisa berbasis IDENTITAS — nominal+tanggal cuma pendukung ---
         # Nama mirip pada pita [NAME_REVIEW_FLOOR..threshold) → perlu_tinjau,
