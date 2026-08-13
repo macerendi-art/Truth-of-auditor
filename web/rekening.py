@@ -7,6 +7,7 @@ Net / Trx / Saldo Awal / Saldo Akhir / Selisih Kontrol. Saldo memakai
 dengan breakdown FR (`_saldo_batas`) — kebal acak urutan. Sumber tanpa saldo
 (gateway QRIS, BCA PDF) → saldo & selisih "—".
 """
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from transactions.models import Transaction
@@ -34,10 +35,21 @@ def rekening_breakdown(toko, dari, sampai=None):
         sampai = dari
     if dari > sampai:
         dari, sampai = sampai, dari
+    # Rentang datetime setengah-terbuka, BUKAN `occurred_at__date__range` yang
+    # lebih enak dibaca: `__date__` membungkus kolomnya (`CAST(occurred_at AS DATE)`
+    # di Postgres) sehingga index btree atas `occurred_at` — `(source_type,
+    # occurred_at)` yang ada di `transactions.Transaction.Meta.indexes` — TIDAK
+    # bisa dipakai dan setiap muat halaman /rekening/ jadi scan lebar (1,88 dtk
+    # di toko besar, prod). Dengan sisi kiri kolom telanjang, index terpakai.
+    # Setara persis: `USE_TZ = False` dan seluruh waktu di app ini naif WIB, jadi
+    # `CAST(occurred_at AS DATE) BETWEEN dari AND sampai` == `dari 00:00:00 <=
+    # occurred_at < (sampai+1) 00:00:00`; baris `occurred_at` NULL sama-sama gugur.
+    # Batasnya dikunci `test_batas_tengah_malam_ikut_terhitung` — jangan "dirapikan".
     rows = (
         Transaction.objects.filter(
             toko=toko, source_type__key__in=MONEY_KEYS,
-            occurred_at__date__range=(dari, sampai),
+            occurred_at__gte=datetime.combine(dari, time.min),
+            occurred_at__lt=datetime.combine(sampai + timedelta(days=1), time.min),
         )
         .select_related("source_type", "upload", "account", "upload__account")
         .order_by("occurred_at", "id")

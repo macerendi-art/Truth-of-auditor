@@ -33,14 +33,15 @@ class _MoneyData(TestCase):
             )
         return self._uploads[key]
 
-    def mv(self, st, provider, owner, money, saldo, jam=10, jenis="depo", tanggal=TGL):
+    def mv(self, st, provider, owner, money, saldo, jam=10, jenis="depo", tanggal=TGL,
+           menit=0, detik=0):
         """Satu baris mutasi uang. `money` bertanda, `saldo`=balance_after (str|None)."""
         self._n += 1
         return Transaction.objects.create(
             upload=self._upload(st, provider, owner), source_type=st, toko=self.toko,
             jenis=jenis, amount=abs(Decimal(money)), money_delta=Decimal(money),
             balance_after=None if saldo is None else Decimal(saldo),
-            occurred_at=datetime(tanggal.year, tanggal.month, tanggal.day, jam, 0),
+            occurred_at=datetime(tanggal.year, tanggal.month, tanggal.day, jam, menit, detik),
             row_hash=f"mv{self._n}",
         )
 
@@ -152,6 +153,32 @@ class RekeningRentangTests(_MoneyData):
         data = rekening_breakdown(self.toko, date(2026, 6, 27), date(2026, 6, 28))
         self.assertEqual(data["dari"], date(2026, 6, 27))
         self.assertEqual(data["sampai"], date(2026, 6, 28))
+
+    def test_batas_tengah_malam_ikut_terhitung(self):
+        """Detik pertama & terakhir rentang ikut; tetangganya tidak.
+
+        Penyaringan tanggal memakai rentang datetime setengah-terbuka
+        (`>= dari 00:00:00`, `< sampai+1 00:00:00`) demi index — tes ini yang
+        menjaga batasnya persis sama dengan `occurred_at__date__range` lama.
+        Nominal sengaja dibuat beda-beda supaya baris yang salah ikut ketahuan.
+        """
+        d26, d27, d28, d29 = (date(2026, 6, x) for x in (26, 27, 28, 29))
+        self.mv(self.bank, "BCA", "HENDI", "1", None, jam=23, menit=59, detik=59, tanggal=d26)
+        self.mv(self.bank, "BCA", "HENDI", "10", None, jam=0, menit=0, detik=0, tanggal=d27)
+        self.mv(self.bank, "BCA", "HENDI", "100", None, jam=23, menit=59, detik=59, tanggal=d28)
+        self.mv(self.bank, "BCA", "HENDI", "1000", None, jam=0, menit=0, detik=0, tanggal=d29)
+
+        data = rekening_breakdown(self.toko, d27, d28)
+        self.assertEqual(data["count"], 2)
+        self.assertEqual(data["accounts"][0]["deposit"], Decimal("110"))
+
+        # mode satu-hari (dari==sampai) memakai batas yang sama
+        satu27 = rekening_breakdown(self.toko, d27)
+        self.assertEqual(satu27["count"], 1)
+        self.assertEqual(satu27["accounts"][0]["deposit"], Decimal("10"))
+        satu28 = rekening_breakdown(self.toko, d28)
+        self.assertEqual(satu28["count"], 1)
+        self.assertEqual(satu28["accounts"][0]["deposit"], Decimal("100"))
 
 
 class RekeningViewTests(_MoneyData):
