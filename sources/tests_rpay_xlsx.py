@@ -1,6 +1,7 @@
 """Parser gateway RafflesPay varian XLSX (BBS): DP satu-header, WD dua-tingkat."""
 import os
 import tempfile
+from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
 from openpyxl import Workbook
@@ -29,6 +30,47 @@ class ReadXlsxGridTests(SimpleTestCase):
         self.assertEqual(grid[0][0], "A")
         self.assertEqual(grid[1][1], "sub")
         self.assertEqual(grid[2][1], 2)
+
+    @patch("sources.parsers.base._raw_xlsx_rows")
+    @patch("sources.parsers.base.openpyxl.load_workbook")
+    def test_fallback_bila_openpyxl_hanya_melihat_satu_baris_palsu(
+            self, load_workbook, raw_rows):
+        ws = MagicMock()
+        ws.iter_rows.return_value = iter([("BranchName",)])
+        wb = MagicMock()
+        wb.sheetnames = ["Sheet"]
+        wb.__getitem__.return_value = ws
+        load_workbook.return_value = wb
+        raw_rows.return_value = [
+            ["BranchName", "OrderId"],
+            ["QRIS CONTOH", "pesanan-1"],
+            ["QRIS CONTOH", "pesanan-2"],
+        ]
+
+        grid = __import__(
+            "sources.parsers.base", fromlist=["read_xlsx_grid"]
+        ).read_xlsx_grid("contoh.xlsx")
+
+        self.assertEqual(len(grid), 3)
+        self.assertEqual(grid[2][1], "pesanan-2")
+
+    @patch("sources.parsers.base._raw_xlsx_rows")
+    @patch("sources.parsers.base.openpyxl.load_workbook")
+    def test_satu_baris_well_formed_tetap_memakai_nilai_typed_bila_raw_tak_lebih_panjang(
+            self, load_workbook, raw_rows):
+        ws = MagicMock()
+        ws.iter_rows.return_value = iter([(123,)])
+        wb = MagicMock()
+        wb.sheetnames = ["Sheet"]
+        wb.__getitem__.return_value = ws
+        load_workbook.return_value = wb
+        raw_rows.return_value = [["123"]]
+
+        grid = __import__(
+            "sources.parsers.base", fromlist=["read_xlsx_grid"]
+        ).read_xlsx_grid("contoh.xlsx")
+
+        self.assertEqual(grid, [[123]])
 
 
 DP_HEADER = ["Website", "Date", "Ticket Number", "Player", "Payment Type",

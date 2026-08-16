@@ -136,7 +136,7 @@ def read_xlsx_rows(path, header_row=1, sheet=None):
 def read_xlsx_grid(path):
     """Baca xlsx -> list-of-list mentah (SEMUA baris, tanpa interpretasi header).
     Untuk format ber-header dua-tingkat yang tak bisa diwakili `read_xlsx_rows`.
-    Fallback ke reader mentah bila openpyxl gagal / kebaca kosong."""
+    Fallback ke reader mentah bila openpyxl gagal / kebaca mencurigakan pendek."""
     grid = None
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
@@ -145,8 +145,16 @@ def read_xlsx_grid(path):
         wb.close()
     except Exception:
         grid = None
-    if not grid:
+    if grid is None:
         grid = _raw_xlsx_rows(path)
+    elif len(grid) <= 1:
+        # Exporter COR/UNO tanpa tag <dimension> dapat membuat openpyxl sukses
+        # tetapi hanya mengembalikan satu baris palsu (mis. ['BranchName']).
+        # Pakai raw hanya bila benar-benar menemukan baris lebih banyak agar
+        # nilai typed dari berkas well-formed tidak dibuang.
+        raw = _raw_xlsx_rows(path)
+        if len(raw) > len(grid):
+            grid = raw
     return grid or []
 
 
