@@ -188,6 +188,104 @@ class QRFlyerParser(BaseParser):
         return out
 
 
+class QRISEliteParser(BaseParser):
+    """QRIS ELITE CSV — gateway deposit panel Nexus.
+
+    Baris pertama adalah judul dan baris kedua header. ``RECORD DATE`` sudah
+    WIB walaupun suffix vendor rusak menjadi ``+07:00+007``; hanya 19 karakter
+    tanggal-jam pertama yang dipakai. ``APPROVE`` sengaja tidak dipakai.
+    """
+
+    source_key = "gateway"
+    STATUS_UANG = frozenset({"SUCCESS"})
+    KOLOM_WAJIB = ("TICKET", "RECORD VALUE", "RECORD DATE")
+
+    def parse(self, path, flow=""):
+        with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+            reader = csv.reader(f)
+            next(reader, None)  # baris 1 = judul "MUTASI QRIS TRANSACTION"
+            header = [str(h or "").strip() for h in (next(reader, None) or [])]
+            peta_header = {h.casefold(): h for h in header if h}
+            hilang = [h for h in self.KOLOM_WAJIB if h.casefold() not in peta_header]
+            if hilang:
+                raise ValueError(
+                    "Laporan QRIS ELITE tak dikenali: kolom %s tidak ditemukan. "
+                    "Header berkas: %s."
+                    % (
+                        " dan ".join(hilang),
+                        ", ".join(repr(h) for h in header if h) or "(kosong)",
+                    )
+                )
+            rows = [dict(zip(header, nilai)) for nilai in reader if any(nilai)]
+
+        kolom = lambda nama: peta_header.get(nama.casefold(), "\x00")  # noqa: E731
+        out = []
+        jumlah_transaksi = 0
+        status_ditemukan = set()
+        for r in rows:
+            ticket = str(r.get(kolom("TICKET"), "") or "").strip()
+            identitas = str(r.get(kolom("ID"), "") or "").strip()
+            if not ticket and not identitas:
+                continue
+            jumlah_transaksi += 1
+            status = str(r.get(kolom("STATUS"), "") or "").strip().upper()
+            status_ditemukan.add(status or "(kosong)")
+            if status not in self.STATUS_UANG:
+                continue
+
+            waktu_raw = str(r.get(kolom("RECORD DATE"), "") or "").strip()
+            occurred = parse_dt(waktu_raw[:19])
+            if not occurred:
+                raise ValueError(
+                    "QRIS ELITE: RECORD DATE tidak dapat dibaca untuk tiket %s: %r."
+                    % (ticket or identitas, waktu_raw)
+                )
+            amount = abs(parse_decimal(r.get(kolom("RECORD VALUE"))))
+            fee = abs(parse_decimal(r.get(kolom("RECORD FEE"))))
+            raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
+
+            # Kalibrasi 85/85 BBS: panel.Approved − RECORD DATE median +37 dtk
+            # (rentang +11..+358, nol negatif), sedangkan terhadap APPROVE
+            # median −25.199 dtk dan 85/85 negatif. RECORD DATE sudah WIB;
+            # jangan dibalik menjadi APPROVE atau ditambah tujuh jam.
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date(),
+                # Bentuk kolom adalah deposit dari vendor. Nama berkas/flow
+                # diketik manusia dan tidak boleh membalik tanda uang.
+                "jenis": "depo",
+                "amount": amount,
+                "credit_delta": Decimal("0"),
+                "money_delta": amount,
+                "fee": fee,
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": ticket,
+                "username": str(r.get(kolom("MEMBER"), "") or "").strip(),
+                "reference": "",
+                "counterparty": "",
+                "description": "QRIS ELITE %s" % str(
+                    r.get(kolom("MERCHANT"), "") or ""
+                ).strip(),
+                "raw": raw,
+            }
+            nominal_kanonik = format(amount.normalize(), "f")
+            row["row_hash"] = row_hash("qris_elite", [ticket, nominal_kanonik])
+            out.append(row)
+
+        if jumlah_transaksi and not out:
+            ditemukan = ", ".join(repr(s) for s in sorted(status_ditemukan))
+            dikenal = ", ".join(sorted(self.STATUS_UANG))
+            raise ValueError(
+                "Laporan QRIS ELITE memuat %d baris transaksi tetapi tidak satu "
+                "pun berstatus uang. Status ditemukan: %s. Status yang dikenal: "
+                "%s. Laporkan berkas ini bila vendor mengganti nama status."
+                % (jumlah_transaksi, ditemukan or "(kosong)", dikenal)
+            )
+        return out
+
+
 class ZPayParser(BaseParser):
     """QRIS ZPay / ZETPAY (CSV) — gateway QRIS baru, panel Nexus (mis. M25).
 

@@ -26,6 +26,7 @@ from .parsers.cor import (
 )
 from .parsers.gateways import (
     NXPayParser,
+    QRISEliteParser,
     QRFlyerParser,
     QHokiParser,
     ZPayParser,
@@ -46,6 +47,7 @@ PARSERS = {
     "bni_pdf": BNIPDFParser,
     "mandiri": MandiriParser,
     "nxpay": NXPayParser,
+    "qris_elite": QRISEliteParser,
     "qrflyer": QRFlyerParser,
     "cor_panel_bank": CORPanelBankParser,
     "cor_panel_qris": CORPanelQRISParser,

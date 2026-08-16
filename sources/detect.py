@@ -138,6 +138,11 @@ def detect_source(path, filename=""):
             add("cor_panel_qris", 0.90)
     elif ext == ".csv":
         c = _csv_text(path)
+        # QRIS ELITE: kunci pada header, bukan nama berkas (sampel W25
+        # mengeja "ELIT"). Keempat token ini tidak dimiliki gateway lain.
+        if all(token in c for token in
+               ("record value", "record fee", "ticket", "member")):
+            add("qris_elite", 0.95)
         if "mutasi_debet" in c or "mutasi_kredit" in c or "tgl_tran" in c:
             add("bri", 0.95)
         if ("cabang" in c and "keterangan" in c and "saldo" in c) or "bca" in fn:
