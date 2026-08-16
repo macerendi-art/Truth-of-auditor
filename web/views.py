@@ -40,7 +40,7 @@ from core.audit import catat
 from core.models import AuditLog
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
 from sources.detect import detect_source
-from sources.management.commands.ingest import detect_flow
+from sources.flow import detect_flow
 from sources.models import SourceType, Upload
 from sources.parsers.banks import NBMB_RE
 from sources.services import PARSERS, ingest, is_encrypted_xlsx

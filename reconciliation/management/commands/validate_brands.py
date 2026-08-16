@@ -10,6 +10,7 @@ from reconciliation.engine import run_batches_auto
 from reconciliation.models import MatchResult
 from sources import services
 from sources.detect import detect_source
+from sources.flow import detect_flow
 from sources.models import Toko
 
 
@@ -17,13 +18,7 @@ def format_rate(n, d):
     return f"{n}/{d} ({100 * n / d:.1f}%)" if d else f"{n}/0 (n/a)"
 
 
-def _flow(name):
-    low = name.lower()
-    if "withdraw" in low or "_wd" in low or " wd" in low or low.startswith("wd"):
-        return "wd"
-    if "deposit" in low or "_dp" in low or " dp" in low or low.startswith("dp"):
-        return "dp"
-    return ""
+_flow = detect_flow
 
 
 class Command(BaseCommand):

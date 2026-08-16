@@ -469,6 +469,20 @@ class CORQRISGatewayTests(SimpleTestCase):
         self.assertEqual(r["reference"], "03f747e8-ac9c-48e0-a")
         self.assertEqual(r["ticket_no"], "")
 
+    def test_bentuk_dp_menang_meski_flow_wd(self):
+        path = _xlsx([
+            self.HEADER,
+            ["QRIS-7-Beta-TMG3", "85000", "83980", "03f747e8-ac9c-48e0-a",
+             "01-Jul-2026 23:59:56", "1pysbjp67783", "-", "-", "Channel 7",
+             "03f747e8-ac9c-48e0-a"],
+        ])
+        try:
+            rows = CORQRISGatewayParser().parse(path, flow="wd")
+        finally:
+            os.remove(path)
+        self.assertEqual(rows[0]["jenis"], "depo")
+        self.assertEqual(rows[0]["money_delta"], Decimal("85000"))
+
 
 class IngestBankFieldsTests(TestCase):
     def test_ingest_panel_mengisi_player_bank(self):

@@ -211,15 +211,19 @@ class CORQRISGatewayParser(BaseParser):
             gross = parse_decimal(r.get("GrandTotal"))
             net = parse_decimal(r.get("BranchNominal"))
             occurred = parse_dt(r.get("TransactionTime"))
-            money_delta = -gross if flow == "wd" else gross
+            # Bentuk kolom berasal dari vendor, sedangkan nama berkas (dan
+            # `flow`) diketik manusia; bentuk harus menang. Di produksi seluruh
+            # 2.067 baris bentuk-DP yang sempat berjenis WD adalah korban salah
+            # deteksi pada satu toko (w25), hanya 14-07-2026 sebanyak 1.471 dan
+            # 13-08-2026 sebanyak 596 — bukan bukti bentuk ini pernah menjadi WD.
             row = {
                 "source_type": "gateway",
                 "occurred_at": occurred,
                 "posted_date": occurred.date() if occurred else None,
-                "jenis": "wd" if flow == "wd" else "depo",
+                "jenis": "depo",
                 "amount": gross,
                 "credit_delta": Decimal("0"),
-                "money_delta": money_delta,
+                "money_delta": gross,
                 "fee": gross - net,
                 "bonus": Decimal("0"),
                 "balance_after": None,

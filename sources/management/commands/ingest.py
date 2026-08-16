@@ -1,17 +1,7 @@
-import os
-
 from django.core.management.base import BaseCommand, CommandError
 
+from sources.flow import detect_flow
 from sources.services import PARSERS, ingest
-
-
-def detect_flow(path):
-    name = os.path.basename(path).lower()
-    if "wd" in name:
-        return "wd"
-    if "dp" in name:
-        return "dp"
-    return ""
 
 
 class Command(BaseCommand):
