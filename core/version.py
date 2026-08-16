@@ -119,6 +119,35 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.20.0",
+        tanggal=_dt.date(2026, 8, 16),
+        nama="QRIS ELITE & Arah UNOPAY yang Tepat",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**Laporan QRIS ELITE sekarang bisa diunggah dan dicocokkan lewat "
+            "nomor tiket.** Diuji pada laporan BBS 13 Agustus: seluruh 85 dari "
+            "85 transaksi menemukan pasangan panelnya. Nominal berkode unik "
+            "tetap dicatat apa adanya, sehingga selisih Rp1–Rp2 tidak "
+            "disembunyikan oleh pembacaan file.",
+            "**Arah deposit UNOPAY tidak lagi terbalik karena nama file.** "
+            "Nama ekspor dapat memuat dua penanda sekaligus, misalnya `WD DP`; "
+            "sebelumnya penanda WD selalu menang dan 596 deposit 13 Agustus "
+            "tercatat sebagai uang keluar, membuat 586 baris panel berhenti di "
+            "\"Belum ada uang masuk\". Sekarang penanda terakhir yang berdiri "
+            "sendiri dipakai, dan bentuk kolom deposit dari vendor selalu "
+            "diperlakukan sebagai deposit.",
+            "**Baris UNOPAY lama yang sudah salah arah dapat dipulihkan di "
+            "tempat tanpa unggah ulang.** Perintah pemulihan secara bawaan "
+            "hanya menampilkan pratinjau per toko dan tanggal; penulisan harus "
+            "diminta tegas, dan otomatis dihentikan bila ada baris yang masih "
+            "terkunci oleh batch rekonsiliasi.",
+            "**File Excel dari eksportir COR/UNO yang bentuk internalnya tidak "
+            "standar kini dibaca penuh.** Aplikasi tidak lagi mengira file "
+            "berisi ratusan baris sebagai satu baris header saja.",
+        ),
+    ),
+    Rilis(
         versi="1.19.0",
         tanggal=_dt.date(2026, 8, 14),
         nama="Bonus Panel Vigor/TM Gaming — Dua Cara Bracket Membukukan Bonus",

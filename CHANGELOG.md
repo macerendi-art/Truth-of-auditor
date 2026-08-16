@@ -3,11 +3,19 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.19.0** · 35 rilis (1 besar, 19 fitur, 11 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.20.0** · 36 rilis (1 besar, 20 fitur, 11 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.20.0 — QRIS ELITE & Arah UNOPAY yang Tepat
+*Rilis fitur · 16 Agustus 2026*
+
+- **Laporan QRIS ELITE sekarang bisa diunggah dan dicocokkan lewat nomor tiket.** Diuji pada laporan BBS 13 Agustus: seluruh 85 dari 85 transaksi menemukan pasangan panelnya. Nominal berkode unik tetap dicatat apa adanya, sehingga selisih Rp1–Rp2 tidak disembunyikan oleh pembacaan file.
+- **Arah deposit UNOPAY tidak lagi terbalik karena nama file.** Nama ekspor dapat memuat dua penanda sekaligus, misalnya `WD DP`; sebelumnya penanda WD selalu menang dan 596 deposit 13 Agustus tercatat sebagai uang keluar, membuat 586 baris panel berhenti di "Belum ada uang masuk". Sekarang penanda terakhir yang berdiri sendiri dipakai, dan bentuk kolom deposit dari vendor selalu diperlakukan sebagai deposit.
+- **Baris UNOPAY lama yang sudah salah arah dapat dipulihkan di tempat tanpa unggah ulang.** Perintah pemulihan secara bawaan hanya menampilkan pratinjau per toko dan tanggal; penulisan harus diminta tegas, dan otomatis dihentikan bila ada baris yang masih terkunci oleh batch rekonsiliasi.
+- **File Excel dari eksportir COR/UNO yang bentuk internalnya tidak standar kini dibaca penuh.** Aplikasi tidak lagi mengira file berisi ratusan baris sebagai satu baris header saja.
 
 ## v1.19.0 — Bonus Panel Vigor/TM Gaming — Dua Cara Bracket Membukukan Bonus
 *Rilis fitur · 14 Agustus 2026*
