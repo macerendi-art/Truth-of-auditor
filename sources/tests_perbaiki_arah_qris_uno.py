@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from io import StringIO
 
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.test import TestCase
 
 from reconciliation.models import ReconBatch, ToleranceProfile
@@ -174,3 +174,65 @@ class PerbaikiArahQRISUnoTests(TestCase):
 
         self.assertIn("diperiksa=0", keluaran)
         self.assertIn("diubah=0", keluaran)
+
+    def test_tanggal_hanya_menyasar_hari_itu(self):
+        lama = self._rusak(posted_date=date(2026, 7, 14))
+        baru = self._rusak(posted_date=date(2026, 8, 13))
+
+        keluaran = self._jalankan("--tanggal", "2026-08-13", "--terapkan")
+
+        lama.refresh_from_db()
+        baru.refresh_from_db()
+        self.assertEqual(lama.jenis, "wd")
+        self.assertEqual(baru.jenis, "depo")
+        self.assertIn("toko=w25 tanggal=2026-08-13 n=1", keluaran)
+        self.assertNotIn("2026-07-14", keluaran)
+        self.assertIn("diubah=1", keluaran)
+
+    def test_kunci_tanggal_lain_tidak_menghentikan(self):
+        """14-07 terkunci tidak boleh memblokir pemulihan 13-08."""
+        terkunci = self._rusak(posted_date=date(2026, 7, 14))
+        bebas = self._rusak(posted_date=date(2026, 8, 13))
+        batch = ReconBatch.objects.create(
+            toko=self.toko,
+            tolerance=ToleranceProfile.objects.get(name="Default"),
+            recon_date=date(2026, 7, 14),
+        )
+        terkunci.consumed_by_batch = batch
+        terkunci.save(update_fields=["consumed_by_batch"])
+
+        keluaran = self._jalankan("--tanggal", "2026-08-13", "--terapkan")
+
+        terkunci.refresh_from_db()
+        bebas.refresh_from_db()
+        self.assertEqual(terkunci.jenis, "wd")
+        self.assertEqual(bebas.jenis, "depo")
+        self.assertIn("terkunci batch=0", keluaran)
+        self.assertNotIn("DIHENTIKAN", keluaran)
+        self.assertIn("diubah=1", keluaran)
+
+    def test_kunci_tanggal_yang_sama_tetap_menghentikan(self):
+        bebas = self._rusak(posted_date=date(2026, 8, 13))
+        terkunci = self._rusak(posted_date=date(2026, 8, 13))
+        batch = ReconBatch.objects.create(
+            toko=self.toko,
+            tolerance=ToleranceProfile.objects.get(name="Default"),
+            recon_date=date(2026, 8, 13),
+        )
+        terkunci.consumed_by_batch = batch
+        terkunci.save(update_fields=["consumed_by_batch"])
+
+        keluaran = self._jalankan("--tanggal", "2026-08-13", "--terapkan")
+
+        bebas.refresh_from_db()
+        terkunci.refresh_from_db()
+        self.assertEqual(bebas.jenis, "wd")
+        self.assertEqual(terkunci.jenis, "wd")
+        self.assertIn("terkunci batch=1", keluaran)
+        self.assertIn("DIHENTIKAN", keluaran)
+
+    def test_tanggal_tidak_sah_ditolak(self):
+        with self.assertRaises(CommandError) as cm:
+            self._jalankan("--tanggal", "13-08-2026")
+        self.assertIn("YYYY-MM-DD", str(cm.exception))
+        self.assertIn("13-08-2026", str(cm.exception))

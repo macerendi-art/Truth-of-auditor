@@ -10,8 +10,16 @@ nominal dan fee kembali dari ``raw``. Secara bawaan ia dry-run; penulisan hanya
 terjadi dengan ``--terapkan``. Bila ada satu sasaran yang sudah dikunci batch,
 seluruh operasi dihentikan agar urutan pemulihan tetap menjadi keputusan
 pemilik data.
+
+``--tanggal`` mempersempit sasaran *dan* gerbang terkunci ke satu
+``posted_date``. Tanpa itu, baris 14-07 yang masih terkunci batch lama
+menghentikan pemulihan 13-08 — padahal keduanya harus bisa dipulihkan
+terpisah, karena menghapus batch sebulan lalu menarik settlement yang sudah
+selesai.
 """
-from django.core.management.base import BaseCommand
+from datetime import date
+
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction as db_transaction
 from django.db.models import Count
 
@@ -27,6 +35,11 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--toko", default=None, help="batasi ke satu toko (key)")
+        parser.add_argument(
+            "--tanggal",
+            default=None,
+            help="batasi ke satu posted_date (YYYY-MM-DD); gerbang terkunci ikut tersaring",
+        )
         mode = parser.add_mutually_exclusive_group()
         mode.add_argument(
             "--dry-run",
@@ -40,6 +53,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts):
+        tanggal = self._parse_tanggal(opts["tanggal"])
         qs = Transaction.objects.filter(
             source_type__key="gateway",
             raw__has_key="BranchName",
@@ -48,14 +62,16 @@ class Command(BaseCommand):
         )
         if opts["toko"]:
             qs = qs.filter(toko__key=opts["toko"])
+        if tanggal is not None:
+            qs = qs.filter(posted_date=tanggal)
 
         for kelompok in qs.values("toko__key", "posted_date").annotate(
             n=Count("id")
         ).order_by("toko__key", "posted_date"):
-            tanggal = kelompok["posted_date"] or "tanpa-tanggal"
+            label_tanggal = kelompok["posted_date"] or "tanpa-tanggal"
             self.stdout.write(
                 f"sasaran toko={kelompok['toko__key'] or '-'} "
-                f"tanggal={tanggal} n={kelompok['n']}"
+                f"tanggal={label_tanggal} n={kelompok['n']}"
             )
 
         terkunci = qs.filter(consumed_by_batch__isnull=False).count()
@@ -113,6 +129,17 @@ class Command(BaseCommand):
         ))
         for sebab, jumlah in lewat.items():
             self.stdout.write(self.style.WARNING(f"dilewati {sebab}={jumlah}"))
+
+    @staticmethod
+    def _parse_tanggal(nilai):
+        if not nilai:
+            return None
+        try:
+            return date.fromisoformat(nilai)
+        except ValueError:
+            raise CommandError(
+                f"tanggal tidak sah: {nilai!r} (pakai YYYY-MM-DD)"
+            )
 
     @staticmethod
     def _hitung(tx):
