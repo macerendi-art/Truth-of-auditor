@@ -12,6 +12,30 @@ def _money(amount, flow):
     return -amount if flow == "wd" else amount
 
 
+def _nxpay_jenis(ticket, amount_signed, flow):
+    """Arah baris NXPay — ticket panel-compatible mengalahkan nama berkas.
+
+    Staff sering menukar nama file DP/WD (bukti BTS 20-08-2026: berkas
+    ``… DP NXPAY.xlsx`` berisi ticket ``W…`` / Amount negatif, dan sebaliknya).
+    Ticket ``D…`` = deposit, ``W…`` = withdraw — sama dengan konvensi panel
+    Nexus. Tanpa prefix D/W: ``flow`` nama file, lalu tanda ``Amount`` vendor.
+    """
+    t = (ticket or "").strip().upper()
+    if t.startswith("W"):
+        return "wd"
+    if t.startswith("D"):
+        return "depo"
+    if flow == "wd":
+        return "wd"
+    if flow == "dp":
+        return "depo"
+    if amount_signed is not None and amount_signed < 0:
+        return "wd"
+    if amount_signed is not None and amount_signed > 0:
+        return "depo"
+    return "depo"
+
+
 class NXPayParser(BaseParser):
     source_key = "gateway"
 
@@ -22,16 +46,18 @@ class NXPayParser(BaseParser):
             ticket = str(r.get("Ticket Number", "") or "").strip()
             if not ticket or "total" in str(r.get("Username", "")).lower():
                 continue  # skip footer / Grand Total
-            amt = abs(parse_decimal(r.get("Amount")))
+            signed = parse_decimal(r.get("Amount"))
+            amt = abs(signed)
+            jenis = _nxpay_jenis(ticket, signed, flow)
             occurred = parse_dt(r.get("Date"))  # format US: M/D/YYYY h:m:s AM/PM
             row = {
                 "source_type": "gateway",
                 "occurred_at": occurred,
                 "posted_date": occurred.date() if occurred else None,
-                "jenis": "wd" if flow == "wd" else "depo",
+                "jenis": jenis,
                 "amount": amt,
                 "credit_delta": Decimal("0"),
-                "money_delta": _money(amt, flow),
+                "money_delta": -amt if jenis == "wd" else amt,
                 "fee": parse_decimal(r.get("Admin Fee")),
                 "bonus": Decimal("0"),
                 "balance_after": None,
