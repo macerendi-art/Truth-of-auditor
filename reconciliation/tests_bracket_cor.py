@@ -263,10 +263,16 @@ class PanelBracketJendelaTanggalTests(_Base):
 
 
 class PanelBracketModeTicketRegresiTests(_Base):
-    """Regresi Nexus: selama panel punya ticket, hasilnya IDENTIK perilaku lama —
-    baris FR tanpa ticket (bonus, beban admin, dst) tetap tak terlihat."""
+    """Regresi Nexus mode ticket + fallback FR tanpa ticket.
+
+    Ticket tetap menang. Baris FR bonus/admin tetap tak terlihat. Panel tanpa
+    ticket tetap sunyi. Panel ber-ticket yang gagal join ticket boleh jatuh ke
+    FR DP/WD tanpa ticket via username (kasus AUTO DEPO NXPY / BTS).
+    """
 
     def test_campuran_ticketed_dan_tanpa_ticket(self):
+        """Ticket menang dulu; sisa panel no_bracket boleh jatuh ke FR DP/WD
+        tanpa ticket via username. Bonus tetap tak terlihat."""
         p1 = self.tx(self.panel, self.up_p, "50000", datetime(2026, 7, 1, 10),
                      ticket="D111111", username="budi88")
         p2 = self.tx(self.panel, self.up_p, "60000", datetime(2026, 7, 1, 11),
@@ -276,25 +282,28 @@ class PanelBracketModeTicketRegresiTests(_Base):
         bonus = self.tx(self.bracket, self.up_b, "60000", datetime(2026, 7, 1, 11, 5),
                         username="siti99", jenis="bonus")
         sisa = self.tx(self.bracket, self.up_b, "60000", datetime(2026, 7, 1, 11, 6),
-                       username="siti99")   # DP tanpa ticket — tak terlihat mode ticket
+                       username="siti99")   # DP FR tanpa ticket (mis. AUTO DEPO NXPY)
         run = self._run()
         self.assertEqual(run.summary["mode"], "ticket")
-        self.assertEqual(run.summary["right"], 1)   # hanya baris ber-ticket
-        self.assertEqual(run.summary["cocok"], 1)
+        # ber-ticket + DP/WD tanpa ticket (bonus dikecualikan)
+        self.assertEqual(run.summary["right"], 2)
+        self.assertEqual(run.summary["cocok"], 2)
         self.assertEqual(run.summary["perlu_tinjau"], 0)
-        self.assertEqual(run.summary["tidak_cocok"], 1)
-        cocok = MatchResult.objects.get(run=run, bucket=MatchResult.Bucket.COCOK)
-        self.assertEqual((cocok.left_id, cocok.right_id), (p1.id, b1.id))
-        self.assertEqual(cocok.reason_code, "ticket+amount")
-        tidak = MatchResult.objects.get(run=run, bucket=MatchResult.Bucket.TIDAK)
-        self.assertEqual(tidak.left_id, p2.id)
-        self.assertEqual(tidak.reason_code, "no_bracket")
-        for t in (bonus, sisa):
-            self.assertFalse(MatchResult.objects.filter(right=t).exists())
+        self.assertEqual(run.summary["tidak_cocok"], 0)
+        by_left = {
+            r.left_id: r
+            for r in MatchResult.objects.filter(run=run, bucket=MatchResult.Bucket.COCOK)
+        }
+        self.assertEqual(by_left[p1.id].right_id, b1.id)
+        self.assertEqual(by_left[p1.id].reason_code, "ticket+amount")
+        self.assertEqual(by_left[p2.id].right_id, sisa.id)
+        self.assertEqual(by_left[p2.id].reason_code, "username_amount")
+        self.assertFalse(MatchResult.objects.filter(right=bonus).exists())
 
     def test_panel_tanpa_ticket_sunyi_saat_mode_ticket(self):
         """Panel campuran (ada yang ber-ticket, ada yang tidak): baris tanpa
-        ticket TIDAK menghasilkan apa pun — persis perilaku lama."""
+        ticket TIDAK menghasilkan apa pun — persis perilaku lama. Fallback
+        username hanya untuk panel yang SUDAH dinilai ticket (no_bracket)."""
         self.tx(self.panel, self.up_p, "50000", datetime(2026, 7, 1, 10),
                 ticket="D111111", username="budi88")
         polos = self.tx(self.panel, self.up_p, "70000", datetime(2026, 7, 1, 12),
@@ -318,6 +327,51 @@ class PanelBracketModeTicketRegresiTests(_Base):
         self.assertEqual(run.summary["perlu_tinjau"], 1)
         self.assertEqual(
             MatchResult.objects.get(run=run).reason_code, "amount_mismatch")
+
+    def test_fallback_username_saat_fr_tanpa_ticket(self):
+        """Kasus BTS/NXPAY: panel Nexus ber-ticket, FR akun 'AUTO DEPO NXPY'
+        tanpa ticket. Ticket gagal → fallback username+nominal+arah."""
+        p_dp = self.tx(self.panel, self.up_p, "1500000", datetime(2026, 8, 20, 0, 7),
+                       ticket="D2821134", username="Gelombang340")
+        p_wd = self.tx(self.panel, self.up_p, "30000000", datetime(2026, 8, 20, 13, 47),
+                       ticket="W2821885", username="Takokak01", jenis="wd")
+        b_dp = self.tx(self.bracket, self.up_b, "1500000", datetime(2026, 8, 20, 0, 10),
+                       username="gelombang340")  # casing beda — kunci lower
+        b_wd = self.tx(self.bracket, self.up_b, "30000000", datetime(2026, 8, 20, 18, 6),
+                       username="takokak01", jenis="wd")
+        # admin FR tanpa ticket tetap tidak mencuri pasangan
+        admin = self.tx(self.bracket, self.up_b, "516085", datetime(2026, 8, 20, 0, 7),
+                        username="", jenis="admin")
+        run = self._run()
+        self.assertEqual(run.summary["mode"], "ticket")
+        self.assertEqual(run.summary["cocok"], 2)
+        self.assertEqual(run.summary["tidak_cocok"], 0)
+        by_left = {
+            r.left_id: r
+            for r in MatchResult.objects.filter(run=run, bucket=MatchResult.Bucket.COCOK)
+        }
+        self.assertEqual(by_left[p_dp.id].right_id, b_dp.id)
+        self.assertEqual(by_left[p_dp.id].reason_code, "username_amount")
+        self.assertEqual(by_left[p_wd.id].right_id, b_wd.id)
+        self.assertEqual(by_left[p_wd.id].reason_code, "username_amount")
+        self.assertFalse(MatchResult.objects.filter(right=admin).exists())
+
+    def test_fallback_tidak_mengalahkan_ticket(self):
+        """Bila ticket sudah cocok, FR tanpa ticket dengan user+nominal sama
+        tidak mencuri pasangan."""
+        p = self.tx(self.panel, self.up_p, "50000", datetime(2026, 7, 1, 10),
+                    ticket="D111111", username="budi88")
+        b_tiket = self.tx(self.bracket, self.up_b, "50000", datetime(2026, 7, 1, 10, 5),
+                          ticket="D111111", username="budi88")
+        b_polos = self.tx(self.bracket, self.up_b, "50000", datetime(2026, 7, 1, 10, 6),
+                          username="budi88")
+        run = self._run()
+        self.assertEqual(run.summary["cocok"], 1)
+        cocok = MatchResult.objects.get(run=run, bucket=MatchResult.Bucket.COCOK)
+        self.assertEqual(cocok.left_id, p.id)
+        self.assertEqual(cocok.right_id, b_tiket.id)
+        self.assertEqual(cocok.reason_code, "ticket+amount")
+        self.assertFalse(MatchResult.objects.filter(right=b_polos).exists())
 
 
 class PanelBracketGerbangBatchTests(_Base):

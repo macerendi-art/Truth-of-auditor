@@ -297,8 +297,10 @@ def check_completeness(toko, date_from=None, date_to=None):
 class PanelBracketMatcher:
     """Join Panel↔Bracket — DUA MODE, dipilih otomatis dari isi data:
 
-    * mode "ticket" (Nexus): join via Ticket Number, kunci TRANSAKSI yang kuat.
-      Perilaku lama, tidak berubah sedikit pun.
+    * mode "ticket" (Nexus): join via Ticket Number dulu (kunci TRANSAKSI kuat).
+      Panel no_bracket boleh fallback ke FR DP/WD TANPA ticket via username
+      (kasus FR "AUTO DEPO NXPY" / NXPAY yang tidak bawa ticket). Bonus/admin
+      FR tetap dikecualikan.
     * mode "username" (Vigor / TM Gaming, mis. COR): panelnya sama sekali TIDAK
       mengekspor Ticket Number, jadi join memakai anchor identitas UTAMA lain
       yang dimiliki kedua sisi — username PERSIS (preseden: anchor
@@ -365,10 +367,18 @@ class PanelBracketMatcher:
         return self._match_username(run, left, right)
 
     def _match_ticket(self, run, left, right):
-        # Baris bracket TANPA ticket tak pernah terlihat di mode ini (bonus,
-        # beban admin, dst) — memulihkan populasi masukan versi lama persis.
-        right = [b for b in right if b.ticket_no]
-        self.right_relevant = len(right)
+        # Ticket pass hanya melihat baris ber-ticket. Setelah itu, panel yang
+        # no_bracket (ticket panel tak ketemu di FR) boleh jatuh ke FR DP/WD
+        # TANPA ticket via username — kasus nyata: akun FR "AUTO DEPO NXPY"
+        # (BTS/NXPAY) yang tidak mengekspor Ticket Number. Bonus/admin tetap
+        # dikecualikan (bukan jenis depo/wd).
+        right_all = right
+        right = [b for b in right_all if b.ticket_no]
+        ticketless = [
+            b for b in right_all
+            if not b.ticket_no and b.jenis in ("depo", "wd")
+        ]
+        self.right_relevant = len(right) + len(ticketless)
         tol = run.tolerance
         bidx = {}
         for b in right:
@@ -397,6 +407,54 @@ class PanelBracketMatcher:
                 out.append(MatchResult(run=run, bucket=MatchResult.Bucket.TIDAK, left=None, right=b,
                                        score=0, reason_code="no_panel",
                                        reason_detail="Ticket Bracket tidak ada di Panel"))
+
+        # Fallback username: hanya panel no_bracket × FR DP/WD tanpa ticket.
+        unmatched = {
+            r.left_id: r for r in out
+            if r.reason_code == "no_bracket" and r.left_id is not None
+        }
+        if unmatched and ticketless:
+            b_by_key = defaultdict(list)
+            for b in ticketless:
+                k = _kunci_username(b)
+                if k:
+                    b_by_key[k].append(b)
+            pairs = []
+            for pid, res in unmatched.items():
+                p = res.left
+                kp = _kunci_username(p)
+                if kp is None:
+                    continue
+                pd = _tanggal_baris(p)
+                if pd is None:
+                    continue
+                for b in b_by_key.get(kp, []):
+                    bd = _tanggal_baris(b)
+                    if bd is None:
+                        continue
+                    delta = abs((bd - pd).days)
+                    if delta <= tol.date_window_days:
+                        pairs.append((delta, p.id, b.id, p, b))
+            pairs.sort(key=lambda x: (x[0], x[1], x[2]))
+            rescued = set()
+            for _delta, _pid, _bid, p, b in pairs:
+                if p.id in rescued or b.id in used:
+                    continue
+                rescued.add(p.id)
+                used.add(b.id)
+                out.append(MatchResult(
+                    run=run, bucket=MatchResult.Bucket.COCOK, left=p, right=b,
+                    score=100, reason_code="username_amount",
+                    reason_detail=(
+                        f"username '{(p.username or '').strip()}' + nominal sama "
+                        f"(FR tanpa ticket)"
+                    ),
+                ))
+            if rescued:
+                out = [
+                    r for r in out
+                    if not (r.reason_code == "no_bracket" and r.left_id in rescued)
+                ]
         return out
 
     def _match_username(self, run, left, right):
