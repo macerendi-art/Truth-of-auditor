@@ -112,14 +112,40 @@ class OverlayHutangManualTests(_HutangData):
         self.assertEqual(data["total_hutang"], Decimal("0"))
         self.assertEqual(data["total_piutang"], Decimal("250000"))  # auto
 
-    def test_overlay_tidak_aktif_lintas_bulan(self):
-        self.fr("Hutang", "-500000")
+    def test_overlay_lintas_bulan_tetap_pakai_override(self):
+        """Juli override + Agustus auto — filter Juli–Agustus tidak menghidupkan FR Juli."""
+        self.fr("Piutang", "100014000", tanggal=date(2026, 7, 11))  # FR Juli (seperti SSN)
+        self.fr("Piutang", "5000000", tanggal=date(2026, 8, 10))     # FR Agustus
+        HutangManual.objects.create(
+            toko=self.toko, periode=date(2026, 7, 1), field="piutang",
+            nilai=Decimal("0"), tanggal=date(2026, 7, 15),
+            catatan="nol-kan juli")
+        data = hutang_piutang(
+            self.toko, dari=date(2026, 7, 1), sampai=date(2026, 8, 22))
+        self.assertTrue(data["manual"]["aktif"])
+        self.assertEqual(data["total_piutang_auto"], Decimal("105014000"))
+        # Juli diganti 0, Agustus tetap 5jt
+        self.assertEqual(data["total_piutang"], Decimal("5000000"))
+        self.assertEqual(data["total_hutang"], Decimal("0"))
+        self.assertEqual(data["count"], 2)  # baris FR tetap tampil
+        self.assertEqual(
+            data["manual"]["bulan_override"], [date(2026, 7, 1)])
+
+    def test_overlay_lintas_bulan_dua_override(self):
+        self.fr("Hutang", "-100", tanggal=date(2026, 7, 1))
+        self.fr("Hutang", "-200", tanggal=date(2026, 8, 1))
         HutangManual.objects.create(
             toko=self.toko, periode=date(2026, 7, 1), field="hutang",
-            nilai=Decimal("1"), tanggal=date(2026, 7, 1))
-        data = hutang_piutang(self.toko, dari=date(2026, 6, 1), sampai=date(2026, 7, 31))
-        self.assertFalse(data["manual"]["aktif"])
-        self.assertEqual(data["total_hutang"], Decimal("-500000"))
+            nilai=Decimal("10"), tanggal=date(2026, 7, 1))
+        HutangManual.objects.create(
+            toko=self.toko, periode=date(2026, 8, 1), field="hutang",
+            nilai=Decimal("20"), tanggal=date(2026, 8, 1))
+        data = hutang_piutang(
+            self.toko, dari=date(2026, 7, 1), sampai=date(2026, 8, 31))
+        self.assertEqual(data["total_hutang"], Decimal("30"))
+        self.assertEqual(
+            set(data["manual"]["bulan_override"]),
+            {date(2026, 7, 1), date(2026, 8, 1)})
 
 
 class HutangViewTests(_HutangData):

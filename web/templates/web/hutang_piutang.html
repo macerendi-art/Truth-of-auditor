@@ -79,11 +79,12 @@
 <div class="card reveal" style="margin-bottom:18px">
   <h3 style="margin:0 0 6px;font-size:14px">Override total bulanan <span class="badge" style="font-size:10px">Admin</span></h3>
   <p class="faint" style="margin:0 0 12px;font-size:12.5px">
-    Menimpa <b>total kartu</b> (dan jalur auto Rekap Bulanan) untuk bulan
+    Menimpa <b>total kartu per bulan</b> (dan jalur auto Rekap Bulanan) untuk bulan
     <b>{{ form_manual.periode|date:"F Y" }}</b>. Baris FR di tabel di bawah
-    tetap dari data bracket. Set filter Dari–Sampai ke satu bulan agar badge Manual aktif.
+    tetap dari data bracket. Filter lintas bulan: bulan yang punya override memakai
+    nilai manual; bulan lain tetap Σ FR auto.
     {% if form_manual.asli_hutang is not None %}
-    · FR auto bulan ini (rentang aktif): Hutang
+    · FR auto rentang aktif: Hutang
     <b class="mono">{{ form_manual.asli_hutang|floatformat:0|intcomma }}</b> /
     Piutang <b class="mono">{{ form_manual.asli_piutang|floatformat:0|intcomma }}</b>
     {% endif %}

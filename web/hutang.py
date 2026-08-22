@@ -3,11 +3,13 @@
 Pola sama `web/breakdown.py`: baca `Transaction.raw` bracket tanpa migrasi,
 berlaku retroaktif untuk data lama. Read-only murni terhadap Transaction.
 
-Overlay opsional: `web.models.HutangManual` menimpa **total** hutang/piutang
-bila rentang (dari, sampai) jatuh dalam satu bulan kalender yang sama dan
-toko tunggal — baris FR tetap dari data mentah.
+Overlay opsional: `web.models.HutangManual` menimpa **total per bulan**
+untuk toko tunggal. Satu bulan atau lintas bulan: tiap bulan yang punya
+override memakai nilai manual; bulan tanpa override memakai Σ FR auto.
+Baris FR di tabel tetap mentah.
 """
 from calendar import monthrange
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
@@ -36,47 +38,118 @@ def _meta_manual(obj):
     }
 
 
-def _overlay_total_bulanan(toko, dari, sampai, total_h, total_p):
-    """Timpa total bila rentang satu bulan + ada HutangManual.
+def _bulan_dalam_rentang(dari, sampai):
+    """Daftar tanggal-1 tiap bulan yang bersinggungan [dari, sampai]."""
+    if not dari or not sampai or dari > sampai:
+        return []
+    cur = date(dari.year, dari.month, 1)
+    end = date(sampai.year, sampai.month, 1)
+    out = []
+    while cur <= end:
+        out.append(cur)
+        if cur.month == 12:
+            cur = date(cur.year + 1, 1, 1)
+        else:
+            cur = date(cur.year, cur.month + 1, 1)
+    return out
 
-    Multi-toko (list) tidak di-overlay di sini — form tulis single-toko saja.
-    Mengembalikan (total_h, total_p, manual_meta dict).
+
+def _auto_per_bulan(rows):
+    """Σ money_delta FR per (periode=tgl1, kategori) dari baris yang sudah difilter."""
+    by = defaultdict(lambda: {"hutang": NOL, "piutang": NOL})
+    for r in rows:
+        t = r.get("tanggal")
+        if not t:
+            continue
+        periode = date(t.year, t.month, 1)
+        slug = r.get("kategori") or ""
+        if slug == "hutang":
+            by[periode]["hutang"] += r.get("nominal") or NOL
+        elif slug == "piutang":
+            by[periode]["piutang"] += r.get("nominal") or NOL
+    return by
+
+
+def _overlay_total_bulanan(toko, dari, sampai, total_h, total_p, rows):
+    """Timpa total per bulan bila ada HutangManual (satu atau multi bulan).
+
+    Multi-toko (list) tidak di-overlay — form tulis single-toko saja.
+    Tanpa dari/sampai: tidak di-overlay (tak ada kunci bulan).
+
+    Per bulan M dalam rentang:
+      - ada override field → pakai nilai manual (total bulan, tidak di-prorata)
+      - tidak ada → pakai Σ FR auto baris di bulan itu (sudah ter-clip filter)
+    Total = jumlah kontribusi semua bulan.
     """
-    kosong = {"hutang": None, "piutang": None, "aktif": False,
-              "periode": None, "asli_hutang": total_h, "asli_piutang": total_p}
+    kosong = {
+        "hutang": None, "piutang": None, "aktif": False,
+        "periode": None, "periodes": [],
+        "asli_hutang": total_h, "asli_piutang": total_p,
+        "bulan_override": [],
+    }
     if toko is None or isinstance(toko, (list, tuple, set, frozenset)):
         return total_h, total_p, kosong
     if not dari or not sampai:
         return total_h, total_p, kosong
-    if dari.year != sampai.year or dari.month != sampai.month:
-        return total_h, total_p, kosong
 
-    # Impor lokal: hindari siklus models ↔ hutang saat app load.
     from web.models import HutangManual
 
-    periode = date(dari.year, dari.month, 1)
-    by_field = {
-        m.field: m
-        for m in HutangManual.objects
-        .filter(toko=toko, periode=periode)
+    bulan = _bulan_dalam_rentang(dari, sampai)
+    if not bulan:
+        return total_h, total_p, kosong
+
+    manuals = list(
+        HutangManual.objects
+        .filter(toko=toko, periode__in=bulan)
         .select_related("dibuat_oleh")
-    }
-    if not by_field:
+    )
+    if not manuals:
         meta = dict(kosong)
-        meta["periode"] = periode
+        meta["periode"] = bulan[0] if len(bulan) == 1 else None
+        meta["periodes"] = bulan
         return total_h, total_p, meta
 
-    h_obj = by_field.get(HutangManual.FIELD_HUTANG)
-    p_obj = by_field.get(HutangManual.FIELD_PIUTANG)
-    new_h = h_obj.nilai if h_obj is not None else total_h
-    new_p = p_obj.nilai if p_obj is not None else total_p
-    return new_h, new_p, {
-        "hutang": _meta_manual(h_obj),
-        "piutang": _meta_manual(p_obj),
+    by_manual = {}
+    for m in manuals:
+        by_manual[(m.periode, m.field)] = m
+
+    auto_by = _auto_per_bulan(rows)
+    out_h, out_p = NOL, NOL
+    bulan_override = []
+    # Meta field: pakai manual terbaru (periode terbesar) yang ter-apply — UI badge.
+    h_meta_obj = None
+    p_meta_obj = None
+
+    for periode in bulan:
+        ah = auto_by.get(periode, {}).get("hutang", NOL)
+        ap = auto_by.get(periode, {}).get("piutang", NOL)
+        mh = by_manual.get((periode, HutangManual.FIELD_HUTANG))
+        mp = by_manual.get((periode, HutangManual.FIELD_PIUTANG))
+        used = False
+        if mh is not None:
+            out_h += mh.nilai
+            h_meta_obj = mh
+            used = True
+        else:
+            out_h += ah
+        if mp is not None:
+            out_p += mp.nilai
+            p_meta_obj = mp
+            used = True
+        else:
+            out_p += ap
+        if used:
+            bulan_override.append(periode)
+
+    return out_h, out_p, {
+        "hutang": _meta_manual(h_meta_obj),
+        "piutang": _meta_manual(p_meta_obj),
         "aktif": True,
-        "periode": periode,
+        "periode": bulan_override[-1] if len(bulan_override) == 1 else None,
+        "periodes": bulan,
         "asli_hutang": total_h,
         "asli_piutang": total_p,
+        "bulan_override": bulan_override,
     }
 
 
@@ -93,9 +166,9 @@ def hutang_piutang(toko, dari=None, sampai=None):
     ringan di volume produksi; slug final tetap lewat `_slug_kategori` agar
     normalisasi varian ejaan satu pintu.
 
-    Bila rentang satu bulan + toko tunggal + ada `HutangManual`, `total_hutang`
-    / `total_piutang` / `netto` memakai nilai override; baris FR tidak diubah.
-    Metadata di kunci `manual`.
+    Bila toko tunggal + ada `HutangManual` pada bulan dalam rentang,
+    `total_hutang` / `total_piutang` / `netto` memakai nilai override per bulan
+    (bulan lain tetap auto). Baris FR tidak diubah. Metadata di kunci `manual`.
     """
     banyak = isinstance(toko, (list, tuple, set, frozenset))
     lingkup = {"toko__in": list(toko)} if banyak else {"toko": toko}
@@ -144,7 +217,7 @@ def hutang_piutang(toko, dari=None, sampai=None):
     rows.sort(key=lambda r: (r["tanggal"] or date.min, r["jam"], r["id"]), reverse=True)
 
     total_h_out, total_p_out, manual = _overlay_total_bulanan(
-        toko, dari, sampai, total_h, total_p)
+        toko, dari, sampai, total_h, total_p, rows)
 
     return {
         "rows": rows,
