@@ -22,6 +22,7 @@ urlpatterns = [
     path("bracket/koreksi/", views.fr_koreksi_form, name="fr_koreksi_form"),
     path("bracket/koreksi/simpan/", views.fr_koreksi_simpan, name="fr_koreksi_simpan"),
     path("hutang-piutang/", views.hutang_piutang, name="hutang_piutang"),
+    path("hutang-piutang/manual/", views.hutang_manual_simpan, name="hutang_manual_simpan"),
     path("biaya-admin/", views.rincian_biaya, name="rincian_biaya"),
     path("bonus/", views.bonus_recon, name="bonus_recon"),
     path("bonus/export/", views.export_bonus, name="export_bonus"),

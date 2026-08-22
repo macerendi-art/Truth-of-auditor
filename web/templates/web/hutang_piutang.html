@@ -50,10 +50,78 @@
 </div>
 
 <div class="grid cols-3 reveal" style="margin-bottom:18px">
-  <div class="card stat"><div class="k">Total Hutang</div><div class="v mono">{{ data.total_hutang|floatformat:0|intcomma }}</div></div>
-  <div class="card stat"><div class="k">Total Piutang</div><div class="v mono">{{ data.total_piutang|floatformat:0|intcomma }}</div></div>
-  <div class="card stat"><div class="k">Netto</div><div class="v mono">{{ data.netto|floatformat:0|intcomma }}</div></div>
+  <div class="card stat">
+    <div class="k">Total Hutang{% if data.manual.aktif and data.manual.hutang %} <span class="badge warn" style="font-size:10px;vertical-align:middle">Manual</span>{% endif %}</div>
+    <div class="v mono">{{ data.total_hutang|floatformat:0|intcomma }}</div>
+    {% if data.manual.aktif and data.manual.hutang %}
+    <div class="faint" style="font-size:11px;margin-top:4px">FR auto: {{ data.manual.asli_hutang|floatformat:0|intcomma }} · tgl {{ data.manual.hutang.tanggal|date:"d/m/Y" }}{% if data.manual.hutang.oleh %} · {{ data.manual.hutang.oleh }}{% endif %}</div>
+    {% if data.manual.hutang.catatan %}<div class="faint" style="font-size:11px;margin-top:2px">{{ data.manual.hutang.catatan }}</div>{% endif %}
+    {% endif %}
+  </div>
+  <div class="card stat">
+    <div class="k">Total Piutang{% if data.manual.aktif and data.manual.piutang %} <span class="badge warn" style="font-size:10px;vertical-align:middle">Manual</span>{% endif %}</div>
+    <div class="v mono">{{ data.total_piutang|floatformat:0|intcomma }}</div>
+    {% if data.manual.aktif and data.manual.piutang %}
+    <div class="faint" style="font-size:11px;margin-top:4px">FR auto: {{ data.manual.asli_piutang|floatformat:0|intcomma }} · tgl {{ data.manual.piutang.tanggal|date:"d/m/Y" }}{% if data.manual.piutang.oleh %} · {{ data.manual.piutang.oleh }}{% endif %}</div>
+    {% if data.manual.piutang.catatan %}<div class="faint" style="font-size:11px;margin-top:2px">{{ data.manual.piutang.catatan }}</div>{% endif %}
+    {% endif %}
+  </div>
+  <div class="card stat">
+    <div class="k">Netto{% if data.manual.aktif %} <span class="badge warn" style="font-size:10px;vertical-align:middle">Manual</span>{% endif %}</div>
+    <div class="v mono">{{ data.netto|floatformat:0|intcomma }}</div>
+    {% if data.manual.aktif %}
+    <div class="faint" style="font-size:11px;margin-top:4px">FR auto: {{ data.netto_auto|floatformat:0|intcomma }}</div>
+    {% endif %}
+  </div>
 </div>
+
+{% if boleh_edit_manual and form_manual %}
+<div class="card reveal" style="margin-bottom:18px">
+  <h3 style="margin:0 0 6px;font-size:14px">Override total bulanan <span class="badge" style="font-size:10px">Admin</span></h3>
+  <p class="faint" style="margin:0 0 12px;font-size:12.5px">
+    Menimpa <b>total kartu</b> (dan jalur auto Rekap Bulanan) untuk bulan
+    <b>{{ form_manual.periode|date:"F Y" }}</b>. Baris FR di tabel di bawah
+    tetap dari data bracket. Set filter Dari–Sampai ke satu bulan agar badge Manual aktif.
+    {% if form_manual.asli_hutang is not None %}
+    · FR auto bulan ini (rentang aktif): Hutang
+    <b class="mono">{{ form_manual.asli_hutang|floatformat:0|intcomma }}</b> /
+    Piutang <b class="mono">{{ form_manual.asli_piutang|floatformat:0|intcomma }}</b>
+    {% endif %}
+  </p>
+  <form method="post" action="{% url 'hutang_manual_simpan' %}">
+    {% csrf_token %}
+    <input type="hidden" name="bulan" value="{{ form_manual.sel_bulan }}">
+    <div class="row">
+      <div class="field">
+        <label>Tanggal acuan</label>
+        <input type="date" name="tanggal" required
+               value="{% if form_manual.hutang %}{{ form_manual.hutang.tanggal|date:'Y-m-d' }}{% elif form_manual.piutang %}{{ form_manual.piutang.tanggal|date:'Y-m-d' }}{% else %}{{ form_manual.periode|date:'Y-m-d' }}{% endif %}">
+      </div>
+      <div class="field">
+        <label>Nominal Hutang</label>
+        <input name="nilai_hutang" autocomplete="off" placeholder="kosong = tidak ubah; minus boleh"
+               value="{% if form_manual.hutang %}{{ form_manual.hutang.nilai|floatformat:0 }}{% endif %}">
+      </div>
+      <div class="field">
+        <label>Nominal Piutang</label>
+        <input name="nilai_piutang" autocomplete="off" placeholder="kosong = tidak ubah; minus boleh"
+               value="{% if form_manual.piutang %}{{ form_manual.piutang.nilai|floatformat:0 }}{% endif %}">
+      </div>
+    </div>
+    <div class="field" style="margin-top:8px">
+      <label>Notes / catatan</label>
+      <textarea name="catatan" rows="2" placeholder="wajib untuk jejak — alasan override">{% if form_manual.hutang %}{{ form_manual.hutang.catatan }}{% elif form_manual.piutang %}{{ form_manual.piutang.catatan }}{% endif %}</textarea>
+    </div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px">
+      {% if form_manual.hutang or form_manual.piutang %}
+      <button class="btn danger" name="hapus" value="1" type="submit"
+              onclick="return confirm('Hapus seluruh override manual bulan ini?')">Hapus override</button>
+      {% endif %}
+      <button class="btn primary" type="submit">Simpan override</button>
+    </div>
+  </form>
+</div>
+{% endif %}
 
 {% if not data.rows %}
 <div class="card reveal"><div class="cell-empty" style="padding:34px 12px;text-align:center">

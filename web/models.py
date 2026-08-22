@@ -86,6 +86,45 @@ class RekapManual(TimeStampedModel):
         return f"{self.periode:%Y-%m} {self.field} = {self.nilai}"
 
 
+class HutangManual(TimeStampedModel):
+    """Override total Hutang/Piutang per toko per bulan — timpa TAMPILAN saja.
+
+    Kunci = (toko, periode, field): `periode` = tanggal 1 bulan bersangkutan,
+    `field` ∈ {hutang, piutang}. Baris FR otomatis tetap utuh; total kartu +
+    jalur auto Rekap Bulanan (`hutang_web`/`piutang_web`) membaca overlay ini
+    bila rentang query jatuh dalam bulan yang sama. `tanggal` = tanggal acuan
+    yang diisi admin (boleh beda dari tgl 1). Riwayat di `core.AuditLog`.
+    Tulis hanya lewat view admin-only.
+    """
+
+    FIELD_HUTANG = "hutang"
+    FIELD_PIUTANG = "piutang"
+    FIELD_CHOICES = [
+        (FIELD_HUTANG, "Hutang"),
+        (FIELD_PIUTANG, "Piutang"),
+    ]
+
+    toko = models.ForeignKey(
+        "sources.Toko", on_delete=models.CASCADE, related_name="hutang_manual")
+    periode = models.DateField(help_text="tanggal 1 bulan bersangkutan")
+    field = models.CharField(max_length=16, choices=FIELD_CHOICES)
+    nilai = models.DecimalField(max_digits=18, decimal_places=2)
+    tanggal = models.DateField(help_text="tanggal acuan isian manual")
+    catatan = models.TextField(blank=True)
+    dibuat_oleh = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="hutang_manual")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["toko", "periode", "field"], name="uniq_hutang_manual"),
+        ]
+
+    def __str__(self):
+        return f"{self.periode:%Y-%m} {self.field} = {self.nilai}"
+
+
 class RekapPenyebab(TimeStampedModel):
     """Satu baris daftar "Penyebab" selisih Rekap Bulanan (label bebas + nilai).
 

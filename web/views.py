@@ -45,7 +45,7 @@ from sources.models import SourceType, Upload
 from sources.parsers.banks import NBMB_RE
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
-from web.access import SEMUA_TOKO, is_admin, mode_semua, tokos_for
+from web.access import SEMUA_TOKO, admin_required, is_admin, mode_semua, tokos_for
 from web.biaya import rincian_biaya as hitung_rincian_biaya
 from web.bonus import rekonsiliasi_bonus as hitung_rekonsiliasi_bonus
 from web.breakdown import (
@@ -60,9 +60,13 @@ from web.breakdown import (
 from web.channels import breakdown_metode
 from web.detail_fr import detail_fr as hitung_detail_fr
 from web.forms import GantiPasswordForm
-from web.hutang import hutang_piutang as hitung_hutang_piutang
+from web.hutang import (
+    akhir_bulan as hutang_akhir_bulan,
+    hutang_piutang as hitung_hutang_piutang,
+    periode_bulan as hutang_periode_bulan,
+)
 from web.kelengkapan import status_sumber
-from web.models import FRKoreksi, RekapManual, RekapPenyebab
+from web.models import FRKoreksi, HutangManual, RekapManual, RekapPenyebab
 from web.monthly import monthly_summary
 from web.penjaga import periksa_upload
 from web.quotes import random_login_tagline
@@ -2305,6 +2309,9 @@ def hutang_piutang(request):
 
     Mode Semua Toko menambahkan ceklis toko (multi-pilih) dan kolom Toko;
     apa pun pilihannya tetap SATU query `toko__in`.
+
+    Admin single-toko: form override total bulanan (`HutangManual`) — nilai
+    menimpa kartu total bila filter rentang satu bulan kalender.
     """
     target, daftar_toko, dipilih = _toko_scope(request)
     if target is None:
@@ -2313,11 +2320,159 @@ def hutang_piutang(request):
     dari = _parse_date(request.GET.get("dari", "")) or _geser_hari(sampai, -30)
     data = hitung_hutang_piutang(target, dari=dari, sampai=sampai)
     page = Paginator(data["rows"], 40).get_page(request.GET.get("page"))
+
+    # Form override: hanya single-toko + admin. Periode default = bulan `sampai`.
+    form_manual = None
+    toko_tunggal = target if not daftar_toko else None
+    if toko_tunggal is not None and is_admin(request.user):
+        periode = hutang_periode_bulan(sampai)
+        form_manual = _hutang_manual_form_ctx(toko_tunggal, periode, data)
+
     return render(request, "web/hutang_piutang.html", {
         "page": page, "data": data, "dari": dari, "sampai": sampai,
         "semua_toko_page": bool(daftar_toko),
         "daftar_toko": daftar_toko, "toko_dipilih": dipilih,
+        "form_manual": form_manual,
+        "boleh_edit_manual": form_manual is not None,
     })
+
+
+def _hutang_manual_form_ctx(toko, periode, data):
+    """Konteks form override bulanan (nilai terisi bila sudah ada)."""
+    existing = {
+        m.field: m
+        for m in HutangManual.objects.filter(toko=toko, periode=periode)
+    }
+    h = existing.get(HutangManual.FIELD_HUTANG)
+    p = existing.get(HutangManual.FIELD_PIUTANG)
+    manual = data.get("manual") or {}
+    return {
+        "periode": periode,
+        "sel_bulan": f"{periode.year:04d}-{periode.month:02d}",
+        "hutang": h,
+        "piutang": p,
+        "asli_hutang": manual.get("asli_hutang", data.get("total_hutang_auto")),
+        "asli_piutang": manual.get("asli_piutang", data.get("total_piutang_auto")),
+        "rentang_satu_bulan": bool(manual.get("periode") == periode or (
+            data.get("manual") and data["manual"].get("periode") == periode)),
+    }
+
+
+def _hutang_parse_nilai(mentah):
+    """Parse nominal form (titik/koma ribuan dibuang). None jika kosong."""
+    s = (mentah or "").strip().replace(".", "").replace(",", "").replace(" ", "")
+    if not s:
+        return None
+    try:
+        nilai = Decimal(s)
+    except (InvalidOperation, ValueError):
+        return "bad"
+    if abs(nilai) > Decimal("9999999999999999.99"):
+        return "bad"
+    return nilai
+
+
+@admin_required
+@require_POST
+def hutang_manual_simpan(request):
+    """Simpan/hapus override total Hutang/Piutang bulanan (admin only).
+
+    Satu POST bisa mengisi hutang dan/atau piutang. `hapus=1` menghapus kedua
+    field bulan itu. Redirect kembali ke halaman dengan rentang bulan penuh
+    supaya overlay langsung terlihat.
+    """
+    active = _active_toko(request)
+    if active is None:
+        messages.error(request, "Pilih satu toko dulu (bukan mode Semua Toko).")
+        return redirect("hutang_piutang")
+    if mode_semua(request):
+        messages.error(request, "Override manual hanya di mode satu toko.")
+        return redirect("hutang_piutang")
+
+    bulan_raw = (request.POST.get("bulan") or "").strip()
+    periode = None
+    if len(bulan_raw) == 7 and bulan_raw[4] == "-":
+        try:
+            y, m = int(bulan_raw[:4]), int(bulan_raw[5:7])
+            if 1 <= m <= 12:
+                periode = date_cls(y, m, 1)
+        except ValueError:
+            periode = None
+    if periode is None:
+        messages.error(request, "Bulan tidak valid.")
+        return redirect("hutang_piutang")
+
+    sel_bulan = f"{periode.year:04d}-{periode.month:02d}"
+    tujuan = (
+        f"{reverse('hutang_piutang')}"
+        f"?dari={periode.isoformat()}"
+        f"&sampai={hutang_akhir_bulan(periode).isoformat()}"
+    )
+
+    if request.POST.get("hapus"):
+        qs = HutangManual.objects.filter(toko=active, periode=periode)
+        sebelum = [
+            {
+                "field": r["field"],
+                "nilai": str(r["nilai"]),
+                "tanggal": r["tanggal"].isoformat() if r["tanggal"] else "",
+                "catatan": r["catatan"] or "",
+            }
+            for r in qs.values("field", "nilai", "tanggal", "catatan")
+        ]
+        n = qs.count()
+        qs.delete()
+        catat(request.user, "hutang_manual_hapus", f"{active.key} {sel_bulan}",
+              toko=active, periode=sel_bulan, hapus=sebelum, jumlah=n)
+        messages.success(request, f"Override manual {sel_bulan} dihapus.")
+        return redirect(tujuan)
+
+    tanggal = _parse_date(request.POST.get("tanggal", ""))
+    if tanggal is None:
+        messages.error(request, "Tanggal acuan wajib diisi.")
+        return redirect(tujuan)
+    if tanggal.year != periode.year or tanggal.month != periode.month:
+        messages.error(request, "Tanggal acuan harus di bulan yang sama.")
+        return redirect(tujuan)
+
+    catatan = (request.POST.get("catatan") or "").strip()
+    tersimpan = []
+    for field, key_post in (
+        (HutangManual.FIELD_HUTANG, "nilai_hutang"),
+        (HutangManual.FIELD_PIUTANG, "nilai_piutang"),
+    ):
+        parsed = _hutang_parse_nilai(request.POST.get(key_post, ""))
+        if parsed == "bad":
+            messages.error(request, f"Nilai {field} tidak valid.")
+            return redirect(tujuan)
+        if parsed is None:
+            continue
+        existing = HutangManual.objects.filter(
+            toko=active, periode=periode, field=field).first()
+        nilai_asli = str(existing.nilai) if existing else ""
+        obj, _ = HutangManual.objects.update_or_create(
+            toko=active, periode=periode, field=field,
+            defaults={
+                "nilai": parsed,
+                "tanggal": tanggal,
+                "catatan": catatan,
+                "dibuat_oleh": request.user,
+            },
+        )
+        catat(request.user, "hutang_manual", f"{active.key} {field} {sel_bulan}",
+              toko=active, periode=sel_bulan, field=field,
+              nilai_asli=nilai_asli, nilai_baru=str(obj.nilai),
+              tanggal=tanggal.isoformat(), catatan=catatan)
+        tersimpan.append(field)
+
+    if not tersimpan:
+        messages.error(request, "Isi minimal satu nominal (hutang atau piutang).")
+        return redirect(tujuan)
+
+    messages.success(
+        request,
+        f"Override manual {sel_bulan} disimpan ({', '.join(tersimpan)}).")
+    return redirect(tujuan)
 
 
 @login_required
