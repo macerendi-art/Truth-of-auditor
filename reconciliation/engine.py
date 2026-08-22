@@ -127,7 +127,7 @@ def _route_ok(expected, owner, source_key):
 # gateway Y yang dikenal berbeda — mencegah deposit kembar beda kanal saling
 # curi saat file uang belum lengkap (kasus M77: uang RPay tersedot baris NXPAY).
 # Fail-open: token tak dikenal / kosong -> tanpa larangan (perilaku lama).
-_GW_CHANNEL_TOKENS = ("NXPAY", "RPAY", "HOKI", "FLYER")
+_GW_CHANNEL_TOKENS = ("NXPAY", "RPAY", "HOKI", "FLYER", "KINGSPAY", "ELITE")
 
 
 def _channel_from(text):

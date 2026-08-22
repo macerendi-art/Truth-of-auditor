@@ -34,6 +34,7 @@ from .parsers.gateways import (
     RPayWDGatewayParser,
     RPayDPXlsxParser,
     RPayWDXlsxParser,
+    KingsPayParser,
 )
 from .parsers.panel import PanelParser
 
@@ -59,6 +60,7 @@ PARSERS = {
     "rpay_wd_xlsx": RPayWDXlsxParser,
     "qhoki": QHokiParser,
     "zpay": ZPayParser,
+    "kingspay": KingsPayParser,
     "panel_bonus": PanelBonusParser,
     "cor_panel_bonus": CORPanelBonusParser,
     "bracket_bonus": BracketBonusParser,

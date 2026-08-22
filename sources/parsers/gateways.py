@@ -1,4 +1,4 @@
-"""Parser gateway pembayaran (sumber UANG, setara bank): NXPAY, QR FLYER, QHOKI, RPAY."""
+"""Parser gateway pembayaran (sumber UANG, setara bank): NXPAY, QR FLYER, QHOKI, RPAY, KINGSPAY."""
 import csv
 import re
 from datetime import timedelta
@@ -738,4 +738,117 @@ class RPayWDXlsxParser(BaseParser):
             row["row_hash"] = row_hash(
                 "rpay_wd_xlsx", [str(r.get("ID", "") or "").strip(), ticket])
             out.append(row)
+        return out
+
+
+class KingsPayParser(BaseParser):
+    """QRIS KINGSPAY CSV — gateway deposit panel Nexus (mis. STN).
+
+    Format vendor (header snakeCase): `platformTrxId`, `merchantTrxId`,
+    `username`, `amount` (rupiah penuh), `status=success`. Panel menandai kanal
+    di Bank Title `KINGSPAY|…` dan menanam `platformTrxId` di Remarks
+    (`kingspay auto approve <id>`) — **tidak** di kolom Ticket/Reference panel.
+
+    Anchor = `username` (pass identitas), pola RPay. `platformTrxId` DISIMPAN di
+    raw saja, TIDAK di `reference`: engine mengasingkan gateway ber-reference
+    yang tak dikenal field `Transaction.reference` panel. Kalibrasi STN
+    20-08-2026: 560/560 success ↔ panel KINGSPAY via username+nominal; 560/561
+    remarks memuat platformTrxId.
+
+    `description` wajib diawali `KINGSPAY` (token channel guard, 12 char pertama).
+    """
+
+    source_key = "gateway"
+    STATUS_UANG = frozenset({"success"})
+    KOLOM_WAJIB = (
+        "platformTrxId", "merchantTrxId", "amount", "status", "username",
+    )
+
+    def parse(self, path, flow=""):
+        with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+            reader = csv.DictReader(f)
+            if not reader.fieldnames:
+                raise ValueError(
+                    "Laporan KINGSPAY tak dikenali: header CSV kosong."
+                )
+            header = [str(h or "").strip() for h in reader.fieldnames]
+            peta = {h.casefold(): h for h in header if h}
+            hilang = [k for k in self.KOLOM_WAJIB if k.casefold() not in peta]
+            if hilang:
+                raise ValueError(
+                    "Laporan KINGSPAY tak dikenali: kolom %s tidak ditemukan. "
+                    "Header berkas: %s."
+                    % (
+                        " dan ".join(hilang),
+                        ", ".join(repr(h) for h in header if h) or "(kosong)",
+                    )
+                )
+            raw_rows = list(reader)
+
+        def kol(r, nama):
+            return r.get(peta[nama.casefold()], "")
+
+        out = []
+        jumlah_transaksi = 0
+        status_ditemukan = set()
+        for r in raw_rows:
+            plat = str(kol(r, "platformTrxId") or "").strip()
+            merch = str(kol(r, "merchantTrxId") or "").strip()
+            if not plat and not merch:
+                continue
+            jumlah_transaksi += 1
+            status = str(kol(r, "status") or "").strip().lower()
+            status_ditemukan.add(status or "(kosong)")
+            if status not in self.STATUS_UANG:
+                continue
+
+            # success_at = waktu bayar; created_at = buat QR (bisa beda menit).
+            occurred = parse_dt(kol(r, "success_at")) or parse_dt(kol(r, "created_at"))
+            if not occurred:
+                raise ValueError(
+                    "KINGSPAY: success_at/created_at tidak dapat dibaca untuk "
+                    "platformTrxId %s: success_at=%r created_at=%r."
+                    % (plat or merch, kol(r, "success_at"), kol(r, "created_at"))
+                )
+            amount = abs(parse_decimal(kol(r, "amount")))
+            fee = abs(parse_decimal(kol(r, "biayaPlatform")))
+            username = str(kol(r, "username") or "").strip()
+            store = str(kol(r, "storeName") or "").strip()
+            rrn = str(kol(r, "rrn") or "").strip()
+            raw = {k: ("" if v is None else str(v)) for k, v in r.items() if k}
+
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date(),
+                # Bentuk deposit vendor; nama file/flow tak boleh membalik tanda.
+                "jenis": "depo",
+                "amount": amount,
+                "credit_delta": Decimal("0"),
+                "money_delta": amount,
+                "fee": fee,
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": "",
+                "username": username,
+                # platformTrxId hanya di raw — lihat docstring.
+                "reference": "",
+                "counterparty": store,
+                "description": ("KINGSPAY %s" % rrn).strip(),
+                "raw": raw,
+            }
+            nominal_kanonik = format(amount.normalize(), "f")
+            row["row_hash"] = row_hash(
+                "kingspay", [plat or merch, nominal_kanonik])
+            out.append(row)
+
+        if jumlah_transaksi and not out:
+            ditemukan = ", ".join(repr(s) for s in sorted(status_ditemukan))
+            dikenal = ", ".join(sorted(self.STATUS_UANG))
+            raise ValueError(
+                "Laporan KINGSPAY memuat %d baris transaksi tetapi tidak satu "
+                "pun berstatus uang. Status ditemukan: %s. Status yang dikenal: "
+                "%s. Laporkan berkas ini bila vendor mengganti nama status."
+                % (jumlah_transaksi, ditemukan or "(kosong)", dikenal)
+            )
         return out

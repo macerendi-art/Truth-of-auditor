@@ -155,6 +155,13 @@ def detect_source(path, filename=""):
             add("qhoki", 0.95)  # sebagian brand ekspor laporan QRIS-HOKI sbg CSV
         if "tiket number" in c and ("status settled" in c or "confirmed bot at" in c):
             add("zpay", 0.95)  # QRIS ZPay/ZETPAY ("Tiket" memang ejaan aslinya)
+        # KINGSPAY: header snakeCase unik (platformTrxId + merchantTrxId +
+        # biayaPlatform). Bukan subset ELITE/ZPay/RPay/Hoki.
+        if ("platformtrxid" in c and "merchanttrxid" in c
+                and "biayaplatform" in c and "netamount" in c):
+            add("kingspay", 0.95)
+        elif "kingspay" in fn or "qriskingspay" in fn:
+            add("kingspay", 0.85)
     elif ext == ".pdf":
         key = _pdf_key(_pdf_text(path))
         add(key, 0.9 if key == "bni_pdf" else 0.75)
