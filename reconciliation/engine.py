@@ -1714,14 +1714,21 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
                 .exclude(jenis="admin").exclude(id__in=used_rights)
                 .select_related("source_type")
             )
-            # Pindah dana Sesama CM sudah ditangani relasi bracket_bank —
-            # jangan muncul lagi sebagai no_panel di panel_bank.
-            bb_ran = any(
-                r_.relation == MatchRun.Relation.BRACKET_BANK for r_ in runs
-            )
-            if bb_ran and batch.toko_id:
+            # Pindah dana Sesama CM BUKAN orphan panel — selalu ke bucket c
+            # (internal), walau bracket_bank dilewati (FR tidak dicentang /
+            # belum di-upload). Jangan buat no_panel di panel_bank.
+            if batch.toko_id:
                 try:
                     from web.sesama_cm import q_sesama_cm
+                    cm_qs = um_qs.filter(q_sesama_cm(batch.toko_id))
+                    for t in cm_qs.iterator():
+                        st = stats["c"]
+                        st["n"] += 1
+                        md = float(t.money_delta)
+                        if md > 0:
+                            st["dp"] += md
+                        else:
+                            st["wd"] += -md
                     um_qs = um_qs.exclude(q_sesama_cm(batch.toko_id))
                 except Exception:
                     pass

@@ -141,3 +141,36 @@ class SesamaCmReconTests(TestCase):
         bb = batch.runs.get(relation="bracket_bank")
         self.assertEqual(bb.summary.get("mode"), "sesama_cm")
         self.assertGreaterEqual(bb.summary.get("cocok", 0), 1)
+
+    def test_batch_tanpa_bracket_sesama_cm_bukan_no_panel(self):
+        """Bracket tidak dicentang: uang Sesama CM tidak jadi orphan no_panel."""
+        dt = datetime(2026, 8, 22, 10, 0)
+        self._tx(self.panel, self.up_p, jenis="depo", amount="100000", money="100000",
+                 dt=dt, ticket="D22", username="x", counterparty="X PLAYER")
+        self._tx(self.bank, self.up_n, jenis="depo", amount="100000", money="100000",
+                 dt=dt, counterparty="X PLAYER", description="TRSF X PLAYER")
+        # FR ada (identitas CM) tapi include bracket=False
+        self._fr_cm("BANK BRI | KIKI SUASANTO | T", "BRI 119101022152500",
+                    "5000000", dt)
+        cm = self._tx(
+            self.bank, self.up_n, jenis="depo", amount="5000000", money="5000000",
+            dt=dt, counterparty="Kikisuasanto",
+            description="Transfer dari KIKISUASANTO 119101022152500",
+        )
+        clear_cm_cache()
+        include = {
+            "panel_dp": True, "panel_wd": True, "bracket": False,
+            "bank": True, "gateway": True,
+        }
+        batch = run_batch(
+            self.toko, self.tol, date_from=dt.date(), date_to=dt.date(),
+            recon_date=dt.date(), include=include,
+        )
+        self.assertIn("bracket_bank", batch.summary.get("skipped") or [])
+        pb = batch.runs.get(relation="panel_bank")
+        # CM money must not appear as no_panel
+        self.assertFalse(
+            MatchResult.objects.filter(run=pb, right=cm, reason_code="no_panel").exists()
+        )
+        um = (batch.summary or {}).get("unmatched_money") or {}
+        self.assertGreaterEqual((um.get("c") or {}).get("n", 0), 1)
