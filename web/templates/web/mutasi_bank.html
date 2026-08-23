@@ -24,7 +24,7 @@
       <a href="?source={{ src }}&from={{ date_from }}&to={{ date_to }}" class="{% if not flow %}active{% endif %}">Semua</a>
       <a href="?source={{ src }}&from={{ date_from }}&to={{ date_to }}&flow=depo" class="dp {% if flow == 'depo' %}active{% endif %}"><span class="dot"></span>Deposit</a>
       <a href="?source={{ src }}&from={{ date_from }}&to={{ date_to }}&flow=wd" class="wd {% if flow == 'wd' %}active{% endif %}"><span class="dot"></span>Withdraw</a>
-      <a href="?source={{ src }}&from={{ date_from }}&to={{ date_to }}&flow=cm" class="cm {% if flow == 'cm' %}active{% endif %}" title="Pindah dana antar rekening CM toko (nama CM lain di mutasi)"><span class="dot"></span>Sesama CM</a>
+      <a href="?source={{ src }}&from={{ date_from }}&to={{ date_to }}&flow=cm" class="cm {% if flow == 'cm' %}active{% endif %}" title="Pindah dana antar rekening CM — identitas mengikuti FR kategori Sesama CM (nama + no. rek)"><span class="dot"></span>Sesama CM</a>
     </div>
   </div>
   <form method="get" class="row">
@@ -67,7 +67,7 @@
         {% else %}<span class="faint">—</span>{% endif %}
       </td>
       <td class="faint cell-tr" style="font-size:11.5px" title="{{ t.description }}">{{ t.description|truncatechars:90|default:"—" }}</td>
-      <td>{% if t.is_sesama_cm %}<span class="badge src" title="Pindah dana antar rekening CM toko">Sesama CM</span>{% elif t.jenis == 'depo' %}<span class="badge ok">Deposit</span>{% elif t.jenis == 'wd' %}<span class="badge bad">Withdraw</span>{% elif t.jenis == 'admin' %}<span class="badge">Biaya Admin</span>{% else %}<span class="badge">{{ t.get_jenis_display }}</span>{% endif %}</td>
+      <td>{% if t.is_sesama_cm %}<span class="badge src" title="Pindah dana antar rekening CM (selaras FR Sesama CM)">Sesama CM</span>{% elif t.jenis == 'depo' %}<span class="badge ok">Deposit</span>{% elif t.jenis == 'wd' %}<span class="badge bad">Withdraw</span>{% elif t.jenis == 'admin' %}<span class="badge">Biaya Admin</span>{% else %}<span class="badge">{{ t.get_jenis_display }}</span>{% endif %}</td>
       <td class="num mono" {% if t.money_delta < 0 %}style="color:var(--bad)"{% elif t.money_delta > 0 %}style="color:var(--ok)"{% endif %}>{{ t.amount|floatformat:0|intcomma }}</td>
       <td class="num mono">{% if t.balance_after is not None %}{{ t.balance_after|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
     </tr>

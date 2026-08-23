@@ -147,7 +147,8 @@ class MutasiBankFilterTests(MutasiBankBase):
 
 
 class MutasiBankSesamaCmTests(MutasiBankBase):
-    """Filter flow=cm: pindah dana antar rekening CM (nama CM lain di mutasi).
+    """Filter flow=cm: pindah dana antar rekening CM — identitas dari FR Sesama CM
+    (+ pelengkap owner upload bank).
 
     Kasus Mul: file owner NASRUL menerima dari KIKI SUASANTO → Sesama CM;
     WD NASRUL ke member eksternal → bukan Sesama CM (nama di deskripsi = owner sendiri).
@@ -155,10 +156,31 @@ class MutasiBankSesamaCmTests(MutasiBankBase):
 
     def setUp(self):
         super().setUp()
+        from web.sesama_cm import clear_cm_cache
+        clear_cm_cache()
+        self.bracket = SourceType.objects.get_or_create(
+            key="bracket", defaults={"name": "Bracket"}
+        )[0]
         self.up_nasrul = self._up(self.bank, "bri_nasrul.csv", owner="NASRUL")
         self.up_kiki = self._up(self.bank, "bri_kiki.csv", owner="KIKI SUASANTO")
-        # Daftarkan kedua owner lewat upload bank (sumber nama CM).
-        # Baris pindah dana: masuk ke rekening Nasrul dari Kiki.
+        # FR Sesama CM — sumber nama + no.rek (otoritatif, selaras Control Bracket)
+        self.up_fr = self._up(self.bracket, "fr.xlsx")
+        self._fr_cm(
+            "BANK BRI | KIKI SUASANTO | TAMPUNG LAYER 2",
+            "BRI 119101022152500",
+            amount="5000000",
+        )
+        self._fr_cm(
+            "BANK BCA | YULIYANTI PRATIWI | TAMPUNG LAYER 1",
+            "BCA 8447072062",
+            amount="970000",
+        )
+        self._fr_cm(
+            "BANK BRI | NASRUL | WITHDRAW",
+            "BRI 058801037387506",
+            amount="5000000",
+        )
+        # Baris pindah dana: masuk ke rekening Nasrul dari Kiki (nama).
         self.cm_depo = self._tx(
             self.up_nasrul, self.bank, jenis="depo", counterparty="Kikisuasanto",
             description="NBMB Kikisuasanto TO NASRUL ESB:NBMB:0001500F:1",
@@ -170,11 +192,10 @@ class MutasiBankSesamaCmTests(MutasiBankBase):
             description="NBMB Nasrul TO ANWAR ESB:NBMB:0001500F:2",
             amount="-350000", dt=datetime(2026, 8, 21, 11, 0),
         )
-        # WD Sesama CM: dari Nasrul ke Yuliyanti (owner rekening lain toko).
-        self._up(self.bank, "bca_yuli.csv", owner="YULIYANTI PRATIWI")
+        # WD Sesama CM via no.rek FR (nama di bank bisa beda ejaan).
         self.cm_wd = self._tx(
-            self.up_nasrul, self.bank, jenis="wd", counterparty="YULIYANTI PRATIWI",
-            description="Transfer BI Fast Ke BCA YULIYANTI PRATIWI 8447072062",
+            self.up_nasrul, self.bank, jenis="wd", counterparty="YULI",
+            description="Transfer BI Fast Ke BCA 8447072062",
             amount="-970000", dt=datetime(2026, 8, 21, 12, 0),
         )
         # Depo member biasa — counterparty bukan nama CM.
@@ -183,38 +204,71 @@ class MutasiBankSesamaCmTests(MutasiBankBase):
             description="TRSF E-BANKING CR BUDI SANTOSO",
             amount="100000", dt=datetime(2026, 8, 21, 13, 0),
         )
+        clear_cm_cache()
+
+    def _fr_cm(self, bank, rek, amount="1000000"):
+        return Transaction.objects.create(
+            upload=self.up_fr, source_type=self.bracket, toko=self.lbs,
+            jenis="lainnya", amount=Decimal(amount), money_delta=Decimal(amount),
+            occurred_at=datetime(2026, 8, 21, 9, 0), posted_date=datetime(2026, 8, 21).date(),
+            description="PINDAH DANA",
+            raw={
+                "Kategori": "Sesama CM",
+                "Bank": bank,
+                "No. Rek Bank Member": rek,
+                "Description": "PINDAH DANA",
+            },
+            row_hash=f"mb-fr-{next(_seq)}",
+        )
 
     def test_filter_cm_hanya_pindah_antar_cm(self):
         r = self.client.get(reverse("bank_mutations"), {"flow": "cm"})
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, "Kikisuasanto")
-        self.assertContains(r, "YULIYANTI PRATIWI")
+        self.assertContains(r, "8447072062")  # match via no.rek FR
         self.assertNotContains(r, "ANWAR")
         self.assertNotContains(r, "BUDI SANTOSO")
-        # Badge Sesama CM di kolom jenis
         self.assertContains(r, "Sesama CM")
 
     def test_badge_cm_di_daftar_semua(self):
         r = self.client.get(reverse("bank_mutations"))
-        html = r.content.decode()
-        # Baris CM bertanda badge; WD member tetap Withdraw
-        self.assertIn("Sesama CM", html)
-        self.assertIn("ANWAR", html)
-        # pastikan baris ANWAR tidak diganti badge CM: cari konteks kasar
-        from web.sesama_cm import tandai_sesama_cm
         rows = list(r.context["page"].object_list)
-        by_cp = { (t.counterparty or ""): t for t in rows }
+        by_cp = {(t.counterparty or ""): t for t in rows}
         self.assertTrue(getattr(by_cp["Kikisuasanto"], "is_sesama_cm", False))
-        self.assertTrue(getattr(by_cp["YULIYANTI PRATIWI"], "is_sesama_cm", False))
+        self.assertTrue(getattr(by_cp["YULI"], "is_sesama_cm", False))  # norek
         self.assertFalse(getattr(by_cp["ANWAR"], "is_sesama_cm", False))
         self.assertFalse(getattr(by_cp["BUDI SANTOSO"], "is_sesama_cm", False))
 
+    def test_identitas_dari_fr_bukan_hanya_upload(self):
+        """Nama hanya di FR (tanpa upload owner) tetap menggerakkan filter."""
+        from web.sesama_cm import clear_cm_cache, nama_cm_toko, identitas_cm_toko
+        clear_cm_cache()
+        # FR punya FITRIA; tidak ada upload owner FITRIA
+        self._fr_cm("BANK BNI | FITRIA | DEPOSIT", "BNI 1929696573")
+        clear_cm_cache()
+        names = nama_cm_toko(self.lbs.id)
+        self.assertTrue(any("FITRIA" in n.upper() for n in names))
+        _, reks = identitas_cm_toko(self.lbs.id)
+        self.assertIn("1929696573", reks)
+        # mutasi ke FITRIA via nama
+        self._tx(
+            self.up_nasrul, self.bank, jenis="wd", counterparty="FITRIA RAHMA",
+            description="TRSF KE FITRIA", amount="-100000",
+            dt=datetime(2026, 8, 21, 14, 0),
+        )
+        r = self.client.get(reverse("bank_mutations"), {"flow": "cm"})
+        self.assertContains(r, "FITRIA")
+
     def test_helper_bersih_nama_buang_sufiks(self):
-        from web.sesama_cm import _bersih_nama
+        from web.sesama_cm import _bersih_nama, _nama_dari_bank_fr
         self.assertEqual(_bersih_nama("KIKI SUASANTO TAMPUNG LAYER ARUBBXY"), "KIKI SUASANTO")
         self.assertEqual(_bersih_nama("NASRUL YGLWHAK"), "NASRUL")
-        self.assertEqual(_bersih_nama("NXPAY"), "")  # noise / pendek
-        self.assertEqual(_bersih_nama("YOGA"), "")   # < 6 compact
+        self.assertEqual(_bersih_nama("NXPAY"), "")
+        self.assertEqual(_bersih_nama("YOGA"), "")
+        self.assertEqual(
+            _nama_dari_bank_fr("BANK BRI | KIKI SUASANTO | TAMPUNG LAYER 2"),
+            "KIKI SUASANTO",
+        )
 
 
 class MutasiBankPhoneLookupTests(MutasiBankBase):

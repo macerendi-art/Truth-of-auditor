@@ -1,34 +1,41 @@
-"""Deteksi mutasi bank/gateway «Sesama CM» (pindah dana antar rekening CM toko).
+"""Deteksi mutasi bank/gateway «Sesama CM» — selaras kategori FR Sesama CM.
 
-Sesama CM di FR = transfer internal antar bank milik toko (bukan DP/WD member).
-Di mutasi bank, sinyal yang sama: counterparty / deskripsi memuat **nama pemilik
-rekening CM lain** pada toko yang sama — bukan owner file mutasi yang sedang
-dibaca (itu pengirim/penerima di statement sendiri, sering muncul di deskripsi WD
-ke member).
+FR menandai pindah dana internal dengan `raw[\"Kategori\"] == \"Sesama CM\"` dan
+menyimpan rekening CM di `raw[\"Bank\"]` (segmen tengah = nama) +
+`raw[\"No. Rek Bank Member\"]`.
 
-Sumber nama CM: `Upload.owner_name` file bank toko (hasil header/nama file).
+Filter Mutasi Bank mengikuti identitas yang sama:
+1. **Nama CM** dari FR Sesama CM (Bank `| nama |`) digabung owner upload bank
+2. **No. rekening** dari FR Sesama CM (digit ≥ 8)
+3. Baris money cocok bila counterparty/deskripsi memuat nama **atau** no.rek
+   CM **lain** — bukan owner file mutasi yang sedang dibaca (WD member sering
+   memuat nama pengirim = owner sendiri di deskripsi).
+
 Tanpa migrasi; query-time; berlaku retroaktif.
 """
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from django.db.models import Q
+from django.db.models.fields.json import KeyTextTransform
 
-# Token/ entri yang bukan nama orang CM.
+# Bukan nama orang CM (FR role / gateway / generik).
 _NOISE = frozenset({
     "BANK", "BCA", "BRI", "MANDIRI", "BNI", "DANA", "GOPAY", "OVO", "SHOPEE",
-    "QRIS", "NXPAY", "QHOKI", "RPAY", "ELITE", "FLYER", "GATEWAY", "TAMPUNG",
-    "LAYER", "DEPOSIT", "WITHDRAW", "WITHDRAWAL", "WD", "DP", "MUL", "CV", "PT",
-    "M", "BCA", "MBCA",
+    "QRIS", "NXPAY", "NEXUSPAY", "QHOKI", "RPAY", "ELITE", "FLYER", "GATEWAY",
+    "TAMPUNG", "LAYER", "DEPOSIT", "WITHDRAW", "WITHDRAWAL", "WD", "DP", "MUL",
+    "CV", "PT", "M", "MBCA", "COSTFINANCE", "TAMPUNGPUSAT", "DEPOSITWITHDRAW",
+    "LAINLAIN", "LAIN",
 })
 
-# Potong sufiks peran/layer + sisa di belakangnya.
 _SUFFIX_CUT = re.compile(
     r"\b(TAMPUNG|LAYER|DEPOSIT|WITHDRAW|WITHDRAWAL|WD|DP)\b.*$",
     re.IGNORECASE,
 )
 _NON_ALNUM = re.compile(r"[^A-Za-z0-9]+")
+_DIGITS = re.compile(r"\D+")
 
 
 def _is_code_token(tok: str) -> bool:
@@ -45,23 +52,46 @@ def _is_code_token(tok: str) -> bool:
 
 
 def _bersih_nama(raw: str) -> str:
-    """Normalisasi owner_name upload → nama orang CM yang bisa di-match."""
+    """Normalisasi label CM → nama yang bisa di-match di mutasi."""
     s = " ".join(str(raw or "").split()).strip()
     if not s:
         return ""
+    # FR kadang "DEPOSIT / WITHDRAW"
+    if "/" in s and not any(c.isalpha() and c.islower() for c in s):
+        # tetap proses; noise di-filter lewat compact
+        pass
     s = _SUFFIX_CUT.sub("", s).strip()
-    # Buang 1–2 token kode di ekor selama masih ada nama di depan.
+    s = s.replace("/", " ")
+    s = " ".join(s.split())
     parts = s.split()
     while len(parts) >= 2 and _is_code_token(parts[-1]):
         parts.pop()
     s = " ".join(parts).strip()
-    # Tolak noise murni / terlalu pendek.
     compact = _NON_ALNUM.sub("", s).upper()
     if len(compact) < 6:
         return ""
     if compact in _NOISE:
         return ""
     return s
+
+
+def _nama_dari_bank_fr(bank: str) -> str:
+    """`BANK BRI | KIKI SUASANTO | TAMPUNG LAYER 2` → `KIKI SUASANTO`."""
+    parts = [p.strip() for p in str(bank or "").split("|")]
+    if len(parts) >= 2:
+        return _bersih_nama(parts[1])
+    return _bersih_nama(bank)
+
+
+def _digit_rek(raw: str) -> str:
+    """`BRI 119101022152500` / `BCA 8447072062` → digit murni (min 8)."""
+    d = _DIGITS.sub("", str(raw or ""))
+    if len(d) < 8:
+        return ""
+    # buang placeholder genap (0000007788 masih valid QRIS — biarkan)
+    if set(d) <= {"0", "7"} and len(d) <= 7:
+        return ""
+    return d
 
 
 def _varian(nama: str) -> list[str]:
@@ -83,44 +113,88 @@ def _varian(nama: str) -> list[str]:
     return out
 
 
-def nama_cm_toko(toko_id: int) -> list[str]:
-    """Daftar nama CM unik (sudah dibersihkan) dari upload bank toko."""
-    from sources.models import Upload
+def _tambah_nama(hasil: list[str], seen: set[str], raw: str) -> None:
+    n = _bersih_nama(raw)
+    if not n:
+        return
+    key = _NON_ALNUM.sub("", n).upper()
+    if key in seen or key in _NOISE:
+        return
+    seen.add(key)
+    hasil.append(n)
 
-    mentah = (
+
+@lru_cache(maxsize=64)
+def identitas_cm_toko(toko_id: int) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """(nama_cm, no_rek_digit) dari FR Sesama CM + owner upload bank.
+
+    Cache per-process: daftar CM jarang berubah; upload FR baru butuh worker
+    recycle / cache clear — cukup untuk filter UI. Tes memanggil
+    `identitas_cm_toko.cache_clear()`.
+    """
+    from sources.models import Upload
+    from transactions.models import Transaction
+
+    names: list[str] = []
+    seen_n: set[str] = set()
+    reks: list[str] = []
+    seen_r: set[str] = set()
+
+    # 1) FR Sesama CM — sumber otoritatif (selaras Control Bracket).
+    fr = (
+        Transaction.objects.filter(toko_id=toko_id, source_type__key="bracket")
+        .annotate(
+            kat=KeyTextTransform("Kategori", "raw"),
+            bank=KeyTextTransform("Bank", "raw"),
+            rek=KeyTextTransform("No. Rek Bank Member", "raw"),
+        )
+        .filter(kat__icontains="sesama")
+        .values_list("bank", "rek")
+        .distinct()
+    )
+    for bank, rek in fr.iterator():
+        mid = _nama_dari_bank_fr(bank or "")
+        if mid:
+            key = _NON_ALNUM.sub("", mid).upper()
+            if key not in seen_n and key not in _NOISE:
+                seen_n.add(key)
+                names.append(mid)
+        d = _digit_rek(rek or "")
+        if d and d not in seen_r:
+            # skip nomor super-generik pendek berulang
+            if len(set(d)) <= 2 and len(d) < 10:
+                continue
+            seen_r.add(d)
+            reks.append(d)
+
+    # 2) Owner file bank — pelengkap (toko yang FR-nya jarang/ belum ada Sesama CM).
+    for raw in (
         Upload.objects.filter(toko_id=toko_id, source_type__key="bank")
         .exclude(owner_name="")
         .values_list("owner_name", flat=True)
         .distinct()
-    )
-    seen = set()
-    hasil = []
-    for raw in mentah:
-        n = _bersih_nama(raw)
-        if not n:
-            continue
-        key = _NON_ALNUM.sub("", n).upper()
-        if key in seen:
-            continue
-        seen.add(key)
-        hasil.append(n)
-    # Nama panjang dulu — memudahkan debug / preferensi match.
-    hasil.sort(key=lambda s: (-len(s), s.lower()))
-    return hasil
+    ):
+        _tambah_nama(names, seen_n, raw)
+
+    names.sort(key=lambda s: (-len(s), s.lower()))
+    reks.sort(key=lambda s: (-len(s), s))
+    return tuple(names), tuple(reks)
+
+
+def nama_cm_toko(toko_id: int) -> list[str]:
+    """Daftar nama CM (FR + upload). API stabil untuk tes/pemanggil lama."""
+    return list(identitas_cm_toko(toko_id)[0])
 
 
 def q_sesama_cm(toko_id: int) -> Q:
-    """Filter ORM: baris money yang deskripsi/counterparty memuat nama CM **lain**.
-
-    Untuk tiap nama N: (cp|desc mengandung N) AND (owner file BUKAN N).
-    Owner file diuji lewat `upload__owner_name` (icontains tiap varian N).
-    """
-    names = nama_cm_toko(toko_id)
-    if not names:
-        return Q(pk__in=[])  # kosong tegas
+    """Filter ORM: mutasi yang merujuk nama/no.rek CM lain (bukan owner file)."""
+    names, reks = identitas_cm_toko(toko_id)
+    if not names and not reks:
+        return Q(pk__in=[])
 
     total = Q()
     any_branch = False
+
     for nama in names:
         vars_ = _varian(nama)
         if not vars_:
@@ -132,25 +206,32 @@ def q_sesama_cm(toko_id: int) -> Q:
             self_owner |= Q(upload__owner_name__icontains=v)
         total |= hit & ~self_owner
         any_branch = True
+
+    # No. rek CM: cocok di deskripsi/counterparty. Self-exclusion kasar:
+    # baris yang HANYA memuat rek tanpa nama tetap lolos (pindah via norek).
+    # Owner file jarang menulis norek sendiri di deskripsi WD member.
+    for d in reks:
+        total |= Q(counterparty__icontains=d) | Q(description__icontains=d)
+        any_branch = True
+
     if not any_branch:
         return Q(pk__in=[])
     return total
 
 
 def tandai_sesama_cm(rows, toko_id: int) -> None:
-    """Set atribut transient `is_sesama_cm` pada tiap baris (tampil badge)."""
-    names = nama_cm_toko(toko_id)
-    if not names:
+    """Set atribut transient `is_sesama_cm` pada tiap baris (badge UI)."""
+    names, reks = identitas_cm_toko(toko_id)
+    if not names and not reks:
         for r in rows:
             r.is_sesama_cm = False
         return
 
-    # Precompute compact keys + varian lower untuk cek Python (sama semangat SQL).
     prepared = []
     for nama in names:
         keys = {v.lower() for v in _varian(nama)}
         compact = _NON_ALNUM.sub("", nama).upper()
-        prepared.append((nama, keys, compact))
+        prepared.append((keys, compact))
 
     for r in rows:
         owner_raw = ""
@@ -162,9 +243,10 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
         blob = f"{r.counterparty or ''} {r.description or ''}"
         blob_l = blob.lower()
         blob_c = _NON_ALNUM.sub("", blob).upper()
+        blob_digits = _DIGITS.sub("", blob)
+
         hit = False
-        for _nama, keys, compact in prepared:
-            # Skip nama yang merupakan owner file ini.
+        for keys, compact in prepared:
             if owner_l and any(k in owner_l for k in keys):
                 continue
             if owner_c and compact and compact in owner_c:
@@ -172,4 +254,14 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
             if any(k in blob_l for k in keys) or (compact and compact in blob_c):
                 hit = True
                 break
+        if not hit:
+            for d in reks:
+                if d and d in blob_digits:
+                    hit = True
+                    break
         r.is_sesama_cm = hit
+
+
+def clear_cm_cache() -> None:
+    """Untuk tes — kosongkan cache identitas CM."""
+    identitas_cm_toko.cache_clear()
