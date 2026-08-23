@@ -167,7 +167,15 @@ UNSETTLED_STATUS = {
 
 
 def _gw_status(raw):
-    return ((raw or {}).get("Payment Status") or (raw or {}).get("Status") or "").strip().upper()
+    """Status pembayaran dari raw gateway — kunci dicocokkan case-insensitive:
+    parser tampung QR Flyer memuat bentuk vendor ber-kunci `status` lowercase
+    (dan `Payment Status` di bentuk lain), keduanya harus terbaca gate."""
+    norm = {str(k).strip().lower(): v for k, v in (raw or {}).items()}
+    for key in ("payment status", "status"):
+        v = norm.get(key)
+        if v:
+            return str(v).strip().upper()
+    return ""
 
 
 def _gw_unsettled(t):

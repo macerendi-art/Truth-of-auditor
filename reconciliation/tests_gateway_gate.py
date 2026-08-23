@@ -178,3 +178,28 @@ class GatewayUnpaidBatchTests(_Base):
                 raw={"Payment Status": "EXPIRED"})
         res = run_batches_auto(self.toko, self.tol)
         self.assertTrue(res["ok"], res["violations"])
+
+
+class GateKunciStatusLowercaseTests(TestCase):
+    """Bentuk vendor kedua parser tampung QR Flyer menyimpan status di kunci
+    raw `status` lowercase — gate harus tetap membacanya (dulu hanya
+    `Payment Status`/`Status` case persis → UNPAID lolos sebagai settle)."""
+
+    def test_status_lowercase_unpaid_terbaca(self):
+        from reconciliation.engine import _gw_status
+        self.assertEqual(_gw_status({"status": "unpaid"}), "UNPAID")
+
+    def test_payment_status_case_aneh_terbaca(self):
+        from reconciliation.engine import _gw_status
+        self.assertEqual(_gw_status({"PAYMENT STATUS": "Settled"}), "SETTLED")
+
+    def test_prioritas_payment_status_di_atas_status(self):
+        from reconciliation.engine import _gw_status
+        self.assertEqual(
+            _gw_status({"status": "unpaid", "Payment Status": "SETTLED"}),
+            "SETTLED",
+        )
+
+    def test_tanpa_kunci_status_tetap_kosong(self):
+        from reconciliation.engine import _gw_status
+        self.assertEqual(_gw_status({"Amount": "5000"}), "")
