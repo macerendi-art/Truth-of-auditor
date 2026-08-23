@@ -138,6 +138,20 @@ def detect_source(path, filename=""):
             add("cor_panel_qris", 0.90)
     elif ext == ".csv":
         c = _csv_text(path)
+        # QR Flyer TAMPUNG / payout (Sesama CM) — sebelum qris_elite / qrflyer
+        # nama-file. Token beneficiary+payout unik vs DP Flyer/ELITE member.
+        if ("beneficiary account" in c and "payout status" in c
+                and "payout amount" in c and "settlement timestamp" in c):
+            add("qrflyer_tampung", 0.95)
+        elif "tampung" in fn and ("flyer" in fn or "qrflyer" in fn):
+            add("qrflyer_tampung", 0.85)
+        # QRIS Elite TAMPUNG / disbursement (Sesama CM). Judul DISBURSEMENT
+        # HISTORY + DATE_DISBURSEMENT — bukan RECORD VALUE member DP.
+        if ("date_disbursement" in c and "vendor_status" in c
+                and "account_name" in c and "disbursement" in c):
+            add("qris_elite_tampung", 0.95)
+        elif "tampung" in fn and ("elite" in fn or "elit" in fn):
+            add("qris_elite_tampung", 0.85)
         # QRIS ELITE: kunci pada header, bukan nama berkas (sampel W25
         # mengeja "ELIT"). Keempat token ini tidak dimiliki gateway lain.
         if all(token in c for token in

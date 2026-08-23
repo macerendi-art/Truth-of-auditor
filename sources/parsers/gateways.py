@@ -852,3 +852,208 @@ class KingsPayParser(BaseParser):
                 % (jumlah_transaksi, ditemukan or "(kosong)", dikenal)
             )
         return out
+
+
+class QRFlyerTampungParser(BaseParser):
+    """QR Flyer — mutasi TAMPUNG / payout ke rekening bank (Sesama CM).
+
+    Bukan mutasi DP member (`qrflyer`). Header payout:
+    Request Timestamp, Client Ref, Bank, Beneficiary Account/Name,
+    Payout Status, Payout Amount, Transaction Fee, Settlement Timestamp.
+
+    Selalu WD (uang keluar dari saldo QR tampung). Hanya Status=Success.
+    Nominal format ID (`IDR 30.000.000`). `reference` kosong (Client Ref bukan
+    ticket panel). counterparty = Beneficiary Name; norek di description+raw
+    untuk join Sesama CM.
+    """
+
+    source_key = "gateway"
+    STATUS_UANG = frozenset({"success"})
+    KOLOM_WAJIB = (
+        "beneficiary account", "beneficiary name", "payout status",
+        "payout amount", "settlement timestamp",
+    )
+
+    def parse(self, path, flow=""):
+        with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+            reader = csv.DictReader(f)
+            header = [str(h or "").strip() for h in (reader.fieldnames or [])]
+            peta = {h.casefold(): h for h in header if h}
+            hilang = [k for k in self.KOLOM_WAJIB if k not in peta]
+            if hilang:
+                raise ValueError(
+                    "Laporan QR Flyer Tampung tak dikenali: kolom %s tidak "
+                    "ditemukan. Header berkas: %s."
+                    % (
+                        " dan ".join(hilang),
+                        ", ".join(repr(h) for h in header if h) or "(kosong)",
+                    )
+                )
+            rows = [r for r in reader if any((v or "").strip() for v in r.values())]
+
+        kol = lambda nama: peta.get(nama.casefold(), "\x00")  # noqa: E731
+        out = []
+        n_tx = 0
+        status_ditemukan = set()
+        for r in rows:
+            ref = str(r.get(kol("client ref"), "") or "").strip()
+            norek = str(r.get(kol("beneficiary account"), "") or "").strip()
+            nama = str(r.get(kol("beneficiary name"), "") or "").strip()
+            if not ref and not norek and not nama:
+                continue
+            n_tx += 1
+            status = str(r.get(kol("payout status"), "") or "").strip().lower()
+            status_ditemukan.add(status or "(kosong)")
+            if status not in self.STATUS_UANG:
+                continue
+
+            amt = abs(parse_decimal(r.get(kol("payout amount")), number_format="id"))
+            fee = abs(parse_decimal(r.get(kol("transaction fee")), number_format="id"))
+            settle = parse_dt(r.get(kol("settlement timestamp")))
+            created = parse_dt(r.get(kol("request timestamp")))
+            occurred = settle or created
+            if not occurred:
+                raise ValueError(
+                    "QR Flyer Tampung: waktu settlement/request tidak terbaca "
+                    "untuk Client Ref %r." % (ref or norek,)
+                )
+            bank = str(r.get(kol("bank"), "") or "").strip()
+            raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date(),
+                "jenis": "wd",
+                "amount": amt,
+                "credit_delta": Decimal("0"),
+                "money_delta": -amt,
+                "fee": fee,
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": "",
+                "username": "",
+                "reference": "",  # Client Ref ≠ ticket panel
+                "counterparty": nama,
+                "description": (
+                    "QRFLYER TAMPUNG %s %s %s" % (bank, norek, nama)
+                ).strip(),
+                "raw": raw,
+            }
+            row["row_hash"] = row_hash(
+                "qrflyer_tampung",
+                [ref, norek, format(amt.normalize(), "f")],
+            )
+            out.append(row)
+
+        if n_tx and not out:
+            raise ValueError(
+                "Laporan QR Flyer Tampung memuat %d baris tetapi tidak satu pun "
+                "berstatus Success. Status ditemukan: %s."
+                % (n_tx, ", ".join(sorted(status_ditemukan)) or "(kosong)")
+            )
+        return out
+
+
+class QRISEliteTampungParser(BaseParser):
+    """QRIS Elite — mutasi TAMPUNG / disbursement ke rekening bank (Sesama CM).
+
+    Bukan mutasi DP member (`qris_elite`). Baris 1 judul DISBURSEMENT HISTORY,
+    baris 2 header: ID, DATE_DISBURSEMENT, BANK_CODE, BANK_NO, ACCOUNT_NAME,
+    AMOUNT, REF_ID, VENDOR_ID, VENDOR_STATUS.
+
+    Selalu WD. Hanya VENDOR_STATUS=success. Nominal rupiah penuh. BANK_NO
+    sering ter-mask (`1191010221*****`) — simpan apa adanya; join Sesama CM
+    lewat nama ACCOUNT_NAME + prefiks norek bila cukup digit.
+    """
+
+    source_key = "gateway"
+    STATUS_UANG = frozenset({"success"})
+    KOLOM_WAJIB = (
+        "date_disbursement", "account_name", "amount", "vendor_status",
+    )
+
+    def parse(self, path, flow=""):
+        with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+            reader = csv.reader(f)
+            judul = next(reader, None) or []
+            header = [str(h or "").strip() for h in (next(reader, None) or [])]
+            peta = {h.casefold(): h for h in header if h}
+            hilang = [k for k in self.KOLOM_WAJIB if k not in peta]
+            if hilang:
+                raise ValueError(
+                    "Laporan QRIS Elite Tampung tak dikenali: kolom %s tidak "
+                    "ditemukan. Header berkas: %s. Judul: %s."
+                    % (
+                        " dan ".join(hilang),
+                        ", ".join(repr(h) for h in header if h) or "(kosong)",
+                        ", ".join(repr(h) for h in judul if h) or "(kosong)",
+                    )
+                )
+            rows = [
+                dict(zip(header, nilai))
+                for nilai in reader
+                if any(str(c or "").strip() for c in nilai)
+            ]
+
+        kol = lambda nama: peta.get(nama.casefold(), "\x00")  # noqa: E731
+        out = []
+        n_tx = 0
+        status_ditemukan = set()
+        for r in rows:
+            pid = str(r.get(kol("id"), "") or "").strip()
+            ref = str(r.get(kol("ref_id"), "") or "").strip()
+            nama = str(r.get(kol("account_name"), "") or "").strip()
+            norek = str(r.get(kol("bank_no"), "") or "").strip()
+            if not pid and not ref and not nama:
+                continue
+            n_tx += 1
+            status = str(r.get(kol("vendor_status"), "") or "").strip().lower()
+            status_ditemukan.add(status or "(kosong)")
+            if status not in self.STATUS_UANG:
+                continue
+
+            amt = abs(parse_decimal(r.get(kol("amount"))))
+            occurred = parse_dt(r.get(kol("date_disbursement")))
+            if not occurred:
+                raise ValueError(
+                    "QRIS Elite Tampung: DATE_DISBURSEMENT tidak terbaca untuk "
+                    "ID %r: %r."
+                    % (pid or ref, r.get(kol("date_disbursement")))
+                )
+            raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
+            # digit norek (buang mask *) untuk blob join Sesama CM
+            norek_digit = re.sub(r"\D", "", norek.replace("*", ""))
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date(),
+                "jenis": "wd",
+                "amount": amt,
+                "credit_delta": Decimal("0"),
+                "money_delta": -amt,
+                "fee": Decimal("0"),
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": "",
+                "username": "",
+                "reference": "",
+                "counterparty": nama,
+                "description": (
+                    "QRISELITE TAMPUNG %s %s %s"
+                    % (norek_digit or norek, nama, ref)
+                ).strip(),
+                "raw": raw,
+            }
+            row["row_hash"] = row_hash(
+                "qris_elite_tampung",
+                [pid or ref, norek_digit or norek, format(amt.normalize(), "f")],
+            )
+            out.append(row)
+
+        if n_tx and not out:
+            raise ValueError(
+                "Laporan QRIS Elite Tampung memuat %d baris tetapi tidak satu "
+                "pun berstatus success. Status ditemukan: %s."
+                % (n_tx, ", ".join(sorted(status_ditemukan)) or "(kosong)")
+            )
+        return out

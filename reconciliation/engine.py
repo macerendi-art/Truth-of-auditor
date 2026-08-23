@@ -990,6 +990,10 @@ def _sesama_cm_identity(fr, bank):
     blob_c = re.sub(r"[^A-Za-z0-9]", "", blob).upper()
     if rek and len(rek) >= 8 and rek in blob_d:
         return 100.0, "amount+rek"
+    # norek ter-mask vendor (ELITE tampung: 1191010221*****) — prefiks ≥10 digit
+    if rek and blob_d and len(rek) >= 10 and len(blob_d) >= 10:
+        if rek.startswith(blob_d) or blob_d.startswith(rek[:10]):
+            return 100.0, "amount+rek"
     if len(nama_c) >= 6 and nama_c in blob_c:
         return 95.0, "amount+name_cm"
     # tanpa identitas kuat: jangan pasang (amount+date saja dilarang anchor rule)
