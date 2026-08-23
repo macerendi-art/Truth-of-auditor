@@ -110,7 +110,51 @@ def _varian(nama: str) -> list[str]:
             continue
         seen.add(key)
         out.append(v)
+    # token pertama ≥4 (owner file sering cuma "SERVA" / "NASRUL")
+    first = n.split()[0] if n.split() else ""
+    if len(first) >= 4 and first.lower() not in seen and first.upper() not in _NOISE:
+        out.append(first)
+        seen.add(first.lower())
     return out
+
+
+def _compact_nama(s: str) -> str:
+    return _NON_ALNUM.sub("", str(s or "")).upper()
+
+
+def cm_names_match(a: str, b: str, *, min_ratio: float = 90.0) -> bool:
+    """True bila dua label CM merujuk orang yang sama (typo FR vs owner bank).
+
+    Contoh: YULIAYANTI PRATIWI ≈ YULIYANTI PRATIWI (ratio ~97),
+    KIKI SUASANTO ≈ KIKISUASANTO, SERVA ≈ SERVA MUHAMAD SEBASTIAN (prefix token).
+    """
+    ca, cb = _compact_nama(a), _compact_nama(b)
+    if not ca or not cb or len(ca) < 4 or len(cb) < 4:
+        return False
+    if ca == cb or ca in cb or cb in ca:
+        return True
+    # token pertama sama + cukup panjang (SERVA vs SERVAMUHAMAD…)
+    ta = (str(a or "").split() or [""])[0]
+    tb = (str(b or "").split() or [""])[0]
+    cta, ctb = _compact_nama(ta), _compact_nama(tb)
+    if cta and ctb and len(cta) >= 4 and cta == ctb and (len(ca) >= 6 or len(cb) >= 6):
+        # hindari token generik
+        if cta not in _NOISE:
+            return True
+    try:
+        from rapidfuzz import fuzz
+        if min(len(ca), len(cb)) >= 8 and fuzz.ratio(ca, cb) >= min_ratio:
+            return True
+        # partial: nama pendek di dalam nama panjang
+        if min(len(ca), len(cb)) >= 6 and fuzz.partial_ratio(ca, cb) >= 95:
+            return True
+    except Exception:
+        # fallback tanpa rapidfuzz: beda 1-2 char
+        if abs(len(ca) - len(cb)) <= 2 and len(ca) >= 8:
+            diff = sum(1 for x, y in zip(ca, cb) if x != y) + abs(len(ca) - len(cb))
+            if diff <= 2:
+                return True
+    return False
 
 
 def _tambah_nama(hasil: list[str], seen: set[str], raw: str) -> None:
@@ -225,6 +269,10 @@ def q_sesama_cm(toko_id: int) -> Q:
         for v in vars_:
             hit |= Q(counterparty__icontains=v) | Q(description__icontains=v)
             self_owner |= Q(upload__owner_name__icontains=v)
+        # owner singkat "SERVA" / "NASRUL" harus self-exclude juga
+        first = (nama.split() or [""])[0]
+        if len(first) >= 4 and first.upper() not in _NOISE:
+            self_owner |= Q(upload__owner_name__icontains=first)
         total |= hit & ~self_owner
         any_branch = True
 
@@ -252,7 +300,7 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
     for nama in names:
         keys = {v.lower() for v in _varian(nama)}
         compact = _NON_ALNUM.sub("", nama).upper()
-        prepared.append((keys, compact))
+        prepared.append((nama, keys, compact))
 
     for r in rows:
         owner_raw = ""
@@ -267,12 +315,22 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
         blob_digits = _DIGITS.sub("", blob)
 
         hit = False
-        for keys, compact in prepared:
+        for nama, keys, compact in prepared:
+            # self: owner = CM ini (termasuk SERVA vs SERVA MUHAMAD…)
+            if owner_raw and cm_names_match(owner_raw, nama):
+                continue
             if owner_l and any(k in owner_l for k in keys):
                 continue
-            if owner_c and compact and compact in owner_c:
+            if owner_c and compact and (compact in owner_c or owner_c in compact):
                 continue
             if any(k in blob_l for k in keys) or (compact and compact in blob_c):
+                hit = True
+                break
+            # fuzzy: counterparty ≈ nama CM lain
+            cp = r.counterparty or ""
+            if cp and cm_names_match(cp, nama) and not (
+                owner_raw and cm_names_match(owner_raw, nama)
+            ):
                 hit = True
                 break
         if not hit:

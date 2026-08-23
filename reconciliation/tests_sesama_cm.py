@@ -165,6 +165,52 @@ class SesamaCmReconTests(TestCase):
         self.assertEqual(sc, 0.0)
         self.assertEqual(reason, "")
 
+    def test_identity_typo_yuliayanti_vs_yuliyanti(self):
+        """FR YULIAYANTI ≈ owner YULIYANTI — typo ejaan FR."""
+        from reconciliation.engine import _sesama_cm_identity
+        from types import SimpleNamespace
+        from web.sesama_cm import cm_names_match
+        self.assertTrue(cm_names_match("YULIAYANTI PRATIWI", "YULIYANTI PRATIWI"))
+        fr = SimpleNamespace(raw={
+            "Bank": "BANK BCA | YULIAYANTI PRATIWI | TAMPUNG LAYER 1",
+            "No. Rek Bank Member": "BCA 8447072062",
+        })
+        bank = SimpleNamespace(
+            counterparty="MOH ZUNAEDY AWAN",
+            description="TRSF E-BANKING CR MOH ZUNAEDY AWAN",
+            upload=SimpleNamespace(owner_name="YULIYANTI PRATIWI"),
+        )
+        sc, reason = _sesama_cm_identity(
+            fr, bank,
+            cm_names=("YULIAYANTI PRATIWI", "YULIYANTI PRATIWI", "MOH ZUNAEDY AWAN"),
+            cm_reks=("8447072062", "3880950656"),
+        )
+        self.assertGreaterEqual(sc, 90)
+        self.assertEqual(reason, "owner_fr+counterparty_cm")
+
+    def test_serva_dp_member_bukan_sesama_cm(self):
+        """DP member ke rekening SERVA (owner=SERVA) bukan Sesama CM."""
+        from web.sesama_cm import tandai_sesama_cm, clear_cm_cache
+        clear_cm_cache()
+        # seed FR CM SERVA
+        self._fr_cm(
+            "BANK BRI | SERVA MUHAMAD SEBASTIAN | DEPOSIT", "BRI 058801037387506",
+            "100000", datetime(2026, 8, 22, 10, 0),
+        )
+        up = Upload.objects.create(
+            source_type=self.bank, toko=self.toko, original_name="bri_serva.csv",
+            owner_name="SERVA",
+        )
+        t = self._tx(
+            self.bank, up, jenis="depo", amount="110000", money="110000",
+            dt=datetime(2026, 8, 22, 11, 0),
+            counterparty="ABD MULUK LD P",
+            description="NBMB ABD MULUK LD P TO SERVA MUHAMAD SEB",
+        )
+        clear_cm_cache()
+        tandai_sesama_cm([t], self.toko.id)
+        self.assertFalse(t.is_sesama_cm)
+
     def test_run_batch_menjalankan_bracket_bank_sesama(self):
         dt = datetime(2026, 8, 21, 10, 0)
         # minimal kelengkapan: panel + bank + bracket

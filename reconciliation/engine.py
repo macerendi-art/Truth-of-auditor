@@ -1001,12 +1001,18 @@ def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
     3. owner file = pemegang rekening FR **dan** lawan = CM lain / norek CM lain
     4. nama FR di deskripsi hanya jika owner file **bukan** rekening FR itu
       (statement rekening lain yang menyebut CM ini)
+
+    Nama memakai `cm_names_match` (typo FR YULIAYANTI ≈ owner YULIYANTI).
     """
     try:
-        from web.sesama_cm import _bersih_nama
+        from web.sesama_cm import _bersih_nama, cm_names_match
     except Exception:
         def _bersih_nama(x):  # noqa: E306
             return " ".join(str(x or "").split())
+
+        def cm_names_match(a, b, **kw):  # noqa: E306
+            ca, cb = _compact_alnum(a), _compact_alnum(b)
+            return bool(ca and cb and (ca in cb or cb in ca))
 
     raw = fr.raw or {}
     frek = re.sub(r"\D", "", str(raw.get("No. Rek Bank Member") or ""))
@@ -1025,12 +1031,10 @@ def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
     up = getattr(bank, "upload", None)
     if up is not None:
         owner_raw = up.owner_name or ""
-    owner_c = _compact_alnum(_bersih_nama(owner_raw) or owner_raw)
+    owner_clean = _bersih_nama(owner_raw) or owner_raw
+    owner_c = _compact_alnum(owner_clean)
 
-    cm_compacts = [
-        _compact_alnum(n) for n in (cm_names or ())
-        if _compact_alnum(n) and len(_compact_alnum(n)) >= 6
-    ]
+    cm_list = list(cm_names or ())
     cm_rek_list = [r for r in (cm_reks or ()) if r and len(r) >= 8]
 
     # 1) norek FR di mutasi
@@ -1040,20 +1044,25 @@ def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
         if frek.startswith(blob_d) or blob_d.startswith(frek[:10]):
             return 100.0, "amount+rek"
 
-    # 2) nama FR di counterparty (lawan/pengirim di statement lain)
+    # 2) nama FR di counterparty (fuzzy)
+    if fname and cp and cm_names_match(fname, cp):
+        return 95.0, "amount+name_cm"
     if fname_c and len(fname_c) >= 6 and fname_c in cp_c:
         return 95.0, "amount+name_cm"
 
-    # 3) baris di rekening FR (owner file = CM FR) + lawan CM / norek CM lain
-    owner_is_fr = bool(
-        fname_c and owner_c and len(fname_c) >= 6
-        and (fname_c in owner_c or owner_c in fname_c)
-    )
+    # 3) baris di rekening FR (owner ≈ FR) + lawan CM / norek CM lain
+    owner_is_fr = bool(fname and owner_clean and cm_names_match(fname, owner_clean))
+    if not owner_is_fr and fname_c and owner_c and len(fname_c) >= 6:
+        owner_is_fr = fname_c in owner_c or owner_c in fname_c
+
     if owner_is_fr:
-        for cc in cm_compacts:
-            if cc == fname_c:
+        for nm in cm_list:
+            if cm_names_match(nm, fname):
                 continue
-            if cc in cp_c or cc in desc_c:
+            if cp and cm_names_match(nm, cp):
+                return 93.0, "owner_fr+counterparty_cm"
+            nm_c = _compact_alnum(nm)
+            if nm_c and len(nm_c) >= 6 and (nm_c in cp_c or nm_c in desc_c):
                 return 93.0, "owner_fr+counterparty_cm"
         for rk in cm_rek_list:
             if frek and (rk == frek or rk.startswith(frek[:10]) or frek.startswith(rk[:10])):
@@ -1065,9 +1074,12 @@ def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
             ):
                 return 94.0, "owner_fr+rek_cm"
 
-    # 4) nama FR di deskripsi pada statement rekening LAIN (bukan noise self)
-    if fname_c and len(fname_c) >= 6 and fname_c in desc_c and not owner_is_fr:
-        return 90.0, "amount+name_cm"
+    # 4) nama FR di deskripsi pada statement rekening LAIN
+    if fname and not owner_is_fr:
+        if cm_names_match(fname, desc) or (
+            fname_c and len(fname_c) >= 6 and fname_c in desc_c
+        ):
+            return 90.0, "amount+name_cm"
 
     return 0.0, ""
 
