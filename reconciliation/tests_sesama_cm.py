@@ -116,6 +116,55 @@ class SesamaCmReconTests(TestCase):
         self.assertEqual(r_miss.bucket, "tidak_cocok")
         self.assertEqual(r_miss.reason_code, "no_money")
 
+    def test_bracket_bank_owner_fr_plus_lawan_cm(self):
+        """Mutasi di rekening FR (owner file) ke CM lain — cocok walau norek FR tak di desc."""
+        dt = datetime(2026, 8, 22, 1, 0)
+        up_moh = Upload.objects.create(
+            source_type=self.bank, toko=self.toko, original_name="bca_moh.csv",
+            owner_name="MOH ZUNAEDY AWAN",
+        )
+        Upload.objects.create(
+            source_type=self.bank, toko=self.toko, original_name="bca_yuli.csv",
+            owner_name="YULIYANTI PRATIWI",
+        )
+        fr = self._fr_cm(
+            "BANK BCA | MOH ZUNAEDY AWAN | DEPOSIT", "BCA 3880950656",
+            "-1050000", dt, desc="MUL NAIK TAMPUNG WEBSITE",
+        )
+        money = self._tx(
+            self.bank, up_moh, jenis="wd", amount="1050000", money="-1050000",
+            dt=dt, counterparty="YULIYANTI PRATIWI",
+            description="TRSF E-BANKING DB YULIYANTI PRATIWI",
+        )
+        clear_cm_cache()
+        run = run_match(MatchRun.Relation.BRACKET_BANK, self.tol, toko=self.toko,
+                        date_from=dt.date(), date_to=dt.date())
+        r_ok = MatchResult.objects.get(run=run, left=fr)
+        self.assertEqual(r_ok.bucket, "cocok")
+        self.assertEqual(r_ok.right_id, money.id)
+        self.assertIn(r_ok.reason_code, (
+            "owner_fr+counterparty_cm", "amount+name_cm",
+        ))
+
+    def test_identity_tidak_pakai_nama_sendiri_di_desc_owner(self):
+        """Nama FR di deskripsi statement sendiri saja ≠ identitas (hindari false match)."""
+        from reconciliation.engine import _sesama_cm_identity
+        from types import SimpleNamespace
+        fr = SimpleNamespace(raw={
+            "Bank": "BANK BRI | KIKI SUASANTO | TAMPUNG",
+            "No. Rek Bank Member": "BRI 119101022152500",
+        })
+        bank = SimpleNamespace(
+            counterparty="ANWAR",
+            description="NBMB Kikisuasanto TO ANWAR",
+            upload=SimpleNamespace(owner_name="KIKI SUASANTO"),
+        )
+        sc, reason = _sesama_cm_identity(
+            fr, bank, cm_names=("KIKI SUASANTO", "NASRUL"), cm_reks=("119101022152500",),
+        )
+        self.assertEqual(sc, 0.0)
+        self.assertEqual(reason, "")
+
     def test_run_batch_menjalankan_bracket_bank_sesama(self):
         dt = datetime(2026, 8, 21, 10, 0)
         # minimal kelengkapan: panel + bank + bracket

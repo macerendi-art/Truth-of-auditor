@@ -890,8 +890,8 @@ class PanelBankMatcher(_MoneyMatcher):
 class BracketBankMatcher:
     """FR kategori Sesama CM ↔ mutasi bank/gateway pindah dana internal.
 
-    Bukan DP/WD member. Join: nominal+arah+tanggal + (no.rek FR di mutasi
-    ATAU nama CM FR di counterparty/deskripsi). Mode summary: sesama_cm.
+    Join: nominal+arah+tanggal + identitas (norek / nama di counterparty /
+    owner rekening FR + lawan CM). Mode summary: sesama_cm.
     """
 
     join_mode = "sesama_cm"
@@ -921,10 +921,22 @@ class BracketBankMatcher:
         return list(left.order_by("id")), list(right.order_by("id"))
 
     def match(self, run, left, right):
+        from web.sesama_cm import identitas_cm_toko
+
         tol = run.tolerance
         self.join_mode = "sesama_cm"
         self.right_relevant = len(right)
         out, used, matched = [], set(), set()
+
+        cm_names, cm_reks = (), ()
+        if left:
+            tid = left[0].toko_id
+            if tid:
+                cm_names, cm_reks = identitas_cm_toko(tid)
+        elif right:
+            tid = right[0].toko_id
+            if tid:
+                cm_names, cm_reks = identitas_cm_toko(tid)
 
         bidx = defaultdict(list)
         for b in right:
@@ -937,7 +949,7 @@ class BracketBankMatcher:
             if fd is None:
                 continue
             for b in bidx.get(key, []):
-                score, reason = _sesama_cm_identity(fr, b)
+                score, reason = _sesama_cm_identity(fr, b, cm_names, cm_reks)
                 if score < 60:
                     continue
                 bd = _tanggal_baris(b)
@@ -945,7 +957,6 @@ class BracketBankMatcher:
                     continue
                 delta = abs((bd - fd).days)
                 if delta <= tol.date_window_days:
-                    # skor tinggi dulu, lalu selisih hari kecil, id stabil
                     pairs.append((-score, delta, fr.id, b.id, fr, b, score, reason))
         pairs.sort()
         for _s, _d, _fid, _bid, fr, b, score, reason in pairs:
@@ -977,26 +988,87 @@ class BracketBankMatcher:
         return out
 
 
-def _sesama_cm_identity(fr, bank):
-    """Skor identitas FR Sesama CM vs baris mutasi: norek > nama CM."""
+def _compact_alnum(s):
+    return re.sub(r"[^A-Za-z0-9]", "", (s or "")).upper()
+
+
+def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
+    """Skor identitas FR Sesama CM vs baris mutasi.
+
+    Urutan kuat → lemah:
+    1. norek FR di blob mutasi (penuh / prefiks mask)
+    2. nama CM FR di **counterparty** mutasi (bukan noise deskripsi sendiri)
+    3. owner file = pemegang rekening FR **dan** lawan = CM lain / norek CM lain
+    4. nama FR di deskripsi hanya jika owner file **bukan** rekening FR itu
+      (statement rekening lain yang menyebut CM ini)
+    """
+    try:
+        from web.sesama_cm import _bersih_nama
+    except Exception:
+        def _bersih_nama(x):  # noqa: E306
+            return " ".join(str(x or "").split())
+
     raw = fr.raw or {}
-    rek = re.sub(r"\D", "", str(raw.get("No. Rek Bank Member") or ""))
-    bank_fr = str(raw.get("Bank") or "")
-    parts = [p.strip() for p in bank_fr.split("|")]
-    nama = parts[1] if len(parts) >= 2 else bank_fr
-    nama_c = re.sub(r"[^A-Za-z0-9]", "", nama).upper()
-    blob = f"{bank.counterparty or ''} {bank.description or ''}"
-    blob_d = re.sub(r"\D", "", blob)
-    blob_c = re.sub(r"[^A-Za-z0-9]", "", blob).upper()
-    if rek and len(rek) >= 8 and rek in blob_d:
+    frek = re.sub(r"\D", "", str(raw.get("No. Rek Bank Member") or ""))
+    parts = [p.strip() for p in str(raw.get("Bank") or "").split("|")]
+    fname_raw = parts[1] if len(parts) >= 2 else str(raw.get("Bank") or "")
+    fname = _bersih_nama(fname_raw) or fname_raw
+    fname_c = _compact_alnum(fname)
+
+    cp = bank.counterparty or ""
+    desc = bank.description or ""
+    cp_c = _compact_alnum(cp)
+    desc_c = _compact_alnum(desc)
+    blob_d = re.sub(r"\D", "", f"{cp} {desc}")
+
+    owner_raw = ""
+    up = getattr(bank, "upload", None)
+    if up is not None:
+        owner_raw = up.owner_name or ""
+    owner_c = _compact_alnum(_bersih_nama(owner_raw) or owner_raw)
+
+    cm_compacts = [
+        _compact_alnum(n) for n in (cm_names or ())
+        if _compact_alnum(n) and len(_compact_alnum(n)) >= 6
+    ]
+    cm_rek_list = [r for r in (cm_reks or ()) if r and len(r) >= 8]
+
+    # 1) norek FR di mutasi
+    if frek and len(frek) >= 8 and frek in blob_d:
         return 100.0, "amount+rek"
-    # norek ter-mask vendor (ELITE tampung: 1191010221*****) — prefiks ≥10 digit
-    if rek and blob_d and len(rek) >= 10 and len(blob_d) >= 10:
-        if rek.startswith(blob_d) or blob_d.startswith(rek[:10]):
+    if frek and blob_d and len(frek) >= 10 and len(blob_d) >= 10:
+        if frek.startswith(blob_d) or blob_d.startswith(frek[:10]):
             return 100.0, "amount+rek"
-    if len(nama_c) >= 6 and nama_c in blob_c:
+
+    # 2) nama FR di counterparty (lawan/pengirim di statement lain)
+    if fname_c and len(fname_c) >= 6 and fname_c in cp_c:
         return 95.0, "amount+name_cm"
-    # tanpa identitas kuat: jangan pasang (amount+date saja dilarang anchor rule)
+
+    # 3) baris di rekening FR (owner file = CM FR) + lawan CM / norek CM lain
+    owner_is_fr = bool(
+        fname_c and owner_c and len(fname_c) >= 6
+        and (fname_c in owner_c or owner_c in fname_c)
+    )
+    if owner_is_fr:
+        for cc in cm_compacts:
+            if cc == fname_c:
+                continue
+            if cc in cp_c or cc in desc_c:
+                return 93.0, "owner_fr+counterparty_cm"
+        for rk in cm_rek_list:
+            if frek and (rk == frek or rk.startswith(frek[:10]) or frek.startswith(rk[:10])):
+                continue
+            if len(rk) >= 8 and rk in blob_d:
+                return 94.0, "owner_fr+rek_cm"
+            if len(rk) >= 10 and len(blob_d) >= 10 and (
+                rk.startswith(blob_d) or blob_d.startswith(rk[:10])
+            ):
+                return 94.0, "owner_fr+rek_cm"
+
+    # 4) nama FR di deskripsi pada statement rekening LAIN (bukan noise self)
+    if fname_c and len(fname_c) >= 6 and fname_c in desc_c and not owner_is_fr:
+        return 90.0, "amount+name_cm"
+
     return 0.0, ""
 
 
