@@ -1558,7 +1558,7 @@ def batch_uang(request, pk):
 def run_detail(request, pk):
     run = get_object_or_404(MatchRun, pk=pk, batch__toko__in=tokos_for(request.user))
     base = MatchResult.objects.filter(run=run).select_related(
-        "left", "right", "right__source_type", "right__upload", "right__account"
+        "left", "left__source_type", "right", "right__source_type", "right__upload", "right__account"
     )
 
     # Kartu status: 'Tidak Cocok' (masih ada baris kredit / no_money) dipisah dari

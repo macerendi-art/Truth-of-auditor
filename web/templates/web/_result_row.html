@@ -4,6 +4,23 @@
   <td><input type="checkbox" name="result_ids" value="{{ r.pk }}" form="bulk-form" aria-label="Pilih hasil {{ r.pk }}"></td>
   <td>{% if r.bucket == 'cocok' %}<span class="badge ok">{% elif r.bucket == 'perlu_tinjau' %}<span class="badge warn">{% else %}<span class="badge bad">{% endif %}{{ r.get_bucket_display }}</span></td>
   {% if not hide_left %}
+  {# --- Sisi kiri: panel (default) ATAU FR Sesama CM --- #}
+  {% if r.left and r.left.source_type.key == "bracket" %}
+  <td>{% if r.left %}
+    <div class="mono" style="font-size:12px">{{ r.left.occurred_at|date:"d/m H:i"|default:"—" }}</div>
+    <div class="faint" style="font-size:11px">FR · {{ r.left.get_jenis_display }}</div>
+  {% else %}<span class="faint">—</span>{% endif %}</td>
+  <td class="cell-tr" style="font-size:12.5px" colspan="2">
+    {% with bank=r.left.raw|raw_get:"Bank" rek=r.left.raw|raw_get:"No. Rek Bank Member" %}
+    {% if bank %}<div title="{{ bank }}" style="font-weight:600;color:var(--ink)">{{ bank }}</div>{% else %}<span class="faint">—</span>{% endif %}
+    {% if rek %}<div class="faint mono" style="font-size:11.5px" title="No. rekening FR">{{ rek }}</div>{% endif %}
+    {% endwith %}
+  </td>
+  <td class="faint col-hide cell-tr" style="font-size:12px" colspan="3">
+    {% if r.left.description %}<span title="{{ r.left.description }}">{{ r.left.description|truncatechars:80 }}</span>{% else %}—{% endif %}
+  </td>
+  <td class="num mono">{% if r.left %}<span {% if r.left.money_delta < 0 %}style="color:var(--bad)"{% elif r.left.money_delta > 0 %}style="color:var(--ok)"{% endif %}>{{ r.left.amount|floatformat:0|intcomma }}</span>{% endif %}</td>
+  {% else %}
   <td>{% if r.left %}<div class="mono">{{ r.left.ticket_no|default:"—" }}</div>
     {% if r.left.occurred_at %}<div class="faint" style="font-size:12px">{{ r.left.occurred_at|date:"d/m H:i" }}</div>{% endif %}
   {% else %}<span class="faint">—</span>{% endif %}</td>
@@ -16,10 +33,40 @@
   {% endwith %}
   <td class="num mono">{% if r.left %}{{ r.left.amount|floatformat:0|intcomma }}{% endif %}</td>
   {% endif %}
-  <td>{% if r.right %}<div style="font-weight:600;color:var(--ink)">{{ r.right.source_label_full }}</div>
-    {% with norek=r.right.raw|raw_get:"NOREK" %}<div class="faint cell-tr" style="font-size:12px">{% if r.right.counterparty %}{{ r.right.counterparty }}{% if norek %} · <span title="No. rekening">{{ norek }}</span>{% endif %}{% elif norek %}<span title="No. rekening">{{ norek }}</span>{% elif r.right.ticket_no %}<span class="mono">{{ r.right.ticket_no }}</span>{% endif %}{% if r.right.occurred_at %}{% if r.right.counterparty or norek or r.right.ticket_no %} · {% endif %}{{ r.right.occurred_at|date:"d/m H:i" }}{% endif %}</div>{% endwith %}
-    {% if r.right.description %}<div class="faint cell-tr" style="font-size:11.5px" title="{{ r.right.description }}">{{ r.right.description|truncatechars:110 }}</div>{% endif %}{% else %}<span class="faint">—</span>{% endif %}</td>
-  <td class="num mono">{% if r.right %}{{ r.right.amount|floatformat:0|intcomma }}{% endif %}</td>
+  {% endif %}
+  {# --- Sisi kanan: mutasi bank/gateway (detail seperti halaman Mutasi Bank) --- #}
+  <td>{% if r.right %}
+    <div style="font-weight:600;color:var(--ink)">{{ r.right.source_label_full }}</div>
+    {% with owner=r.right.upload.owner_name %}
+    {% if owner %}
+    <div class="faint" style="font-size:12px" title="Nama rekening (owner file mutasi)">
+      <span style="opacity:.75">Rekening a/n</span> <b style="color:var(--ink);font-weight:600">{{ owner }}</b>
+    </div>
+    {% endif %}
+    {% endwith %}
+    <div class="cell-tr" style="font-size:12.5px;margin-top:2px">
+      {% if r.right.counterparty %}
+        <span title="Nama di mutasi: {{ r.right.counterparty }}">{{ r.right.counterparty }}</span>
+      {% elif r.right.player_name %}
+        <span title="Nama dari deskripsi mutasi">{{ r.right.player_name }}</span>
+      {% else %}
+        <span class="faint">—</span>
+      {% endif %}
+      {% with norek=r.right.raw|raw_get:"NOREK" %}
+      {% if norek %} · <span class="mono faint" title="No. rekening di mutasi">{{ norek }}</span>{% endif %}
+      {% endwith %}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:3px">
+      {% if r.right.jenis == 'depo' %}<span class="badge ok" style="font-size:10.5px;padding:1px 7px">Deposit</span>
+      {% elif r.right.jenis == 'wd' %}<span class="badge bad" style="font-size:10.5px;padding:1px 7px">Withdraw</span>
+      {% elif r.right.jenis == 'admin' %}<span class="badge" style="font-size:10.5px;padding:1px 7px">Biaya Admin</span>
+      {% endif %}
+      {% if r.right.occurred_at %}<span class="faint mono" style="font-size:11.5px">{{ r.right.occurred_at|date:"d/m H:i" }}</span>{% endif %}
+      {% if r.right.balance_after is not None %}<span class="faint mono" style="font-size:11px" title="Saldo setelah">saldo {{ r.right.balance_after|floatformat:0|intcomma }}</span>{% endif %}
+    </div>
+    {% if r.right.description %}<div class="faint cell-tr" style="font-size:11.5px;margin-top:2px" title="{{ r.right.description }}">{{ r.right.description|truncatechars:110 }}</div>{% endif %}
+  {% else %}<span class="faint">—</span>{% endif %}</td>
+  <td class="num mono">{% if r.right %}<span {% if r.right.money_delta < 0 %}style="color:var(--bad)"{% elif r.right.money_delta > 0 %}style="color:var(--ok)"{% endif %}>{{ r.right.amount|floatformat:0|intcomma }}</span>{% endif %}</td>
   <td>
     <span style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">
       <span class="badge {{ r.reason_code|reason_tone }}" style="font-size:11.5px;padding:2px 9px">{{ r.reason_code|reason_label }}</span>

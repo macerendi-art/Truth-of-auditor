@@ -98,22 +98,54 @@ class SplitPanelColumnsTests(_Base):
         self.assertIn("BCA|HENDI|7126201591", cells[6])
         self.assertIn("Mozart K25", cells[7])
 
-    def test_sisi_kiri_bracket_tanpa_field_panel_render_strip(self):
-        """Relasi dgn kiri=Bracket (tanpa username/raw panel) → sel berisi — tanpa error."""
+    def test_sisi_kiri_bracket_tampil_bank_fr(self):
+        """Relasi bracket_bank: sisi kiri tampil Bank FR + norek, bukan kolom panel kosong."""
         bracket = SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})[0]
         run = MatchRun.objects.create(
             relation=MatchRun.Relation.BRACKET_BANK, tolerance=self.tol, batch=self.batch
         )
-        left = self._tx(bracket, "rc3", ticket_no="BR-1", username="", counterparty="")
+        left = self._tx(
+            bracket, "rc3", ticket_no="", username="", counterparty="",
+            raw={
+                "Bank": "BANK BCA | YULIYANTI PRATIWI | TAMPUNG",
+                "No. Rek Bank Member": "BCA 8447072062",
+                "Kategori": "Sesama CM",
+            },
+            description="MUL NAIK TAMPUNG WEBSITE",
+        )
         r = MatchResult.objects.create(
             run=run, bucket=MatchResult.Bucket.TIDAK, left=left, right=None,
         )
         resp = self.client.get(reverse("run_detail", args=[run.pk]))
         self.assertEqual(resp.status_code, 200)
-        cells = _row_cells(resp.content.decode(), r.pk)
-        self.assertEqual(len(cells), 13)  # +1 checkbox bulk-review
-        for i in (3, 4, 5, 6, 7):  # User ID, Full Name, Player Bank, Bank Title, Handler
-            self.assertEqual(cells[i], "—")
+        html = resp.content.decode()
+        self.assertIn("YULIYANTI PRATIWI", html)
+        self.assertIn("8447072062", html)
+        self.assertIn("MUL NAIK TAMPUNG", html)
+
+    def test_mutasi_bank_tampil_nama_rekening_owner(self):
+        """Sisi mutasi bank menampilkan Rekening a/n + nama di mutasi + jenis."""
+        up_bank = Upload.objects.create(
+            source_type=self.bank, toko=self.lbs, original_name="bca_yuli.csv",
+            owner_name="YULIYANTI PRATIWI", provider="BCA",
+        )
+        left = self._tx(
+            self.panel, "rc_l", ticket_no="D1", username="x", counterparty="X",
+        )
+        right = self._tx(
+            self.bank, "rc_r", upload=up_bank, counterparty="MOH ZUNAEDY AWAN",
+            description="TRSF E-BANKING CR MOH ZUNAEDY AWAN", jenis="depo",
+            money_delta=Decimal("1050000"), amount=Decimal("1050000"),
+        )
+        r = MatchResult.objects.create(
+            run=self.run, bucket=MatchResult.Bucket.COCOK, left=left, right=right,
+        )
+        resp = self.client.get(reverse("run_detail", args=[self.run.pk]))
+        html = resp.content.decode()
+        self.assertIn("Rekening a/n", html)
+        self.assertIn("YULIYANTI PRATIWI", html)
+        self.assertIn("MOH ZUNAEDY AWAN", html)
+        self.assertIn("Deposit", html)
 
     def test_empty_state_colspan_12(self):
         resp = self.client.get(reverse("run_detail", args=[self.run.pk]))
