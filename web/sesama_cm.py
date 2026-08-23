@@ -176,9 +176,30 @@ def identitas_cm_toko(toko_id: int) -> tuple[tuple[str, ...], tuple[str, ...]]:
     ):
         _tambah_nama(names, seen_n, raw)
 
+    # Buang token tunggal pendek yang sudah jadi bagian nama multi-kata
+    # (cegah "MUHAMMAD"/"SEBASTIAN" menelan WD member).
+    names = _saring_nama_ambigu(names)
+
     names.sort(key=lambda s: (-len(s), s.lower()))
     reks.sort(key=lambda s: (-len(s), s))
     return tuple(names), tuple(reks)
+
+
+def _saring_nama_ambigu(names: list[str]) -> list[str]:
+    """Drop nama 1 kata yang merupakan token di nama CM multi-kata lain."""
+    multi_tokens: set[str] = set()
+    for n in names:
+        parts = n.split()
+        if len(parts) >= 2:
+            for p in parts:
+                multi_tokens.add(p.upper())
+    out = []
+    for n in names:
+        parts = n.split()
+        if len(parts) == 1 and parts[0].upper() in multi_tokens:
+            continue
+        out.append(n)
+    return out
 
 
 def nama_cm_toko(toko_id: int) -> list[str]:
