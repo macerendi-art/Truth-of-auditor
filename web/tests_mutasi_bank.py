@@ -135,10 +135,86 @@ class MutasiBankFilterTests(MutasiBankBase):
         self.assertContains(r, "WD-BANK")
         self.assertNotContains(r, "DP-BANK")
 
+    def test_filter_flow_cm_tombol_ada(self):
+        r = self.client.get(reverse("bank_mutations"))
+        self.assertContains(r, "Sesama CM")
+        self.assertContains(r, "flow=cm")
+
     def test_filter_tanggal(self):
         r = self.client.get(reverse("bank_mutations"), {"from": "2026-06-28"})
         self.assertContains(r, "WD-BANK")
         self.assertNotContains(r, "DP-BANK")
+
+
+class MutasiBankSesamaCmTests(MutasiBankBase):
+    """Filter flow=cm: pindah dana antar rekening CM (nama CM lain di mutasi).
+
+    Kasus Mul: file owner NASRUL menerima dari KIKI SUASANTO → Sesama CM;
+    WD NASRUL ke member eksternal → bukan Sesama CM (nama di deskripsi = owner sendiri).
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.up_nasrul = self._up(self.bank, "bri_nasrul.csv", owner="NASRUL")
+        self.up_kiki = self._up(self.bank, "bri_kiki.csv", owner="KIKI SUASANTO")
+        # Daftarkan kedua owner lewat upload bank (sumber nama CM).
+        # Baris pindah dana: masuk ke rekening Nasrul dari Kiki.
+        self.cm_depo = self._tx(
+            self.up_nasrul, self.bank, jenis="depo", counterparty="Kikisuasanto",
+            description="NBMB Kikisuasanto TO NASRUL ESB:NBMB:0001500F:1",
+            amount="5000000", dt=datetime(2026, 8, 21, 10, 0),
+        )
+        # WD member biasa dari rekening Nasrul — deskripsi memuat "Nasrul" (owner sendiri).
+        self.wd_member = self._tx(
+            self.up_nasrul, self.bank, jenis="wd", counterparty="ANWAR",
+            description="NBMB Nasrul TO ANWAR ESB:NBMB:0001500F:2",
+            amount="-350000", dt=datetime(2026, 8, 21, 11, 0),
+        )
+        # WD Sesama CM: dari Nasrul ke Yuliyanti (owner rekening lain toko).
+        self._up(self.bank, "bca_yuli.csv", owner="YULIYANTI PRATIWI")
+        self.cm_wd = self._tx(
+            self.up_nasrul, self.bank, jenis="wd", counterparty="YULIYANTI PRATIWI",
+            description="Transfer BI Fast Ke BCA YULIYANTI PRATIWI 8447072062",
+            amount="-970000", dt=datetime(2026, 8, 21, 12, 0),
+        )
+        # Depo member biasa — counterparty bukan nama CM.
+        self.dp_member = self._tx(
+            self.up_nasrul, self.bank, jenis="depo", counterparty="BUDI SANTOSO",
+            description="TRSF E-BANKING CR BUDI SANTOSO",
+            amount="100000", dt=datetime(2026, 8, 21, 13, 0),
+        )
+
+    def test_filter_cm_hanya_pindah_antar_cm(self):
+        r = self.client.get(reverse("bank_mutations"), {"flow": "cm"})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Kikisuasanto")
+        self.assertContains(r, "YULIYANTI PRATIWI")
+        self.assertNotContains(r, "ANWAR")
+        self.assertNotContains(r, "BUDI SANTOSO")
+        # Badge Sesama CM di kolom jenis
+        self.assertContains(r, "Sesama CM")
+
+    def test_badge_cm_di_daftar_semua(self):
+        r = self.client.get(reverse("bank_mutations"))
+        html = r.content.decode()
+        # Baris CM bertanda badge; WD member tetap Withdraw
+        self.assertIn("Sesama CM", html)
+        self.assertIn("ANWAR", html)
+        # pastikan baris ANWAR tidak diganti badge CM: cari konteks kasar
+        from web.sesama_cm import tandai_sesama_cm
+        rows = list(r.context["page"].object_list)
+        by_cp = { (t.counterparty or ""): t for t in rows }
+        self.assertTrue(getattr(by_cp["Kikisuasanto"], "is_sesama_cm", False))
+        self.assertTrue(getattr(by_cp["YULIYANTI PRATIWI"], "is_sesama_cm", False))
+        self.assertFalse(getattr(by_cp["ANWAR"], "is_sesama_cm", False))
+        self.assertFalse(getattr(by_cp["BUDI SANTOSO"], "is_sesama_cm", False))
+
+    def test_helper_bersih_nama_buang_sufiks(self):
+        from web.sesama_cm import _bersih_nama
+        self.assertEqual(_bersih_nama("KIKI SUASANTO TAMPUNG LAYER ARUBBXY"), "KIKI SUASANTO")
+        self.assertEqual(_bersih_nama("NASRUL YGLWHAK"), "NASRUL")
+        self.assertEqual(_bersih_nama("NXPAY"), "")  # noise / pendek
+        self.assertEqual(_bersih_nama("YOGA"), "")   # < 6 compact
 
 
 class MutasiBankPhoneLookupTests(MutasiBankBase):

@@ -1949,9 +1949,13 @@ def bank_mutations(request):
         qs = qs.filter(source_type__key=src)
 
     flow = request.GET.get("flow", "")
-    if flow not in ("depo", "wd"):
+    if flow not in ("depo", "wd", "cm"):
         flow = ""
-    if flow:
+    if flow == "cm":
+        # Pindah dana antar rekening CM toko (bukan DP/WD member).
+        from web.sesama_cm import q_sesama_cm
+        qs = qs.filter(q_sesama_cm(active.id))
+    elif flow:
         qs = qs.filter(jenis=flow)
 
     date_from = _parse_date(request.GET.get("from", ""))
@@ -2020,6 +2024,8 @@ def bank_mutations(request):
 
     page = Paginator(qs, 40).get_page(request.GET.get("page"))
     _resolve_wallet_names(page.object_list, active)
+    from web.sesama_cm import tandai_sesama_cm
+    tandai_sesama_cm(page.object_list, active.id)
     return render(request, "web/mutasi_bank.html", {
         "page": page, "active_toko": active,
         "src": src, "flow": flow,
