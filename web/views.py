@@ -87,7 +87,7 @@ TX_EXPORT_LIMIT = 100_000
 REL_LABELS = {
     MatchRun.Relation.PANEL_BRACKET.value: ("Panel", "Bracket"),
     MatchRun.Relation.PANEL_BANK.value: ("Panel", "Mutasi Bank"),
-    MatchRun.Relation.BRACKET_BANK.value: ("Bracket", "Mutasi Bank"),
+    MatchRun.Relation.BRACKET_BANK.value: ("Sesama CM (FR)", "Mutasi Bank"),
     MatchRun.Relation.SALDO.value: ("Kiri", "Kanan"),
 }
 

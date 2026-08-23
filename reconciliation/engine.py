@@ -872,9 +872,128 @@ class _MoneyMatcher:
 class PanelBankMatcher(_MoneyMatcher):
     left_key = "panel"
 
+    def sides(self, dfrom, dto, toko=None, include=None):
+        """Sisi uang tanpa pindah dana Sesama CM — itu jalur Bracket↔Bank."""
+        left, right = super().sides(dfrom, dto, toko, include)
+        if toko is None:
+            return left, right
+        tid = getattr(toko, "id", toko)
+        try:
+            from web.sesama_cm import tandai_sesama_cm
+        except Exception:
+            return left, right
+        tandai_sesama_cm(right, tid)
+        right = [b for b in right if not getattr(b, "is_sesama_cm", False)]
+        return left, right
 
-class BracketBankMatcher(_MoneyMatcher):
-    left_key = "bracket"
+
+class BracketBankMatcher:
+    """FR kategori Sesama CM ↔ mutasi bank/gateway pindah dana internal.
+
+    Bukan DP/WD member. Join: nominal+arah+tanggal + (no.rek FR di mutasi
+    ATAU nama CM FR di counterparty/deskripsi). Mode summary: sesama_cm.
+    """
+
+    join_mode = "sesama_cm"
+
+    def sides(self, dfrom, dto, toko=None, include=None):
+        from django.db.models.fields.json import KeyTextTransform
+        from web.sesama_cm import q_sesama_cm
+
+        left = Transaction.objects.filter(
+            source_type__key="bracket", is_duplicate=False,
+        ).annotate(
+            _kat=KeyTextTransform("Kategori", "raw"),
+        ).filter(_kat__icontains="sesama")
+        if include is not None and not include.get("bracket", True):
+            left = left.none()
+        left = _date_filter(_active(_toko_filter(left, toko)), dfrom, dto)
+
+        money_keys = _included_money_sources(include)
+        right = Transaction.objects.filter(
+            source_type__key__in=money_keys, is_duplicate=False,
+        ).exclude(jenis="admin")
+        right = _date_filter(_active(_toko_filter(right, toko)), dfrom, dto)
+        if toko is not None:
+            tid = getattr(toko, "id", toko)
+            right = right.filter(q_sesama_cm(tid))
+        right = right.select_related("source_type", "upload")
+        return list(left.order_by("id")), list(right.order_by("id"))
+
+    def match(self, run, left, right):
+        tol = run.tolerance
+        self.join_mode = "sesama_cm"
+        self.right_relevant = len(right)
+        out, used, matched = [], set(), set()
+
+        bidx = defaultdict(list)
+        for b in right:
+            bidx[(int(abs(b.money_delta)), b.money_delta > 0)].append(b)
+
+        pairs = []
+        for fr in left:
+            key = (int(abs(fr.money_delta)), fr.money_delta > 0)
+            fd = _tanggal_baris(fr)
+            if fd is None:
+                continue
+            for b in bidx.get(key, []):
+                score, reason = _sesama_cm_identity(fr, b)
+                if score < 60:
+                    continue
+                bd = _tanggal_baris(b)
+                if bd is None:
+                    continue
+                delta = abs((bd - fd).days)
+                if delta <= tol.date_window_days:
+                    # skor tinggi dulu, lalu selisih hari kecil, id stabil
+                    pairs.append((-score, delta, fr.id, b.id, fr, b, score, reason))
+        pairs.sort()
+        for _s, _d, _fid, _bid, fr, b, score, reason in pairs:
+            if fr.id in matched or b.id in used:
+                continue
+            matched.add(fr.id)
+            used.add(b.id)
+            out.append(MatchResult(
+                run=run, bucket=MatchResult.Bucket.COCOK, left=fr, right=b,
+                score=score, reason_code=reason,
+                reason_detail="Sesama CM FR ↔ mutasi (nominal+arah+identitas)",
+            ))
+        for fr in left:
+            if fr.id in matched:
+                continue
+            out.append(MatchResult(
+                run=run, bucket=MatchResult.Bucket.TIDAK, left=fr, right=None,
+                score=0, reason_code="no_money",
+                reason_detail="Sesama CM FR belum ada pasangan di mutasi bank",
+            ))
+        for b in right:
+            if b.id in used:
+                continue
+            out.append(MatchResult(
+                run=run, bucket=MatchResult.Bucket.TIDAK, left=None, right=b,
+                score=0, reason_code="no_fr",
+                reason_detail="Mutasi Sesama CM tanpa pasangan di FR",
+            ))
+        return out
+
+
+def _sesama_cm_identity(fr, bank):
+    """Skor identitas FR Sesama CM vs baris mutasi: norek > nama CM."""
+    raw = fr.raw or {}
+    rek = re.sub(r"\D", "", str(raw.get("No. Rek Bank Member") or ""))
+    bank_fr = str(raw.get("Bank") or "")
+    parts = [p.strip() for p in bank_fr.split("|")]
+    nama = parts[1] if len(parts) >= 2 else bank_fr
+    nama_c = re.sub(r"[^A-Za-z0-9]", "", nama).upper()
+    blob = f"{bank.counterparty or ''} {bank.description or ''}"
+    blob_d = re.sub(r"\D", "", blob)
+    blob_c = re.sub(r"[^A-Za-z0-9]", "", blob).upper()
+    if rek and len(rek) >= 8 and rek in blob_d:
+        return 100.0, "amount+rek"
+    if len(nama_c) >= 6 and nama_c in blob_c:
+        return 95.0, "amount+name_cm"
+    # tanpa identitas kuat: jangan pasang (amount+date saja dilarang anchor rule)
+    return 0.0, ""
 
 
 MATCHERS = {
@@ -1459,6 +1578,22 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
         relations.append(MatchRun.Relation.PANEL_BANK)
     else:
         skipped.append(MatchRun.Relation.PANEL_BANK.value)
+    # BRACKET_BANK = FR Sesama CM ↔ mutasi pindah dana (bukan DP/WD member).
+    # Jalan bila bracket + uang ada & dicentang. Matcher khusus kategori Sesama CM.
+    if (comp.get("bracket") and _inc(include, "bracket")
+            and money_present):
+        relations.append(MatchRun.Relation.BRACKET_BANK)
+    else:
+        skipped.append(MatchRun.Relation.BRACKET_BANK.value)
+        if not _inc(include, "bracket"):
+            alasan_bb = "sumber Bracket tidak diikutkan dalam run ini"
+        elif not comp.get("bracket"):
+            alasan_bb = "tidak ada baris Bracket (FR) dalam rentang tanggal"
+        elif not money_present:
+            alasan_bb = "tidak ada mutasi bank/gateway dalam rentang"
+        else:
+            alasan_bb = "Sesama CM ↔ Mutasi Bank tidak dijalankan"
+        skipped_detail[MatchRun.Relation.BRACKET_BANK.value] = alasan_bb
 
     retro = (
         _retro_homes(toko, recon_date, date_from, date_to, include, exclude_ids=set(carried))
@@ -1579,6 +1714,17 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
                 .exclude(jenis="admin").exclude(id__in=used_rights)
                 .select_related("source_type")
             )
+            # Pindah dana Sesama CM sudah ditangani relasi bracket_bank —
+            # jangan muncul lagi sebagai no_panel di panel_bank.
+            bb_ran = any(
+                r_.relation == MatchRun.Relation.BRACKET_BANK for r_ in runs
+            )
+            if bb_ran and batch.toko_id:
+                try:
+                    from web.sesama_cm import q_sesama_cm
+                    um_qs = um_qs.exclude(q_sesama_cm(batch.toko_id))
+                except Exception:
+                    pass
             for t in um_qs:
                 k = classify_unmatched_money(t, recon_date, window, panel_ticket_set, ops)
                 st = stats[k]

@@ -173,7 +173,7 @@
     {% for run in runs %}
       <tr>
         {# Panel tanpa ticket (COR/Vigor/TMG) dipasangkan lewat username — jelaskan. #}
-        <td style="font-weight:600">{{ run.get_relation_display }}{% if run.summary.mode == "username" %} <span class="faint" style="font-weight:400;font-size:.82rem">join username+nominal — panel tanpa ticket</span>{% endif %}</td>
+        <td style="font-weight:600">{{ run.get_relation_display }}{% if run.summary.mode == "username" %} <span class="faint" style="font-weight:400;font-size:.82rem">join username+nominal — panel tanpa ticket</span>{% elif run.summary.mode == "sesama_cm" %} <span class="faint" style="font-weight:400;font-size:.82rem">pindah dana internal FR ↔ mutasi</span>{% endif %}</td>
         <td><span class="badge ok">{{ run.summary.cocok|default:0|intcomma }}</span></td>
         <td><span class="badge warn">{{ run.summary.perlu_tinjau|default:0|intcomma }}</span></td>
         <td><span class="badge bad">{{ run.summary.tidak_cocok|default:0|intcomma }}</span></td>

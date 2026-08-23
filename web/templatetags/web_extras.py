@@ -21,6 +21,8 @@ REASON_LABELS = {
     "username_amount":  ("Username & nominal sama",  "ok"),
     "kode_unik":        ("Kode unik",                "ok"),
     "amount+date+name": ("Nominal · tanggal · nama", "ok"),
+    "amount+rek":       ("Nominal · no. rek CM",     "ok"),
+    "amount+name_cm":   ("Nominal · nama CM",        "ok"),
     # perlu tinjau
     "amount_fee":       ("Selisih biaya transfer",   "warn"),
     "amount_mismatch":  ("Selisih nominal",          "warn"),
@@ -35,6 +37,7 @@ REASON_LABELS = {
     "no_bracket":       ("Tak ada di bracket",       "bad"),
     "no_panel":         ("Tak ada di panel",         "bad"),
     "no_money":         ("Belum ada uang masuk",     "bad"),
+    "no_fr":            ("Tak ada di FR Sesama CM",  "bad"),
 }
 
 

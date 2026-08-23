@@ -25,7 +25,7 @@ class MatchRun(TimeStampedModel):
     class Relation(models.TextChoices):
         PANEL_BRACKET = "panel_bracket", "Panel ↔ Bracket"
         PANEL_BANK = "panel_bank", "Panel ↔ Mutasi Bank"
-        BRACKET_BANK = "bracket_bank", "Bracket ↔ Mutasi Bank"
+        BRACKET_BANK = "bracket_bank", "Sesama CM ↔ Mutasi Bank"
         SALDO = "saldo", "Rekonsiliasi Saldo"
 
     relation = models.CharField(max_length=20, choices=Relation.choices)
