@@ -440,3 +440,101 @@ class SesamaCmReconTests(TestCase):
         self.assertEqual(r_out.right_id, flyer.id)
         self.assertEqual(r_in.bucket, "cocok")
         self.assertEqual(r_in.right_id, bri.id)
+
+    def test_cutoff_uang_h1_cocok_seperti_panel_bank(self):
+        """Cutoff mutasi: FR jam malam D, uang D+1 → cocok (date_ok terarah window 1)."""
+        fr_dt = datetime(2026, 8, 22, 23, 30)
+        money_dt = datetime(2026, 8, 23, 0, 15)
+        fr = self._fr_cm(
+            "BANK BRI | KIKI SUASANTO | TAMPUNG", "BRI 119101022152500",
+            "3000000", fr_dt,
+        )
+        money = self._tx(
+            self.bank, self.up_k, jenis="depo", amount="3000000", money="3000000",
+            dt=money_dt, counterparty="",
+            description="ESB:APFT:cutoff",
+            raw={"NOREK": "119101022152500", "GLSIGN": "Cr"},
+        )
+        clear_cm_cache()
+        run = run_match(
+            MatchRun.Relation.BRACKET_BANK, self.tol, toko=self.toko,
+            date_from=fr_dt.date(), date_to=money_dt.date(),
+        )
+        r = MatchResult.objects.get(run=run, left=fr)
+        self.assertEqual(r.bucket, "cocok")
+        self.assertEqual(r.right_id, money.id)
+
+    def test_uang_mendahului_fr_tidak_cocok(self):
+        """Uang D-1 vs FR D tidak dipasangkan — sama panel↔bank (bukan abs hari)."""
+        fr_dt = datetime(2026, 8, 22, 10, 0)
+        money_dt = datetime(2026, 8, 21, 22, 0)
+        fr = self._fr_cm(
+            "BANK BRI | KIKI SUASANTO | TAMPUNG", "BRI 119101022152500",
+            "4000000", fr_dt,
+        )
+        money = self._tx(
+            self.bank, self.up_k, jenis="depo", amount="4000000", money="4000000",
+            dt=money_dt, counterparty="",
+            description="ESB:APFT:before",
+            raw={"NOREK": "119101022152500"},
+        )
+        clear_cm_cache()
+        run = run_match(
+            MatchRun.Relation.BRACKET_BANK, self.tol, toko=self.toko,
+            date_from=money_dt.date(), date_to=fr_dt.date(),
+        )
+        r = MatchResult.objects.get(run=run, left=fr)
+        self.assertEqual(r.bucket, "tidak_cocok")
+        self.assertEqual(r.reason_code, "no_money")
+        self.assertFalse(
+            MatchResult.objects.filter(run=run, left=fr, right=money, bucket="cocok").exists()
+        )
+
+    def test_late_settlement_sesama_cm_flip_batch_asal(self):
+        """FR Sesama no_money D menunggu; uang D+1 → flip late_settlement di batch asal."""
+        d22 = datetime(2026, 8, 22, 23, 45)
+        d23 = datetime(2026, 8, 23, 1, 0)
+        # minimal panel+bank agar run_batch panel_bank juga jalan
+        self._tx(self.panel, self.up_p, jenis="depo", amount="100000", money="100000",
+                 dt=d22, ticket="D22x", username="p", counterparty="PLAYER X")
+        self._tx(self.bank, self.up_n, jenis="depo", amount="100000", money="100000",
+                 dt=d22, counterparty="PLAYER X", description="TRSF PLAYER X")
+        fr = self._fr_cm(
+            "BANK BRI | KIKI SUASANTO | TAMPUNG", "BRI 119101022152500",
+            "5500000", d22,
+        )
+        clear_cm_cache()
+        b22 = run_batch(
+            self.toko, self.tol, date_from=d22.date(), date_to=d22.date(),
+            recon_date=d22.date(),
+        )
+        r22 = MatchResult.objects.get(
+            run__batch=b22, run__relation="bracket_bank", left=fr,
+        )
+        self.assertEqual(r22.bucket, "tidak_cocok")
+        self.assertEqual(r22.reason_code, "no_money")
+        self.assertIsNone(fr.consumed_by_batch_id)  # menunggu settlement
+
+        # hari berikutnya: panel + money member + uang Sesama CM
+        self._tx(self.panel, self.up_p, jenis="depo", amount="110000", money="110000",
+                 dt=d23, ticket="D23x", username="q", counterparty="PLAYER Y")
+        self._tx(self.bank, self.up_n, jenis="depo", amount="110000", money="110000",
+                 dt=d23, counterparty="PLAYER Y", description="TRSF PLAYER Y")
+        money = self._tx(
+            self.bank, self.up_k, jenis="depo", amount="5500000", money="5500000",
+            dt=d23, counterparty="",
+            description="ESB:APFT:late",
+            raw={"NOREK": "119101022152500"},
+        )
+        clear_cm_cache()
+        b23 = run_batch(
+            self.toko, self.tol, date_from=d22.date(), date_to=d23.date(),
+            recon_date=d23.date(),
+        )
+        r22.refresh_from_db()
+        fr.refresh_from_db()
+        self.assertEqual(r22.bucket, "cocok")
+        self.assertEqual(r22.reason_code, "late_settlement")
+        self.assertEqual(r22.right_id, money.id)
+        self.assertEqual(r22.resolved_by_batch_id, b23.id)
+        self.assertEqual(fr.consumed_by_batch_id, b22.id)

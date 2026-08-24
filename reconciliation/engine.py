@@ -890,8 +890,10 @@ class PanelBankMatcher(_MoneyMatcher):
 class BracketBankMatcher:
     """FR kategori Sesama CM ↔ mutasi bank/gateway pindah dana internal.
 
-    Join: nominal+arah+tanggal + identitas (norek / nama di counterparty /
-    owner rekening FR + lawan CM). Mode summary: sesama_cm.
+    Join: nominal+arah + **date_ok terarah** (uang ≥ FR, window hari — sama
+    panel↔bank / cutoff mutasi T+1) + identitas (norek / nama / owner+lawan /
+    channel tampung). Mode summary: sesama_cm. Carry-over no_money ikut
+    late_settlement seperti panel.
     """
 
     join_mode = "sesama_cm"
@@ -945,19 +947,20 @@ class BracketBankMatcher:
         pairs = []
         for fr in left:
             key = (int(abs(fr.money_delta)), fr.money_delta > 0)
-            fd = _tanggal_baris(fr)
-            if fd is None:
+            # Sama panel↔bank: jangkar waktu lewat occurred_at + date_ok terarah
+            # (uang >= FR, maks date_window_days) — cutoff mutasi T+1 / jam malam.
+            if fr.occurred_at is None:
                 continue
             for b in bidx.get(key, []):
                 score, reason = _sesama_cm_identity(fr, b, cm_names, cm_reks)
                 if score < 60:
                     continue
-                bd = _tanggal_baris(b)
-                if bd is None:
+                if b.occurred_at is None:
                     continue
-                delta = abs((bd - fd).days)
-                if delta <= tol.date_window_days:
-                    pairs.append((-score, delta, fr.id, b.id, fr, b, score, reason))
+                if not date_ok(fr.occurred_at, b.occurred_at, tol):
+                    continue
+                delta = (b.occurred_at.date() - fr.occurred_at.date()).days
+                pairs.append((-score, delta, fr.id, b.id, fr, b, score, reason))
         pairs.sort()
         for _s, _d, _fid, _bid, fr, b, score, reason in pairs:
             if fr.id in matched or b.id in used:
@@ -967,7 +970,7 @@ class BracketBankMatcher:
             out.append(MatchResult(
                 run=run, bucket=MatchResult.Bucket.COCOK, left=fr, right=b,
                 score=score, reason_code=reason,
-                reason_detail="Sesama CM FR ↔ mutasi (nominal+arah+identitas)",
+                reason_detail="Sesama CM FR ↔ mutasi (nominal+arah+identitas+cutoff)",
             ))
         for fr in left:
             if fr.id in matched:
