@@ -212,12 +212,55 @@
       setSorot(n ? tampak()[0] : null);
     }
 
-    // Popover selalu turun ke bawah; tingginya dipangkas bila induk yang
-    // menggulir (kartu modal) atau tepi layar memotongnya.
+    // Popover: parser di sel tabel pakai position:fixed agar lolos overflow
+    // .twrap (overflow-x:auto → clipping). Kotak cari di luar .tp-list (flex)
+    // supaya tidak ikut gulir. Toko bilah atas tetap absolute di host.
     function tempatkan() {
       daftar.style.maxHeight = '';
+      if (modeValue) {
+        var r = trigger.getBoundingClientRect();
+        var lebar = Math.max(Math.ceil(r.width), 220);
+        var left = Math.min(r.left, window.innerWidth - lebar - 8);
+        if (left < 8) left = 8;
+        pop.classList.add('tp-pop-fixed');
+        pop.style.position = 'fixed';
+        pop.style.left = left + 'px';
+        pop.style.right = 'auto';
+        pop.style.width = lebar + 'px';
+        pop.style.minWidth = lebar + 'px';
+        pop.style.zIndex = '200';
+        var ruangBawah = window.innerHeight - r.bottom - 12;
+        var ruangAtas = r.top - 12;
+        var headH = cari ? 48 : 8; // perkiraan tinggi kotak cari + margin
+        var maxList = 260;
+        if (ruangBawah < 160 && ruangAtas > ruangBawah) {
+          // buka ke atas
+          pop.style.top = 'auto';
+          pop.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+          maxList = Math.min(260, Math.max(120, ruangAtas - headH));
+        } else {
+          pop.style.bottom = 'auto';
+          pop.style.top = (r.bottom + 6) + 'px';
+          maxList = Math.min(260, Math.max(120, ruangBawah - headH));
+        }
+        daftar.style.maxHeight = maxList + 'px';
+        return;
+      }
+      pop.classList.remove('tp-pop-fixed');
+      pop.style.position = '';
+      pop.style.left = '';
+      pop.style.right = '';
+      pop.style.top = '';
+      pop.style.bottom = '';
+      pop.style.width = '';
+      pop.style.minWidth = '';
+      pop.style.zIndex = '';
       var luber = pop.getBoundingClientRect().bottom + 8 - batasBawah(host);
       if (luber > 0) daftar.style.maxHeight = Math.max(140, daftar.clientHeight - luber) + 'px';
+    }
+
+    function onScrollOrResize() {
+      if (!pop.hidden && modeValue) tempatkan();
     }
 
     function buka() {
@@ -232,6 +275,10 @@
       tempatkan();
       if (terpilih && !terpilih.hidden) setSorot(terpilih);
       fokusAria.focus();
+      if (modeValue) {
+        window.addEventListener('scroll', onScrollOrResize, true);
+        window.addEventListener('resize', onScrollOrResize);
+      }
     }
 
     function tutup(kembalikanFokus) {
@@ -239,6 +286,20 @@
       pop.hidden = true;
       trigger.setAttribute('aria-expanded', 'false');
       if (terbuka === ctl) terbuka = null;
+      if (modeValue) {
+        window.removeEventListener('scroll', onScrollOrResize, true);
+        window.removeEventListener('resize', onScrollOrResize);
+        pop.classList.remove('tp-pop-fixed');
+        pop.style.position = '';
+        pop.style.left = '';
+        pop.style.right = '';
+        pop.style.top = '';
+        pop.style.bottom = '';
+        pop.style.width = '';
+        pop.style.minWidth = '';
+        pop.style.zIndex = '';
+        daftar.style.maxHeight = '';
+      }
       if (kembalikanFokus) trigger.focus();
     }
     ctl.tutup = tutup;
