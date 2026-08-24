@@ -1,4 +1,5 @@
-/* toko-picker.js — kotak cari untuk <select> panjang (Toko + jenis parser upload).
+/* toko-picker.js — kotak cari untuk <select> panjang
+ * (Toko + jenis parser upload + file mutasi bank).
  *
  * SELECT ASLI TETAP SUMBER KEBENARAN. Enhancement murni klien; select disembunyikan
  * (.tp-native) HANYA setelah kontrol berhasil dibangun.
@@ -6,7 +7,7 @@
  * Mode:
  * - `select[name=toko_id]` → tombol + popover (+ cari bila opsi banyak) → form.submit()
  * - `select.parser-pick` → SATU input combobox (ketik = saring, pilih = set value).
- *   Tidak ada kotak cari kedua — itu yang bikin UI “Cari jenis…” dobel & membingungkan.
+ * - `select.file-pick` → SATU input combobox file mutasi (ketik = saring, pilih = submit GET).
  *
  * Vanilla JS, tanpa dependensi.
  */
@@ -79,17 +80,19 @@
       || (qn && norm(v).indexOf(qn) !== -1);
   }
 
-  /* ─── Mode parser: satu input combobox ─── */
+  /* ─── Mode combobox satu field: parser-pick | file-pick ─── */
   function bangunParser(select) {
     if (select.dataset.tpDone) return;
     if (!select.parentNode) return;
 
+    var modeFile = select.classList.contains('file-pick');
+    var form = select.form;
     var grup = bacaOpsi(select), jumlah = 0, i, k;
     for (i = 0; i < grup.length; i++) jumlah += grup[i].opsi.length;
     if (!jumlah) return;
 
     var id = 'tp' + (++seq);
-    var host = buat('div', 'tp-host tp-field tp-combo');
+    var host = buat('div', 'tp-host tp-field tp-combo' + (modeFile ? ' tp-combo-file' : ''));
     var wrap = buat('div', 'tp-combo-wrap');
     var input = buat('input', 'tp-combo-input');
     input.type = 'text';
@@ -98,13 +101,16 @@
     input.setAttribute('role', 'combobox');
     input.setAttribute('aria-autocomplete', 'list');
     input.setAttribute('aria-expanded', 'false');
-    input.setAttribute('aria-label', 'Jenis file — ketik untuk mencari');
-    input.placeholder = 'Cari jenis…';
+    input.setAttribute(
+      'aria-label',
+      modeFile ? 'File mutasi — ketik untuk mencari' : 'Jenis file — ketik untuk mencari'
+    );
+    input.placeholder = modeFile ? 'Cari file…' : 'Cari jenis…';
     wrap.appendChild(input);
     var chevBtn = buat('button', 'tp-combo-chev');
     chevBtn.type = 'button';
     chevBtn.tabIndex = -1;
-    chevBtn.setAttribute('aria-label', 'Buka daftar jenis');
+    chevBtn.setAttribute('aria-label', modeFile ? 'Buka daftar file' : 'Buka daftar jenis');
     chevBtn.insertAdjacentHTML('beforeend', CHEV);
     wrap.appendChild(chevBtn);
     host.appendChild(wrap);
@@ -116,7 +122,11 @@
     daftar.setAttribute('role', 'listbox');
     input.setAttribute('aria-controls', daftar.id);
     pop.appendChild(daftar);
-    var kosong = buat('div', 'tp-kosong', 'Jenis tidak ditemukan.');
+    var kosong = buat(
+      'div',
+      'tp-kosong',
+      modeFile ? 'File tidak ditemukan.' : 'Jenis tidak ditemukan.'
+    );
     kosong.setAttribute('role', 'status');
     kosong.hidden = true;
     pop.appendChild(kosong);
@@ -127,13 +137,15 @@
     for (i = 0; i < grup.length; i++) {
       for (k = 0; k < grup[i].opsi.length; k++) {
         var o = grup[i].opsi[k];
+        // Placeholder disabled value="" (parser gagal deteksi) — label di input saja
         if (o.disabled && !o.nilai) {
           if (o.terpilih && !labelTerpilih) {
             labelTerpilih = o.teks || '';
-            input.placeholder = o.teks || 'Cari jenis…';
+            input.placeholder = o.teks || input.placeholder;
           }
           continue;
         }
+        // value="" aktif ("Semua file") tetap masuk daftar
         var node = buat('div', 'tp-opt', o.teks);
         node.id = id + '-o' + item.length;
         node.setAttribute('role', 'option');
@@ -148,8 +160,8 @@
         }
       }
     }
-    // Tampilkan nilai terpilih di input (bukan placeholder)
-    if (labelTerpilih && select.value) {
+    // Tampilkan nilai terpilih di input
+    if (labelTerpilih) {
       input.value = labelTerpilih;
     } else {
       input.value = '';
@@ -197,7 +209,7 @@
 
     function tempatkan() {
       var r = wrap.getBoundingClientRect();
-      var lebar = Math.max(Math.ceil(r.width), 200);
+      var lebar = Math.max(Math.ceil(r.width), modeFile ? 280 : 200);
       var left = Math.min(r.left, window.innerWidth - lebar - 8);
       if (left < 8) left = 8;
       pop.style.position = 'fixed';
@@ -208,15 +220,15 @@
       pop.style.zIndex = '200';
       var ruangBawah = window.innerHeight - r.bottom - 12;
       var ruangAtas = r.top - 12;
-      var maxList = 260;
+      var maxList = modeFile ? 320 : 260;
       if (ruangBawah < 140 && ruangAtas > ruangBawah) {
         pop.style.top = 'auto';
         pop.style.bottom = (window.innerHeight - r.top + 4) + 'px';
-        maxList = Math.min(260, Math.max(100, ruangAtas - 12));
+        maxList = Math.min(maxList, Math.max(100, ruangAtas - 12));
       } else {
         pop.style.bottom = 'auto';
         pop.style.top = (r.bottom + 4) + 'px';
-        maxList = Math.min(260, Math.max(100, ruangBawah - 12));
+        maxList = Math.min(maxList, Math.max(100, ruangBawah - 12));
       }
       daftar.style.maxHeight = maxList + 'px';
     }
@@ -288,6 +300,14 @@
             }
           }
         }
+        if (!lab) {
+          for (var y = 0; y < item.length; y++) {
+            if (item[y].getAttribute('data-v') === '') {
+              lab = item[y].textContent;
+              break;
+            }
+          }
+        }
         input.value = lab || '';
       }
       return wasOpen;
@@ -311,6 +331,11 @@
       ignoreBlur = true;
       tutup(false);
       input.value = teks;
+      // File mutasi: langsung terapkan filter GET
+      if (modeFile && form) {
+        try { form.submit(); } catch (e3) { /* */ }
+        return;
+      }
       setTimeout(function () {
         ignoreBlur = false;
         try { input.blur(); } catch (e2) { /* */ }
@@ -615,8 +640,11 @@
   function bangun(select) {
     if (select.dataset.tpDone) return;
     try {
-      if (select.classList.contains('parser-pick')) bangunParser(select);
-      else bangunToko(select);
+      if (select.classList.contains('parser-pick') || select.classList.contains('file-pick')) {
+        bangunParser(select);
+      } else {
+        bangunToko(select);
+      }
     } catch (err) { /* biarkan select bawaan */ }
   }
 
@@ -637,7 +665,9 @@
 
   function init() {
     var s = document.querySelectorAll(
-      'select[name="toko_id"]:not([data-tp-done]), select.parser-pick:not([data-tp-done])'
+      'select[name="toko_id"]:not([data-tp-done]), ' +
+      'select.parser-pick:not([data-tp-done]), ' +
+      'select.file-pick:not([data-tp-done])'
     );
     for (var i = 0; i < s.length; i++) bangun(s[i]);
   }

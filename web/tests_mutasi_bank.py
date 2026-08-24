@@ -116,6 +116,16 @@ class MutasiBankFilterTests(MutasiBankBase):
         self.assertContains(r, "QR FLYER")
         self.assertNotContains(r, "bca.csv")
 
+    def test_combobox_cari_file_terpasang(self):
+        """Wiring: class file-pick + skrip combobox global (search box File mutasi)."""
+        r = self.client.get(reverse("bank_mutations"))
+        html = r.content.decode()
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('name="upload"', html)
+        self.assertIn("file-pick", html)
+        self.assertIn("toko-picker.js", html)
+        self.assertIn("tp-combo-file", html)
+
     def test_ganti_sumber_reset_pilihan_file(self):
         # file gateway dipilih tapi sumber=bank -> pilihan diabaikan (tampil semua bank)
         r = self.client.get(reverse("bank_mutations"), {"source": "bank", "upload": self.upg.id})
