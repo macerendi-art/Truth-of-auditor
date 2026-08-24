@@ -159,9 +159,16 @@ def read_xlsx_grid(path):
 
 
 def parse_decimal(value, number_format="intl"):
-    """Parse angka (str/float/int) -> Decimal. Mendukung format intl & ID."""
+    """Parse angka (str/float/int) -> Decimal. Mendukung format intl & ID.
+
+    Notasi ilmiah Excel (`1.0E7` = 10_000_000) diproses SEBELUM pembuangan
+    huruf non-digit. Tanpa itu `E` hilang dan `1.0E7` jadi `1.07` — cacat
+    QR Flyer BSW 22-08-2026 (13 baris 10jt panel ↔ mutasi Rp1, selisih 9.999.999).
+    """
     if value is None or value == "":
         return Decimal("0")
+    if isinstance(value, Decimal):
+        return value
     if isinstance(value, (int, float)):
         return Decimal(str(value))
     s = str(value).strip().replace("Rp", "").replace("'", "").strip()
@@ -170,6 +177,16 @@ def parse_decimal(value, number_format="intl"):
     neg = s.startswith("-") or s.endswith("DB") or s.endswith("Db")
     s = s.replace("DB", "").replace("Db", "").replace("CR", "").replace("Cr", "")
     s = s.strip().lstrip("+-").strip()
+    # Notasi ilmiah dulu (Decimal native). Jangan strip huruf dulu.
+    s_sci = re.sub(r"\s+", "", s)
+    if number_format == "intl":
+        s_sci = s_sci.replace(",", "")
+    if re.fullmatch(r"[+-]?(?:\d+\.?\d*|\.\d+)[eE][+-]?\d+", s_sci):
+        try:
+            d = abs(Decimal(s_sci))
+        except InvalidOperation:
+            d = Decimal("0")
+        return -d if neg else d
     if number_format == "id":  # 1.000,00 -> 1000.00
         s = s.replace(".", "").replace(",", ".")
     else:  # intl 1,000.00 -> 1000.00

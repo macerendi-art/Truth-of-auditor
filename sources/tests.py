@@ -34,6 +34,18 @@ class ParseDecimalTests(SimpleTestCase):
     def test_empty(self):
         self.assertEqual(parse_decimal(""), Decimal("0"))
 
+    def test_scientific_excel_1e7(self):
+        """Excel/openpyxl sering tulis 10_000_000 sebagai '1.0E7' di sel teks."""
+        self.assertEqual(parse_decimal("1.0E7"), Decimal("10000000"))
+        self.assertEqual(parse_decimal("1.0e7"), Decimal("10000000"))
+        self.assertEqual(parse_decimal("1E+7"), Decimal("10000000"))
+        self.assertEqual(parse_decimal("2.5E6"), Decimal("2500000"))
+
+    def test_scientific_bukan_1_koma_07(self):
+        """Regresi BSW: strip 'E' dulu membuat '1.0E7' → '1.07' (SALAH)."""
+        self.assertNotEqual(parse_decimal("1.0E7"), Decimal("1.07"))
+        self.assertEqual(parse_decimal("1.0E7"), Decimal(10_000_000))
+
 
 class ExtractTests(SimpleTestCase):
     def test_ticket_deposit(self):
