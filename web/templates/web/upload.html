@@ -178,11 +178,13 @@
       <tr>
         <td>{{ p.name }}<input type="hidden" name="staged" value="{{ p.staged }}"><input type="hidden" name="orig_name" value="{{ p.name }}"></td>
         <td>
-          <select name="parser_key" class="f" required>
+          <select name="parser_key" class="f parser-pick" required>
             {% comment %}
             Placeholder terpilih-dan-disabled saat deteksi gagal. Tanpa ini tak
             ada opsi yang `selected` sehingga peramban menampilkan opsi PERTAMA
             (`bca_csv`) — "tidak tahu" menyamar jadi tebakan yang terlihat yakin.
+            Kelas `parser-pick` → toko-picker.js memasang combobox + kotak cari
+            "Cari jenis…" (select asli tetap sumber kebenaran / fallback no-JS).
             {% endcomment %}
             {% if not p.parser_key %}<option value="" selected disabled>— tidak terdeteksi, pilih jenis —</option>{% endif %}
             {% for pk in parsers %}<option value="{{ pk }}" {% if pk == p.parser_key %}selected{% endif %}>{{ pk }}</option>{% endfor %}

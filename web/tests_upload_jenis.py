@@ -65,11 +65,27 @@ class PratinjauJenisTests(_Masuk):
 
     def test_select_wajib_diisi(self):
         """`required` yang membuat peramban menolak submit selama placeholder
-        (satu-satunya opsi terpilih, dan ia `disabled`) masih terpilih."""
+        (satu-satunya opsi terpilih, dan ia `disabled`) masih terpilih.
+        Kelas `parser-pick` memicu combobox + kotak cari di klien."""
         r = self._analyze("entahapa.csv", ASING)
 
-        self.assertIn('<select name="parser_key" class="f" required>',
-                      r.content.decode())
+        html = r.content.decode()
+        self.assertIn('name="parser_key"', html)
+        self.assertIn("parser-pick", html)
+        self.assertIn("required", html)
+        # Select masih ada (fallback no-JS); enhancement murni klien via toko-picker.js
+        self.assertIn("<select", html)
+
+    def test_combobox_cari_jenis_terpasang(self):
+        """Wiring: skrip combobox global + kelas parser-pick di preview."""
+        r = self._analyze("entahapa.csv", ASING)
+        html = r.content.decode()
+        self.assertIn("toko-picker.js", html)
+        self.assertIn('class="f parser-pick"', html)
+        # Placeholder deteksi gagal tetap di markup server
+        self.assertIn('value="" selected disabled', html)
+        # CSS sel tabel untuk combobox jenis (app_base)
+        self.assertIn("td .tp-host.tp-field", html)
 
     def test_badge_menggantikan_nol_persen(self):
         r = self._analyze("entahapa.csv", ASING)

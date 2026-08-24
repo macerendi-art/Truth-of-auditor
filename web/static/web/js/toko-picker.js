@@ -1,16 +1,18 @@
-/* toko-picker.js — kotak cari untuk pemilih Toko (bilah atas + modal pengingat).
+/* toko-picker.js — kotak cari untuk <select> panjang (Toko + jenis parser upload).
  *
  * Instalasi ini memakai 16+ toko dgn nama pendek dan mirip (MUL MXW M25 K25 …),
  * jadi menggulir <select> bawaan menyiksa. Modul ini membangun kontrol bertema
  * DI SEBELAH select asli: tombol pemicu + popover berisi kotak cari dan daftar
  * role="listbox" yang tersaring saat diketik.
  *
- * SELECT ASLI TETAP SUMBER KEBENARAN. Markup server sengaja TIDAK diubah — tes
- * lama mem-pin string persisnya, dan tanpa JS pemilih toko harus tetap bekerja
- * apa adanya. Memilih = set `select.value` lalu `form.submit()`, persis seperti
- * `onchange="this.form.submit()"` bawaannya. Select hanya disembunyikan (kelas
- * .tp-native) SETELAH kontrol berhasil dibangun; bila apa pun gagal, pemilih
- * bawaan tetap tampil dan berfungsi.
+ * SELECT ASLI TETAP SUMBER KEBENARAN. Markup server sengaja TIDAK diubah isinya —
+ * enhancement murni klien. Select hanya disembunyikan (kelas .tp-native) SETELAH
+ * kontrol berhasil dibangun; bila apa pun gagal, select bawaan tetap tampil.
+ *
+ * Mode:
+ * - `select[name=toko_id]` → pilih = set value + form.submit() (bilah atas / modal)
+ * - `select.parser-pick` → pilih = set value saja (preview Upload & Parse; form
+ *   commit nanti). Placeholder "Cari jenis…".
  *
  * Vanilla JS, tanpa dependensi & tanpa build step — gaya sama dgn range-select.js.
  */
@@ -68,21 +70,32 @@
   }
 
   function satu(o) {
-    return { nilai: o.value, teks: (o.textContent || '').trim(), terpilih: o.selected };
+    return {
+      nilai: o.value,
+      teks: (o.textContent || '').trim(),
+      terpilih: o.selected,
+      disabled: !!o.disabled,
+    };
   }
 
   function bangun(select) {
     if (select.dataset.tpDone) return;
     var form = select.form;
-    // Tanpa form, kontrak "pilih = form.submit()" tak terpenuhi → biarkan bawaan.
-    if (!form || !select.parentNode) return;
+    // Mode submit (toko) butuh form. Mode value (parser) cukup parent.
+    var modeValue = select.classList.contains('parser-pick');
+    if (!modeValue && (!form || !select.parentNode)) return;
+    if (!select.parentNode) return;
 
     var grup = bacaOpsi(select), jumlah = 0, i, k;
     for (i = 0; i < grup.length; i++) jumlah += grup[i].opsi.length;
     if (!jumlah) return;
 
     var id = 'tp' + (++seq);
-    var host = buat('div', 'tp-host' + (select.closest('.toko-pick') ? '' : ' tp-field'));
+    // parser-pick di sel tabel = medan penuh; toko di bilah atas = ringkas
+    var host = buat(
+      'div',
+      'tp-host' + (modeValue || !select.closest('.toko-pick') ? ' tp-field' : '')
+    );
     var trigger = buat('button', 'tp-trigger');
     trigger.type = 'button';
     trigger.setAttribute('aria-haspopup', 'listbox');
@@ -104,17 +117,21 @@
     if (jumlah > AMBANG_CARI) {
       cari = buat('input', 'tp-cari');
       cari.type = 'text';
-      cari.placeholder = 'Cari toko…';
+      cari.placeholder = modeValue ? 'Cari jenis…' : 'Cari toko…';
       cari.autocomplete = 'off';
       cari.setAttribute('role', 'combobox');
       cari.setAttribute('aria-controls', daftar.id);
       cari.setAttribute('aria-expanded', 'true');
       cari.setAttribute('aria-autocomplete', 'list');
-      cari.setAttribute('aria-label', 'Cari toko');
+      cari.setAttribute('aria-label', modeValue ? 'Cari jenis file' : 'Cari toko');
       pop.appendChild(cari);
     }
     pop.appendChild(daftar);
-    var kosong = buat('div', 'tp-kosong', 'Toko tidak ditemukan.');
+    var kosong = buat(
+      'div',
+      'tp-kosong',
+      modeValue ? 'Jenis tidak ditemukan.' : 'Toko tidak ditemukan.'
+    );
     // role="status" (aria-live sopan): saringan yang nihil harus TERDENGAR juga,
     // bukan cuma terlihat — pesannya muncul tanpa fokus pindah ke mana pun.
     kosong.setAttribute('role', 'status');
@@ -132,7 +149,16 @@
         daftar.appendChild(wadah);
       }
       for (k = 0; k < grup[i].opsi.length; k++) {
-        var o = grup[i].opsi[k], node = buat('div', 'tp-opt', o.teks);
+        var o = grup[i].opsi[k];
+        // Opsi placeholder disabled (value="") tidak masuk daftar pilih —
+        // labelnya tetap di trigger bila belum ada deteksi.
+        if (o.disabled && !o.nilai) {
+          if (o.terpilih && !terpilih) {
+            kini.textContent = o.teks || '—';
+          }
+          continue;
+        }
+        var node = buat('div', 'tp-opt', o.teks);
         node.id = id + '-o' + item.length;
         node.setAttribute('role', 'option');
         node.setAttribute('aria-selected', o.terpilih ? 'true' : 'false');
@@ -143,8 +169,14 @@
         if (o.terpilih) terpilih = node;
       }
     }
-    kini.textContent = terpilih ? terpilih.textContent : '—';
-    trigger.title = 'Toko aktif: ' + kini.textContent + ' — klik untuk mengganti';
+    if (terpilih) {
+      kini.textContent = terpilih.textContent;
+    } else if (!kini.textContent) {
+      kini.textContent = '—';
+    }
+    trigger.title = modeValue
+      ? ('Jenis: ' + kini.textContent + ' — klik untuk mencari/ganti')
+      : ('Toko aktif: ' + kini.textContent + ' — klik untuk mengganti');
 
     var ctl = { host: host, sorot: null, tutup: null };
     var fokusAria = cari || daftar; // pembawa aria-activedescendant
@@ -213,12 +245,27 @@
 
     function pilih(node) {
       var nilai = node.dataset.v;
-      // Memilih toko yang sedang aktif = tak ada perubahan, sama seperti
-      // <select> bawaan yang tak memicu onchange. Cukup tutup popovernya.
+      // Memilih nilai yang sedang aktif = tak ada perubahan.
       if (select.value === nilai) { tutup(true); return; }
       select.value = nilai;
+      // Segarkan label + aria pada opsi
+      for (var x = 0; x < item.length; x++) {
+        item[x].setAttribute('aria-selected', item[x] === node ? 'true' : 'false');
+      }
+      terpilih = node;
+      kini.textContent = node.textContent;
+      trigger.title = modeValue
+        ? ('Jenis: ' + kini.textContent + ' — klik untuk mencari/ganti')
+        : ('Toko aktif: ' + kini.textContent + ' — klik untuk mengganti');
+      try {
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (err) { /* IE tua — abaikan */ }
+      if (modeValue) {
+        tutup(true);
+        return;
+      }
       tutup(false);
-      form.submit();
+      if (form) form.submit();
     }
 
     trigger.addEventListener('click', function () {
@@ -284,9 +331,11 @@
   });
 
   function init() {
-    var s = document.querySelectorAll('select[name="toko_id"]:not([data-tp-done])');
+    var s = document.querySelectorAll(
+      'select[name="toko_id"]:not([data-tp-done]), select.parser-pick:not([data-tp-done])'
+    );
     for (var i = 0; i < s.length; i++) {
-      // Kegagalan satu kontrol tidak boleh mematikan pemilih toko: diam saja,
+      // Kegagalan satu kontrol tidak boleh mematikan pemilih: diam saja,
       // select bawaannya masih tampil. Halaman tanpa select ini (mis. login)
       // sama sekali tak terpengaruh.
       try { bangun(s[i]); } catch (err) { /* sengaja diabaikan */ }
