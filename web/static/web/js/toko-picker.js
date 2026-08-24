@@ -183,7 +183,9 @@
 
     function tampak() {
       var v = [];
-      for (var x = 0; x < item.length; x++) if (!item[x].hidden) v.push(item[x]);
+      for (var x = 0; x < item.length; x++) {
+        if (!item[x].hidden && !item[x].classList.contains('tp-hide')) v.push(item[x]);
+      }
       return v;
     }
 
@@ -194,21 +196,49 @@
       node.classList.add('tp-on');
       fokusAria.setAttribute('aria-activedescendant', node.id);
       // Gulirkan di dalam daftar saja — jangan sampai menggeser halaman.
-      var atas = node.offsetTop, bawah = atas + node.offsetHeight;
-      if (atas < daftar.scrollTop) daftar.scrollTop = atas;
-      else if (bawah > daftar.scrollTop + daftar.clientHeight) daftar.scrollTop = bawah - daftar.clientHeight;
+      try {
+        if (typeof node.scrollIntoView === 'function') {
+          node.scrollIntoView({ block: 'nearest' });
+        } else {
+          var atas = node.offsetTop, bawah = atas + node.offsetHeight;
+          if (atas < daftar.scrollTop) daftar.scrollTop = atas;
+          else if (bawah > daftar.scrollTop + daftar.clientHeight) {
+            daftar.scrollTop = bawah - daftar.clientHeight;
+          }
+        }
+      } catch (err) { /* abaikan */ }
+    }
+
+    function norm(s) {
+      return String(s || '').toLowerCase().replace(/[_\s\-\.]+/g, '');
     }
 
     function saring() {
-      var q = cari ? cari.value.trim().toLowerCase() : '', n = 0, x;
+      var raw = cari ? cari.value : '';
+      var q = String(raw).trim().toLowerCase();
+      var qn = norm(raw);
+      var n = 0, x;
       for (x = 0; x < item.length; x++) {
-        var ok = !q || item[x].dataset.q.indexOf(q) > -1;
+        var hay = item[x].getAttribute('data-q') || item[x].dataset.q || '';
+        var hayV = item[x].getAttribute('data-v') || item[x].dataset.v || '';
+        var ok = !q
+          || hay.indexOf(q) !== -1
+          || String(hayV).toLowerCase().indexOf(q) !== -1
+          || (qn && norm(hay).indexOf(qn) !== -1)
+          || (qn && norm(hayV).indexOf(qn) !== -1);
         item[x].hidden = !ok;
+        item[x].classList.toggle('tp-hide', !ok);
         if (ok) n++;
       }
-      var judul = daftar.querySelectorAll('.tp-grup'); // grup yang jadi kosong ikut hilang
-      for (x = 0; x < judul.length; x++) judul[x].hidden = !judul[x].querySelector('.tp-opt:not([hidden])');
+      var judul = daftar.querySelectorAll('.tp-grup');
+      for (x = 0; x < judul.length; x++) {
+        var ada = !!judul[x].querySelector('.tp-opt:not(.tp-hide):not([hidden])');
+        judul[x].hidden = !ada;
+        judul[x].classList.toggle('tp-hide', !ada);
+      }
       kosong.hidden = n > 0;
+      // Saat mengetik: selalu mulai dari atas daftar ter-filter
+      daftar.scrollTop = 0;
       setSorot(n ? tampak()[0] : null);
     }
 
@@ -259,8 +289,20 @@
       if (luber > 0) daftar.style.maxHeight = Math.max(140, daftar.clientHeight - luber) + 'px';
     }
 
-    function onScrollOrResize() {
-      if (!pop.hidden && modeValue) tempatkan();
+    function onScrollOrResize(e) {
+      if (pop.hidden || !modeValue) return;
+      // Scroll di dalam daftar opsi jangan memicu re-layout (bisa ganggu ketik/filter)
+      if (e && e.type === 'scroll' && pop.contains(e.target)) return;
+      tempatkan();
+    }
+
+    function fokusCari() {
+      if (!cari) return;
+      try {
+        cari.focus();
+        // select() memudahkan ganti kata kunci; abaikan bila browser menolak
+        if (typeof cari.select === 'function' && cari.value) cari.select();
+      } catch (err) { /* abaikan */ }
     }
 
     function buka() {
@@ -273,8 +315,14 @@
       // Tinggi final dulu, baru sorot: menggulir toko aktif ke dalam pandangan
       // butuh tinggi daftar yang sudah dipangkas, kalau tidak ia meleset.
       tempatkan();
-      if (terpilih && !terpilih.hidden) setSorot(terpilih);
-      fokusAria.focus();
+      if (terpilih && !terpilih.hidden && !terpilih.classList.contains('tp-hide')) {
+        setSorot(terpilih);
+      }
+      // Fokus ke kotak cari — WAJIB ditunda: click pada <button> mengembalikan
+      // fokus ke tombol SETELAH handler click selesai, sehingga ketikan user
+      // tidak masuk ke input (filter kosong, daftar tetap penuh).
+      fokusCari();
+      setTimeout(fokusCari, 0);
       if (modeValue) {
         window.addEventListener('scroll', onScrollOrResize, true);
         window.addEventListener('resize', onScrollOrResize);
@@ -329,6 +377,11 @@
       if (form) form.submit();
     }
 
+    // cegah tombol mengambil fokus pada mousedown — biar fokusCari menang
+    trigger.addEventListener('mousedown', function (e) {
+      if (pop.hidden) e.preventDefault();
+    });
+
     trigger.addEventListener('click', function () {
       if (pop.hidden) buka(); else tutup(true);
     });
@@ -341,14 +394,35 @@
         e.preventDefault(); // jangan menggulir halaman
         buka();
       }
+      // Ketik huruf saat trigger fokus → buka + isi pencarian
+      if (pop.hidden && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        buka();
+        if (cari) {
+          cari.value = e.key;
+          saring();
+          setTimeout(fokusCari, 0);
+        }
+      }
     });
 
     daftar.addEventListener('click', function (e) {
       var node = e.target.closest ? e.target.closest('.tp-opt') : null;
-      if (node) pilih(node);
+      if (node && !node.classList.contains('tp-hide')) pilih(node);
     });
 
-    if (cari) cari.addEventListener('input', saring);
+    if (cari) {
+      cari.addEventListener('input', function () { saring(); });
+      cari.addEventListener('keyup', function () { saring(); });
+      // Cegah Enter di kotak cari mensubmit form commit upload
+      cari.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          if (ctl.sorot) pilih(ctl.sorot);
+        }
+      });
+    }
 
     pop.addEventListener('keydown', function (e) {
       var v, i2;
