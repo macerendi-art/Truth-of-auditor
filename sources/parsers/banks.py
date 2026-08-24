@@ -2,9 +2,12 @@
 
 - BRI : CSV, header baris 1, kolom MUTASI_DEBET/KREDIT + SALDO_AKHIR_MUTASI.
 - BCA : CSV, ada preamble; header 'Tanggal,Keterangan,Cabang,Jumlah,,Saldo' (DB/CR).
+        Ekspor MyBCA kadang ; / tab / UTF-16 — auto-deteksi.
 - Mandiri: xlsx e-Statement; header 2 baris; tiap transaksi 2 baris (tgl lalu jam);
   angka format ID (1.000,00).
 """
+import csv
+import io
 import re
 from decimal import Decimal
 
@@ -198,32 +201,54 @@ class BRIParser(BaseParser):
 class BCACSVParser(BaseParser):
     source_key = "bank"
 
+    # Header kolom — ekspor klasik + varian MyBCA / EN
+    _HDR_TGL = ("tanggal", "date", "tgl", "transaction date")
+    _HDR_SALDO = ("saldo", "balance", "saldo (idr)", "ending balance")
+    _HDR_JUMLAH = ("jumlah", "amount", "mutasi", "nominal", "transaction amount")
+    _HDR_KET = ("keterangan", "description", "deskripsi", "narration", "uraian")
+
     def parse(self, path, flow=""):
-        rows = read_csv_raw(path)
+        rows, delim = self._baca_csv_otomatis(path)
         hidx = None
         for i, r in enumerate(rows):
             cells = [str(c).strip() for c in r]
             # Preamble BCA: baris 'Nama,=,NIJUN' sebelum header -> pemilik rekening.
-            if not self.meta.get("owner_name") and cells and cells[0] == "Nama":
-                owner = next((c.lstrip("'").strip() for c in cells[1:] if c and c != "="), "")
+            if not self.meta.get("owner_name") and cells and self._sel_nama(cells):
+                owner = self._ambil_owner(cells)
                 if owner:
                     self.meta["owner_name"] = owner
-            if "Tanggal" in cells and "Saldo" in cells:
+            if self._is_header(cells):
                 hidx = i
                 break
         if hidx is None:
+            # Header tak ketemu — jangan diam (KIGAR SHU MING: 0 baris + owner dari nama file)
+            if any(any(str(c).strip() for c in r) for r in rows):
+                raise ValueError(
+                    "Mutasi BCA CSV tidak dikenali: header Tanggal/Saldo tidak ditemukan "
+                    f"(delimiter coba={delim!r}). Kirim sample ke pengembang."
+                )
             return []
         _, dicts = rows_to_dicts(rows, hidx)
+        # Normalisasi alias kolom → kunci klasik
+        dicts = [self._norm_row(d) for d in dicts]
         out = []
         for r in dicts:
             jumlah = parse_decimal(r.get("Jumlah"))
             dbcr = ""
             for v in r.values():
                 vv = str(v).strip().upper()
-                if vv in ("DB", "CR"):
-                    dbcr = vv
+                if vv in ("DB", "CR", "D", "C", "DEBIT", "CREDIT"):
+                    dbcr = "DB" if vv in ("DB", "D", "DEBIT") else "CR"
                     break
-            money = jumlah if dbcr == "CR" else -jumlah
+            # Beberapa ekspor: jumlah negatif = DB, positif = CR, tanpa kolom DB/CR
+            if not dbcr:
+                raw_j = str(r.get("Jumlah") or "").strip()
+                if raw_j.startswith("-") or (jumlah is not None and jumlah < 0):
+                    dbcr = "DB"
+                    jumlah = abs(jumlah or Decimal("0"))
+                else:
+                    dbcr = "CR"
+            money = jumlah if dbcr == "CR" else -abs(jumlah or Decimal("0"))
             occurred = parse_dt(r.get("Tanggal"), dayfirst=True)
             if occurred is None:  # skip baris ringkasan (Saldo Awal/Akhir/Mutasi)
                 continue
@@ -248,6 +273,114 @@ class BCACSVParser(BaseParser):
             }
             row["row_hash"] = row_hash("bca", [occurred, money, r.get("Saldo", ""), desc[:60]])
             out.append(row)
+        if not out and dicts:
+            raise ValueError(
+                "Mutasi BCA CSV: header ketemu tapi 0 baris bertanggal "
+                f"({len(dicts)} baris data). Cek kolom Tanggal/Jumlah — kirim sample."
+            )
+        return out
+
+    def _baca_csv_otomatis(self, path):
+        """Baca CSV BCA dengan encoding + delimiter otomatis.
+
+        MyBCA / Excel ID sering `;` atau tab; kadang UTF-16. Owner dari nama file
+        dulu menutupi kegagalan header (KIGAR SHU MING rows_parsed=0).
+        """
+        with open(path, "rb") as f:
+            raw = f.read()
+        if not raw.strip():
+            return [], ","
+
+        text = None
+        used_enc = "utf-8-sig"
+        for enc in ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be", "cp1252", "latin-1"):
+            try:
+                cand = raw.decode(enc)
+            except UnicodeDecodeError:
+                continue
+            # UTF-16 mis-decode as latin often has many NULs
+            if enc.startswith("utf-16") or "\x00" not in cand[:200]:
+                text = cand
+                used_enc = enc
+                if enc.startswith("utf-16") or self._skor_header_text(cand) > 0:
+                    break
+        if text is None:
+            text = raw.decode("utf-8-sig", errors="replace")
+
+        best_rows, best_delim, best_score = None, ",", -1
+        for delim in (",", ";", "\t", "|"):
+            try:
+                rows = list(csv.reader(io.StringIO(text), delimiter=delim))
+            except csv.Error:
+                continue
+            score = self._skor_rows(rows)
+            if score > best_score:
+                best_score, best_rows, best_delim = score, rows, delim
+        if best_rows is None:
+            best_rows = read_csv_raw(path)
+        return best_rows, best_delim
+
+    def _skor_header_text(self, text: str) -> int:
+        t = text.casefold()
+        s = 0
+        if "tanggal" in t or "date" in t:
+            s += 1
+        if "saldo" in t or "balance" in t:
+            s += 1
+        if "keterangan" in t or "description" in t:
+            s += 1
+        return s
+
+    def _skor_rows(self, rows) -> int:
+        score = 0
+        for r in rows[:40]:
+            cells = [str(c).strip() for c in r]
+            if self._is_header(cells):
+                score += 10 + max(0, len([c for c in cells if c]) - 2)
+            if cells and self._sel_nama(cells):
+                score += 2
+            # banyak kolom non-kosong = delimiter masuk akal
+            nn = sum(1 for c in cells if c)
+            if nn >= 4:
+                score += 1
+        return score
+
+    def _is_header(self, cells) -> bool:
+        norms = [re.sub(r"\s+", " ", c).casefold().strip(":'\" ") for c in cells if c]
+        if not norms:
+            return False
+        has_tgl = any(any(h == n or h in n for h in self._HDR_TGL) for n in norms)
+        has_saldo = any(any(h == n or h in n for h in self._HDR_SALDO) for n in norms)
+        return has_tgl and has_saldo
+
+    def _sel_nama(self, cells) -> bool:
+        c0 = re.sub(r"\s+", " ", str(cells[0])).casefold().strip(":'\" ")
+        return c0 in ("nama", "name", "nama/name", "account name")
+
+    def _ambil_owner(self, cells) -> str:
+        for c in cells[1:]:
+            s = str(c).lstrip("'").strip()
+            if s and s not in ("=", ":", "-"):
+                return s
+        return ""
+
+    def _norm_row(self, d: dict) -> dict:
+        """Map alias header → Tanggal/Keterangan/Jumlah/Saldo."""
+        key_map = {}
+        for k in d:
+            nk = re.sub(r"\s+", " ", str(k)).casefold().strip(":'\" ")
+            if any(h == nk or h in nk for h in self._HDR_TGL):
+                key_map[k] = "Tanggal"
+            elif any(h == nk or h in nk for h in self._HDR_KET):
+                key_map[k] = "Keterangan"
+            elif any(h == nk or h in nk for h in self._HDR_JUMLAH):
+                key_map[k] = "Jumlah"
+            elif any(h == nk or h in nk for h in self._HDR_SALDO):
+                key_map[k] = "Saldo"
+        out = dict(d)
+        for old, new in key_map.items():
+            if new not in out or not out.get(new):
+                out[new] = d.get(old, "")
         return out
 
 

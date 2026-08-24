@@ -5,6 +5,7 @@ milik end user ("BCA a/n HENDI"), bukan hanya brand banknya.
 """
 import os
 import tempfile
+from decimal import Decimal
 
 from django.test import SimpleTestCase, TestCase
 from openpyxl import Workbook
@@ -105,6 +106,54 @@ class ParserMetaTests(SimpleTestCase):
             os.remove(path)
         self.assertEqual(p.meta.get("owner_name", ""), "")
         self.assertEqual(len(rows), 1)
+
+    def test_bca_csv_delimiter_titik_koma(self):
+        """MyBCA/Excel ID: delimiter ';' — dulu rows_parsed=0 (KIGAR SHU MING)."""
+        text = (
+            "No. Rekening;=;'0202405914\n"
+            "Nama;=;SHU MING\n"
+            "Mata Uang;=:IDR\n"
+            "\n"
+            "Tanggal;Keterangan;Cabang;Jumlah;;Saldo\n"
+            "'23/08/2026;BI-FAST DB TRANSFER   KE 008 BUDI SANTOSO MyBCA;'0000;500000.00;DB;1000000.00\n"
+            "'23/08/2026;BI-FAST DB BIAYA TXN  KE 008 BUDI SANTOSO MyBCA;'0000;2500.00;DB;997500.00\n"
+        )
+        path = _csv(".CSV", text)
+        try:
+            p = BCACSVParser()
+            rows = p.parse(path)
+        finally:
+            os.remove(path)
+        self.assertEqual(p.meta.get("owner_name"), "SHU MING")
+        self.assertEqual(len(rows), 2)
+        by = {str(r["amount"]): r for r in rows}
+        self.assertEqual(by["500000.00"]["jenis"], "wd")
+        self.assertEqual(by["500000.00"]["money_delta"], Decimal("-500000.00"))
+        self.assertEqual(by["2500.00"]["jenis"], "admin")
+
+    def test_bca_csv_delimiter_tab(self):
+        text = (
+            "Tanggal\tKeterangan\tCabang\tJumlah\t\tSaldo\n"
+            "'23/08/2026\tTRSF E-BANKING CR 2308/FTSCY BUDI\t'0000\t100000.00\tCR\t1100000.00\n"
+        )
+        path = _csv(".csv", text)
+        try:
+            rows = BCACSVParser().parse(path)
+        finally:
+            os.remove(path)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["jenis"], "depo")
+        self.assertEqual(rows[0]["amount"], Decimal("100000.00"))
+
+    def test_bca_csv_header_asing_error_jelas(self):
+        """Bukan diam 0 baris — error minta sample."""
+        path = _csv(".csv", "foo,bar\n1,2\n")
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                BCACSVParser().parse(path)
+            self.assertIn("tidak dikenali", str(ctx.exception).lower())
+        finally:
+            os.remove(path)
 
     def test_bri_meta_kosong(self):
         path = _csv(".csv", BRI_CSV)
