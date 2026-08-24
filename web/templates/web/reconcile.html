@@ -145,6 +145,13 @@ details.adv .adv-body{padding:2px 14px 14px}
 <div class="card pad0 reveal" style="margin-top:16px">
   <div class="card-head">
     <h3>Riwayat Batch</h3>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+    {% if is_admin_user and batches %}
+      <button type="submit" form="bulkBatchForm" class="btn sm danger" id="bulkBatchDelBtn" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        Hapus terpilih <span class="cnt" id="batchSelCount">0</span>
+      </button>
+    {% endif %}
     {% if batches or bank or bulan %}
     <form method="get" style="margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
@@ -162,14 +169,26 @@ details.adv .adv-body{padding:2px 14px 14px}
       </select>
     </form>
     {% endif %}
+    </div>
   </div>
   {% if batches %}
+  <form method="post" action="{% url 'bulk_delete_batches' %}" id="bulkBatchForm"
+        onsubmit="return confirm('Hapus semua batch terpilih? Hasil rekonsiliasinya terhapus (transaksi tetap utuh). Tidak bisa dibatalkan.');">
+  {% csrf_token %}
+  {% if bulan %}<input type="hidden" name="bulan" value="{{ bulan }}">{% endif %}
+  {% if bank %}<input type="hidden" name="bank" value="{{ bank }}">{% endif %}
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr><th>Batch</th><th>Tanggal</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th class="r">Cocok</th><th class="r">Tinjau</th><th class="r">Tidak Cocok</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
+    <thead><tr>
+      {% if is_admin_user %}<th style="width:32px"><input type="checkbox" id="chkAllBatch" title="Pilih semua"></th>{% endif %}
+      <th>Batch</th><th>Tanggal</th><th class="num">DP selisih</th><th class="num">WD selisih</th><th class="r">Cocok</th><th class="r">Tinjau</th><th class="r">Tidak Cocok</th>{% if is_admin_user %}<th></th>{% endif %}
+    </tr></thead>
     <tbody>
     {% for b in batches %}
       <tr>
+        {% if is_admin_user %}
+        <td><input type="checkbox" class="batchchk" name="batch_ids" value="{{ b.pk }}" aria-label="Pilih batch #{{ b.no }}"></td>
+        {% endif %}
         <td><a class="grad-text" style="font-weight:600" href="{% url 'batch_detail' b.pk %}">#{{ b.no }}</a>
           <span class="faint" style="font-size:11px;display:block">{{ b.created_at|date:"d/m H:i" }}</span></td>
         <td>{{ b.recon_date|date:"d/m/Y"|default:"—" }}</td>
@@ -180,11 +199,8 @@ details.adv .adv-body{padding:2px 14px 14px}
         <td class="r num" style="color:var(--bad)">{{ b.summary.buckets.tidak_cocok|default:0|intcomma }}</td>
         {% if is_admin_user %}
         <td class="r">
-          <form method="post" action="{% url 'delete_batch' b.pk %}" style="display:inline"
-                onsubmit="return confirm('Hapus Batch #{{ b.no }}? Semua hasil rekonsiliasinya terhapus (transaksi tetap utuh).')">
-            {% csrf_token %}
-            <button class="btn sm ghost danger" type="submit">Hapus</button>
-          </form>
+          <button class="btn sm ghost danger" type="submit" form="delBatch{{ b.pk }}"
+                  onclick="return confirm('Hapus Batch #{{ b.no }}? Semua hasil rekonsiliasinya terhapus (transaksi tetap utuh).')">Hapus</button>
         </td>
         {% endif %}
       </tr>
@@ -192,6 +208,12 @@ details.adv .adv-body{padding:2px 14px 14px}
     </tbody>
   </table>
   </div>
+  </form>
+  {% if is_admin_user %}
+  {% for b in batches %}
+  <form method="post" action="{% url 'delete_batch' b.pk %}" id="delBatch{{ b.pk }}" class="sr-only" hidden>{% csrf_token %}</form>
+  {% endfor %}
+  {% endif %}
   {% else %}
   <div class="empty">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v16a2 2 0 0 0 2 2h12"/><path d="M18 8l-4-4 4-4"/><path d="M2 12h13a4 4 0 0 1 4 4v4"/></svg></span>
@@ -201,4 +223,25 @@ details.adv .adv-body{padding:2px 14px 14px}
   </div>
   {% endif %}
 </div>
+{% if is_admin_user and batches %}
+<script>
+(function(){
+  var all=document.getElementById('chkAllBatch'),
+      btn=document.getElementById('bulkBatchDelBtn'),
+      cnt=document.getElementById('batchSelCount');
+  if(!btn) return;
+  function rows(){ return [].slice.call(document.querySelectorAll('.batchchk')); }
+  function upd(){
+    var rs=rows(), n=rs.filter(function(c){return c.checked;}).length;
+    cnt.textContent=n; btn.disabled=(n===0);
+    if(all){ all.checked = n>0 && n===rs.length; all.indeterminate = n>0 && n<rs.length; }
+  }
+  if(all) all.addEventListener('change',function(){ rows().forEach(function(c){c.checked=all.checked;}); upd(); });
+  document.addEventListener('change',function(e){
+    if(e.target && e.target.classList && e.target.classList.contains('batchchk')) upd();
+  });
+  upd();
+})();
+</script>
+{% endif %}
 {% endblock %}

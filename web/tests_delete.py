@@ -104,3 +104,39 @@ class DeleteBatchTests(TestCase):
         self.client.login(username="sup", password="pw123456")
         self.client.post(reverse("delete_batch", args=[self.batch.pk]))
         self.assertTrue(ReconBatch.objects.filter(pk=self.batch.pk).exists())
+
+    def test_riwayat_batch_punya_checkbox_massal_admin(self):
+        self.client.login(username="adm", password="pw123456")
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
+        r = self.client.get(reverse("reconcile"))
+        self.assertContains(r, 'id="chkAllBatch"')
+        self.assertContains(r, 'name="batch_ids"')
+        self.assertContains(r, "Hapus terpilih")
+        self.assertContains(r, reverse("bulk_delete_batches"))
+
+    def test_bulk_delete_batches_admin(self):
+        from datetime import date
+        from reconciliation.models import ReconBatch, ToleranceProfile
+        tol = ToleranceProfile.objects.get(name="Default")
+        b2 = ReconBatch.objects.create(toko=self.lbs, tolerance=tol, recon_date=date(2026, 8, 22), summary={})
+        b3 = ReconBatch.objects.create(toko=self.lbs, tolerance=tol, recon_date=date(2026, 8, 23), summary={})
+        self.client.login(username="adm", password="pw123456")
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
+        r = self.client.post(reverse("bulk_delete_batches"), {
+            "batch_ids": [str(b2.pk), str(b3.pk)],
+            "bulan": "2026-08",
+        })
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("bulan=2026-08", r.url)
+        self.assertFalse(ReconBatch.objects.filter(pk__in=[b2.pk, b3.pk]).exists())
+        self.assertTrue(ReconBatch.objects.filter(pk=self.batch.pk).exists())
+        from core.models import AuditLog
+        log = AuditLog.objects.filter(aksi="hapus_batch_massal").latest("id")
+        self.assertEqual(log.detail.get("n_batch"), 2)
+
+    def test_bulk_delete_batches_supervisor_ditolak(self):
+        from reconciliation.models import ReconBatch
+        User.objects.create_user("sup2", password="pw123456", role="supervisor")
+        self.client.login(username="sup2", password="pw123456")
+        self.client.post(reverse("bulk_delete_batches"), {"batch_ids": [str(self.batch.pk)]})
+        self.assertTrue(ReconBatch.objects.filter(pk=self.batch.pk).exists())

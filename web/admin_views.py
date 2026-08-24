@@ -381,7 +381,7 @@ def bulk_delete_uploads(request):
 def delete_batch(request, pk):
     batch = get_object_or_404(ReconBatch, pk=pk)
     if request.method == "POST":
-        no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
+        no = _batch_no(batch)
         n_runs = batch.runs.count()
         toko = batch.toko
         with transaction.atomic():
@@ -395,6 +395,59 @@ def delete_batch(request, pk):
         if n_reverted:
             msg += f" {n_reverted} settle terlambat dikembalikan ke tidak cocok."
         messages.success(request, msg)
+    return redirect("reconcile")
+
+
+@admin_required
+def bulk_delete_batches(request):
+    """Hapus banyak batch sekaligus dari Riwayat Batch (checkbox).
+
+    Pola sama bulk_delete_uploads: admin only, dibatasi toko aktif, transaksi
+    tetap utuh, settle terlambat di-revert per batch.
+    """
+    if request.method == "POST":
+        active = _active_toko(request)
+        ids = [i for i in request.POST.getlist("batch_ids") if str(i).isdecimal()]
+        qs = ReconBatch.objects.filter(pk__in=ids).select_related("toko")
+        if active is not None:
+            qs = qs.filter(toko=active)
+        batches = list(qs.order_by("id"))
+        n_batch = n_runs = n_reverted = 0
+        labels = []
+        with transaction.atomic():
+            for batch in batches:
+                no = _batch_no(batch)
+                n_runs += batch.runs.count()
+                n_reverted += revert_late_settlements(batch)
+                tgl = batch.recon_date.strftime("%d/%m/%Y") if batch.recon_date else "—"
+                labels.append(f"#{no} ({tgl})")
+                batch.delete()
+                n_batch += 1
+        if n_batch:
+            catat(
+                request.user, "hapus_batch_massal", f"{n_batch} batch",
+                toko=active, n_batch=n_batch, n_runs=n_runs,
+                batches=", ".join(labels)[:1000],
+            )
+            msg = (
+                f"{n_batch} batch dihapus — {n_runs} run ikut terhapus. "
+                "Transaksi tetap utuh."
+            )
+            if n_reverted:
+                msg += f" {n_reverted} settle terlambat dikembalikan ke tidak cocok."
+            messages.success(request, msg)
+        elif ids:
+            messages.info(request, "Tidak ada batch terpilih yang bisa dihapus.")
+    # Kembali ke filter bulan/sumber yang sama (hanya token aman)
+    q = []
+    bulan = (request.POST.get("bulan") or "").strip()
+    bank = (request.POST.get("bank") or "").strip()
+    if bulan and len(bulan) == 7 and bulan[4] == "-" and bulan[:4].isdigit() and bulan[5:].isdigit():
+        q.append(f"bulan={bulan}")
+    if bank in ("bank", "gateway"):
+        q.append(f"bank={bank}")
+    if q:
+        return redirect(f"{reverse('reconcile')}?{'&'.join(q)}")
     return redirect("reconcile")
 
 

@@ -82,6 +82,7 @@ AKSI_LABELS = {
     "review_massal":       ("Review massal",         "src"),
     "export_batch":        ("Export batch",          "src"),
     "hapus_batch":         ("Hapus batch",           "bad"),
+    "hapus_batch_massal":  ("Hapus batch massal",    "bad"),
     "hapus_upload":        ("Hapus upload",          "bad"),
     "hapus_upload_massal": ("Hapus upload massal",   "bad"),
     # kelola pengguna
