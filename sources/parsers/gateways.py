@@ -1,5 +1,6 @@
 """Parser gateway pembayaran (sumber UANG, setara bank): NXPAY, QR FLYER, QHOKI, RPAY, KINGSPAY."""
 import csv
+import os
 import re
 from datetime import timedelta
 from decimal import Decimal
@@ -857,14 +858,16 @@ class KingsPayParser(BaseParser):
 class QRFlyerTampungParser(BaseParser):
     """QR Flyer — mutasi TAMPUNG / payout ke rekening bank (Sesama CM).
 
-    Bukan mutasi DP member (`qrflyer`). Header payout:
+    Bukan mutasi DP member (`qrflyer`). Header payout (CSV atau XLSX):
     Request Timestamp, Client Ref, Bank, Beneficiary Account/Name,
     Payout Status, Payout Amount, Transaction Fee, Settlement Timestamp.
 
+    XLSX vendor kadang baris-1 judul ``Withdraw - Qrisflyer`` lalu header di
+    baris berikutnya (MXW 23-08-2026) — header dicari dinamis di 8 baris pertama.
+
     Selalu WD (uang keluar dari saldo QR tampung). Hanya Status=Success.
-    Nominal format ID (`IDR 30.000.000`). `reference` kosong (Client Ref bukan
-    ticket panel). counterparty = Beneficiary Name; norek di description+raw
-    untuk join Sesama CM.
+    Nominal format ID (`IDR 30.000.000`) atau angka. `reference` kosong.
+    counterparty = Beneficiary Name; norek di description+raw untuk join Sesama CM.
     """
 
     source_key = "gateway"
@@ -873,25 +876,132 @@ class QRFlyerTampungParser(BaseParser):
         "beneficiary account", "beneficiary name", "payout status",
         "payout amount", "settlement timestamp",
     )
+    # Alias casefold → kanonik (vendor kadang beda spasi/underscore)
+    _ALIAS = {
+        "beneficiary account": ("beneficiary account", "beneficiary_account", "account number"),
+        "beneficiary name": ("beneficiary name", "beneficiary_name", "account name"),
+        "payout status": ("payout status", "payout_status", "status"),
+        "payout amount": ("payout amount", "payout_amount", "amount"),
+        "settlement timestamp": (
+            "settlement timestamp", "settlement_timestamp", "settlement time", "settled at",
+        ),
+        "request timestamp": (
+            "request timestamp", "request_timestamp", "created at", "transaction date",
+        ),
+        "client ref": ("client ref", "client_ref", "client reference", "client reff"),
+        "transaction fee": ("transaction fee", "transaction_fee", "fee"),
+        "bank": ("bank", "bank name", "bank identifier"),
+    }
+
+    @classmethod
+    def _norm_h(cls, h):
+        return re.sub(r"\s+", " ", str(h or "").strip().casefold())
+
+    @classmethod
+    def _petakan_header(cls, headers):
+        """header list → {kanonik: nama asli di berkas}."""
+        ada = {}
+        for h in headers or []:
+            if not h:
+                continue
+            ada.setdefault(cls._norm_h(h), str(h).strip())
+        peta = {}
+        for kanon, aliases in cls._ALIAS.items():
+            for a in aliases:
+                if a in ada:
+                    peta[kanon] = ada[a]
+                    break
+        return peta
+
+    def _baca_baris(self, path):
+        """→ list[dict] keyed by original header names. Cari baris header dulu."""
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".csv":
+            with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+                # sniffer: baris pertama bisa judul
+                lines = f.readlines()
+            if not lines:
+                return []
+            # Cari baris header di 8 baris pertama
+            header_idx = 0
+            for i, line in enumerate(lines[:8]):
+                low = line.casefold()
+                if "beneficiary" in low and ("payout" in low or "amount" in low):
+                    header_idx = i
+                    break
+                if "payout amount" in low or "payout_amount" in low:
+                    header_idx = i
+                    break
+            import io
+            body = "".join(lines[header_idx:])
+            reader = csv.DictReader(io.StringIO(body))
+            return [r for r in reader if any((v or "").strip() for v in r.values())]
+
+        # XLSX / XLS
+        grid = read_xlsx_grid(path)
+        if not grid:
+            return []
+        header_idx = None
+        for i, row in enumerate(grid[:8]):
+            cells = [str(c or "").strip() for c in row]
+            low = " ".join(c.casefold() for c in cells if c)
+            if "beneficiary" in low and ("payout" in low or "amount" in low):
+                header_idx = i
+                break
+            if "payout amount" in low or "payout_amount" in low:
+                header_idx = i
+                break
+        if header_idx is None:
+            # fallback: baris pertama yang punya ≥3 sel non-kosong
+            for i, row in enumerate(grid[:8]):
+                n = sum(1 for c in row if c not in (None, ""))
+                if n >= 3:
+                    header_idx = i
+                    break
+        if header_idx is None:
+            raise ValueError(
+                "Laporan QR Flyer Tampung tak dikenali: baris header payout "
+                "tidak ditemukan (cari Beneficiary/Payout Amount). "
+                "Baris awal: %s."
+                % (
+                    "; ".join(
+                        repr(" | ".join(str(c or "").strip() for c in row if c not in (None, "")))
+                        for row in grid[:3]
+                    )
+                    or "(kosong)",
+                )
+            )
+        headers = [
+            str(c).strip() if c is not None else "" for c in grid[header_idx]
+        ]
+        out = []
+        for row in grid[header_idx + 1 :]:
+            if row is None or all(c is None or c == "" for c in row):
+                continue
+            d = {h: c for h, c in zip(headers, row) if h}
+            if any(str(v or "").strip() for v in d.values()):
+                out.append(d)
+        return out
 
     def parse(self, path, flow=""):
-        with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
-            reader = csv.DictReader(f)
-            header = [str(h or "").strip() for h in (reader.fieldnames or [])]
-            peta = {h.casefold(): h for h in header if h}
-            hilang = [k for k in self.KOLOM_WAJIB if k not in peta]
-            if hilang:
-                raise ValueError(
-                    "Laporan QR Flyer Tampung tak dikenali: kolom %s tidak "
-                    "ditemukan. Header berkas: %s."
-                    % (
-                        " dan ".join(hilang),
-                        ", ".join(repr(h) for h in header if h) or "(kosong)",
-                    )
+        rows = self._baca_baris(path)
+        if not rows:
+            return []
+        # header dari kunci baris pertama
+        headers = list(rows[0].keys())
+        peta = self._petakan_header(headers)
+        hilang = [k for k in self.KOLOM_WAJIB if k not in peta]
+        if hilang:
+            raise ValueError(
+                "Laporan QR Flyer Tampung tak dikenali: kolom %s tidak "
+                "ditemukan. Header berkas: %s."
+                % (
+                    " dan ".join(hilang),
+                    ", ".join(repr(h) for h in headers if h) or "(kosong)",
                 )
-            rows = [r for r in reader if any((v or "").strip() for v in r.values())]
+            )
 
-        kol = lambda nama: peta.get(nama.casefold(), "\x00")  # noqa: E731
+        kol = lambda nama: peta.get(nama, "\x00")  # noqa: E731
         out = []
         n_tx = 0
         status_ditemukan = set()
@@ -907,8 +1017,17 @@ class QRFlyerTampungParser(BaseParser):
             if status not in self.STATUS_UANG:
                 continue
 
-            amt = abs(parse_decimal(r.get(kol("payout amount")), number_format="id"))
-            fee = abs(parse_decimal(r.get(kol("transaction fee")), number_format="id"))
+            raw_amt = r.get(kol("payout amount"))
+            # XLSX typed number vs CSV "IDR 30.000.000"
+            if isinstance(raw_amt, (int, float, Decimal)):
+                amt = abs(parse_decimal(raw_amt))
+            else:
+                amt = abs(parse_decimal(raw_amt, number_format="id"))
+            raw_fee = r.get(kol("transaction fee"))
+            if isinstance(raw_fee, (int, float, Decimal)):
+                fee = abs(parse_decimal(raw_fee))
+            else:
+                fee = abs(parse_decimal(raw_fee, number_format="id"))
             settle = parse_dt(r.get(kol("settlement timestamp")))
             created = parse_dt(r.get(kol("request timestamp")))
             occurred = settle or created

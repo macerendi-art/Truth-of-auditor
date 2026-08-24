@@ -70,6 +70,79 @@ class QRFlyerTampungParserTests(SimpleTestCase):
     def test_registry(self):
         self.assertIs(services.PARSERS.get("qrflyer_tampung"), QRFlyerTampungParser)
 
+    def test_xlsx_judul_withdraw_qrisflyer(self):
+        """MXW: XLSX baris-1 judul 'Withdraw - Qrisflyer', header payout baris-2."""
+        import openpyxl
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["Withdraw - Qrisflyer"])
+        ws.append([
+            "Request Timestamp", "Client Ref", "Bank Identifier", "Bank",
+            "Beneficiary Account", "Beneficiary Name", "Payout Status",
+            "Payout Amount", "Transaction Fee", "Settlement Timestamp",
+        ])
+        ws.append([
+            "2026-08-23 10:00:00", "A260823TEST1", "002", "BRI",
+            "119101022152500", "KIKISUASANTO", "Success",
+            30000000, 2500, "2026-08-23 10:00:02",
+        ])
+        ws.append([
+            "2026-08-23 11:00:00", "A260823FAIL", "014", "BCA",
+            "5315090854", "UBAY", "Failed",
+            1000000, 2500, "2026-08-23 11:00:01",
+        ])
+        fd, path = tempfile.mkstemp(suffix=".xlsx", prefix="flyer_tampung_mxw_")
+        os.close(fd)
+        try:
+            wb.save(path)
+            rows = QRFlyerTampungParser().parse(path)
+            hit = detect_source(path, "HISTORY TAMPUNG QRIS FLYER MXW 23 AGUST.xlsx")
+        finally:
+            os.remove(path)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["amount"], Decimal("30000000"))
+        self.assertEqual(rows[0]["money_delta"], Decimal("-30000000"))
+        self.assertEqual(rows[0]["counterparty"], "KIKISUASANTO")
+        self.assertTrue(rows[0]["description"].startswith("QRFLYER TAMPUNG"))
+        self.assertEqual(rows[0]["posted_date"], date(2026, 8, 23))
+        self.assertTrue(hit)
+        self.assertEqual(hit[0]["parser_key"], "qrflyer_tampung")
+        self.assertGreaterEqual(hit[0]["confidence"], 0.92)
+
+    def test_detect_filename_tampung_xlsx_bukan_qrflyer_member(self):
+        """Filename HISTORY TAMPUNG … FLYER.xlsx jangan jatuh ke parser member."""
+        import openpyxl
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["Withdraw - Qrisflyer"])
+        ws.append([
+            "Request Timestamp", "Client Ref", "Bank", "Beneficiary Account",
+            "Beneficiary Name", "Payout Status", "Payout Amount",
+            "Transaction Fee", "Settlement Timestamp",
+        ])
+        ws.append([
+            "2026-08-23 12:00:00", "R1", "BRI", "119101022152500",
+            "ORANG", "Success", "IDR 1.000.000", "IDR 2.500", "2026-08-23 12:00:01",
+        ])
+        fd, path = tempfile.mkstemp(suffix=".xlsx", prefix="hist_tampung_")
+        os.close(fd)
+        try:
+            wb.save(path)
+            hit = detect_source(path, "HISTORY TAMPUNG QRIS FLYER MXW 23 AGUST.xlsx")
+        finally:
+            os.remove(path)
+        self.assertEqual(hit[0]["parser_key"], "qrflyer_tampung")
+        keys = [h["parser_key"] for h in hit]
+        # bila qrflyer member ikut score, tampung harus lebih tinggi
+        if "qrflyer" in keys:
+            conf_t = next(h["confidence"] for h in hit if h["parser_key"] == "qrflyer_tampung")
+            conf_m = next(h["confidence"] for h in hit if h["parser_key"] == "qrflyer")
+            self.assertGreater(conf_t, conf_m)
+
 
 class QRISEliteTampungParserTests(SimpleTestCase):
     def test_parse_fixture(self):

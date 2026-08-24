@@ -78,7 +78,15 @@ def detect_source(path, filename=""):
         scored[key] = max(scored.get(key, 0.0), conf)
 
     if ext in (".xlsx", ".xls"):
-        t = _xlsx_tokens(path)
+        t = _xlsx_tokens(path, max_rows=8)
+        # QR Flyer TAMPUNG XLSX — sebelum aturan qrflyer member (filename 0.85).
+        # MXW 23-08: baris-1 judul "Withdraw - Qrisflyer", header payout di baris 2+.
+        if (_has(t, "beneficiary account") or _has(t, "beneficiary_account")) and (
+            _has(t, "payout amount") or _has(t, "payout_amount") or _has(t, "payout status")
+        ):
+            add("qrflyer_tampung", 0.95)
+        elif "tampung" in fn and ("flyer" in fn or "qrflyer" in fn or "qris flyer" in fn):
+            add("qrflyer_tampung", 0.92)
         if _has(t, "ticket number") and _has(t, "user name") and (_has(t, "deposit amount") or _has(t, "withdrawal amount")):
             add("panel", 0.95)
         if _has(t, "ticket number") and (_has(t, "admin fee") or _has(t, "account title")) \
@@ -121,7 +129,10 @@ def detect_source(path, filename=""):
         # atas. Sebelum ini bentuk keempat cuma lolos lewat nama file (0,85).
         if _has(t, "client reff") and (_has(t, "total_amount") or _has(t, "net_amount")):
             add("qrflyer", 0.95)
-        if _has(t, "qris") or _has(t, "qr flyer") or "qrflyer" in fn or "qris" in fn or "qr flyer" in fn:
+        # Jangan sandingkan filename qrflyer member di atas tampung
+        if "tampung" not in fn and (
+            _has(t, "qris") or _has(t, "qr flyer") or "qrflyer" in fn or "qris" in fn or "qr flyer" in fn
+        ):
             add("qrflyer", 0.85)
         if _has(t, "e-statement") or _has(t, "rekening koran") or "mandiri" in fn:
             add("mandiri", 0.80)
