@@ -1,43 +1,32 @@
 /* toko-picker.js — kotak cari untuk <select> panjang (Toko + jenis parser upload).
  *
- * Instalasi ini memakai 16+ toko dgn nama pendek dan mirip (MUL MXW M25 K25 …),
- * jadi menggulir <select> bawaan menyiksa. Modul ini membangun kontrol bertema
- * DI SEBELAH select asli: tombol pemicu + popover berisi kotak cari dan daftar
- * role="listbox" yang tersaring saat diketik.
- *
- * SELECT ASLI TETAP SUMBER KEBENARAN. Markup server sengaja TIDAK diubah isinya —
- * enhancement murni klien. Select hanya disembunyikan (kelas .tp-native) SETELAH
- * kontrol berhasil dibangun; bila apa pun gagal, select bawaan tetap tampil.
+ * SELECT ASLI TETAP SUMBER KEBENARAN. Enhancement murni klien; select disembunyikan
+ * (.tp-native) HANYA setelah kontrol berhasil dibangun.
  *
  * Mode:
- * - `select[name=toko_id]` → pilih = set value + form.submit() (bilah atas / modal)
- * - `select.parser-pick` → pilih = set value saja (preview Upload & Parse; form
- *   commit nanti). Placeholder "Cari jenis…".
+ * - `select[name=toko_id]` → tombol + popover (+ cari bila opsi banyak) → form.submit()
+ * - `select.parser-pick` → SATU input combobox (ketik = saring, pilih = set value).
+ *   Tidak ada kotak cari kedua — itu yang bikin UI “Cari jenis…” dobel & membingungkan.
  *
- * Vanilla JS, tanpa dependensi & tanpa build step — gaya sama dgn range-select.js.
+ * Vanilla JS, tanpa dependensi.
  */
 (function () {
   'use strict';
 
-  var AMBANG_CARI = 7; // kotak cari muncul bila jumlah opsi LEBIH dari ini
-  // Chevron statis (tanpa data pengguna) — meniru .side details.grp>summary>.chev.
+  var AMBANG_CARI = 7;
   var CHEV = '<svg class="tp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
-    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>';
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>';
 
-  var seq = 0;      // penomor id unik antar-kontrol di satu halaman
-  var terbuka = null; // kontrol yang popovernya sedang terbuka (maksimal satu)
+  var seq = 0;
+  var terbuka = null;
 
   function buat(tag, cls, teks) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
-    // Nama toko = data pengguna: SELALU lewat textContent, tak pernah innerHTML.
     if (teks != null) n.textContent = teks;
     return n;
   }
 
-  // Batas bawah area yang masih terlihat: induk terdekat yang memotong/menggulir
-  // (kartu modal Pengingat Toko punya max-height:90vh + overflow-y:auto), atau
-  // tepi layar. Dipakai untuk memangkas tinggi daftar agar popover tak terpotong.
   function batasBawah(node) {
     for (var p = node.parentElement; p && p !== document.body; p = p.parentElement) {
       var ov = getComputedStyle(p).overflowY;
@@ -48,9 +37,6 @@
     return window.innerHeight;
   }
 
-  // Baca struktur <select> apa adanya: optgroup beserta isinya, plus option
-  // lepas di luar optgroup ("Semua Toko" milik admin, dan daftar rata saat
-  // hanya ada satu panel).
   function bacaOpsi(select) {
     var grup = [], anak = select.children, i, j, lepas = null;
     for (i = 0; i < anak.length; i++) {
@@ -78,12 +64,24 @@
     };
   }
 
-  function bangun(select) {
+  function norm(s) {
+    return String(s || '').toLowerCase().replace(/[_\s\-\.]+/g, '');
+  }
+
+  function cocok(teks, nilai, raw) {
+    var q = String(raw || '').trim().toLowerCase();
+    var qn = norm(raw);
+    if (!q) return true;
+    var t = String(teks || '').toLowerCase();
+    var v = String(nilai || '').toLowerCase();
+    return t.indexOf(q) !== -1 || v.indexOf(q) !== -1
+      || (qn && norm(t).indexOf(qn) !== -1)
+      || (qn && norm(v).indexOf(qn) !== -1);
+  }
+
+  /* ─── Mode parser: satu input combobox ─── */
+  function bangunParser(select) {
     if (select.dataset.tpDone) return;
-    var form = select.form;
-    // Mode submit (toko) butuh form. Mode value (parser) cukup parent.
-    var modeValue = select.classList.contains('parser-pick');
-    if (!modeValue && (!form || !select.parentNode)) return;
     if (!select.parentNode) return;
 
     var grup = bacaOpsi(select), jumlah = 0, i, k;
@@ -91,11 +89,307 @@
     if (!jumlah) return;
 
     var id = 'tp' + (++seq);
-    // parser-pick di sel tabel = medan penuh; toko di bilah atas = ringkas
-    var host = buat(
-      'div',
-      'tp-host' + (modeValue || !select.closest('.toko-pick') ? ' tp-field' : '')
-    );
+    var host = buat('div', 'tp-host tp-field tp-combo');
+    var wrap = buat('div', 'tp-combo-wrap');
+    var input = buat('input', 'tp-combo-input');
+    input.type = 'text';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-expanded', 'false');
+    input.setAttribute('aria-label', 'Jenis file — ketik untuk mencari');
+    input.placeholder = 'Cari jenis…';
+    wrap.appendChild(input);
+    var chevBtn = buat('button', 'tp-combo-chev');
+    chevBtn.type = 'button';
+    chevBtn.tabIndex = -1;
+    chevBtn.setAttribute('aria-label', 'Buka daftar jenis');
+    chevBtn.insertAdjacentHTML('beforeend', CHEV);
+    wrap.appendChild(chevBtn);
+    host.appendChild(wrap);
+
+    var pop = buat('div', 'tp-pop tp-pop-fixed');
+    pop.hidden = true;
+    var daftar = buat('div', 'tp-list');
+    daftar.id = id + '-list';
+    daftar.setAttribute('role', 'listbox');
+    input.setAttribute('aria-controls', daftar.id);
+    pop.appendChild(daftar);
+    var kosong = buat('div', 'tp-kosong', 'Jenis tidak ditemukan.');
+    kosong.setAttribute('role', 'status');
+    kosong.hidden = true;
+    pop.appendChild(kosong);
+    // pop di body lewat fixed; tetap child host untuk contains()
+    host.appendChild(pop);
+
+    var item = [], terpilih = null, labelTerpilih = '';
+    for (i = 0; i < grup.length; i++) {
+      for (k = 0; k < grup[i].opsi.length; k++) {
+        var o = grup[i].opsi[k];
+        if (o.disabled && !o.nilai) {
+          if (o.terpilih && !labelTerpilih) {
+            labelTerpilih = o.teks || '';
+            input.placeholder = o.teks || 'Cari jenis…';
+          }
+          continue;
+        }
+        var node = buat('div', 'tp-opt', o.teks);
+        node.id = id + '-o' + item.length;
+        node.setAttribute('role', 'option');
+        node.setAttribute('aria-selected', o.terpilih ? 'true' : 'false');
+        node.setAttribute('data-v', o.nilai);
+        node.setAttribute('data-q', o.teks.toLowerCase());
+        daftar.appendChild(node);
+        item.push(node);
+        if (o.terpilih) {
+          terpilih = node;
+          labelTerpilih = o.teks;
+        }
+      }
+    }
+    // Tampilkan nilai terpilih di input (bukan placeholder)
+    if (labelTerpilih && select.value) {
+      input.value = labelTerpilih;
+    } else {
+      input.value = '';
+    }
+
+    var ctl = { host: host, sorot: null, tutup: null };
+    var ignoreBlur = false;
+
+    function tampak() {
+      var v = [], x;
+      for (x = 0; x < item.length; x++) {
+        if (!item[x].classList.contains('tp-hide')) v.push(item[x]);
+      }
+      return v;
+    }
+
+    function setSorot(node) {
+      if (ctl.sorot) ctl.sorot.classList.remove('tp-on');
+      ctl.sorot = node || null;
+      if (!node) {
+        input.removeAttribute('aria-activedescendant');
+        return;
+      }
+      node.classList.add('tp-on');
+      input.setAttribute('aria-activedescendant', node.id);
+      try { node.scrollIntoView({ block: 'nearest' }); } catch (e) { /* */ }
+    }
+
+    function saring(qraw) {
+      var q = qraw != null ? qraw : input.value;
+      var n = 0, x;
+      for (x = 0; x < item.length; x++) {
+        var hay = item[x].getAttribute('data-q') || '';
+        var hayV = item[x].getAttribute('data-v') || '';
+        var ok = cocok(hay, hayV, q);
+        item[x].classList.toggle('tp-hide', !ok);
+        item[x].hidden = !ok;
+        if (ok) n++;
+      }
+      kosong.hidden = n > 0;
+      daftar.scrollTop = 0;
+      setSorot(n ? tampak()[0] : null);
+      return n;
+    }
+
+    function tempatkan() {
+      var r = wrap.getBoundingClientRect();
+      var lebar = Math.max(Math.ceil(r.width), 200);
+      var left = Math.min(r.left, window.innerWidth - lebar - 8);
+      if (left < 8) left = 8;
+      pop.style.position = 'fixed';
+      pop.style.left = left + 'px';
+      pop.style.width = lebar + 'px';
+      pop.style.minWidth = lebar + 'px';
+      pop.style.right = 'auto';
+      pop.style.zIndex = '200';
+      var ruangBawah = window.innerHeight - r.bottom - 12;
+      var ruangAtas = r.top - 12;
+      var maxList = 260;
+      if (ruangBawah < 140 && ruangAtas > ruangBawah) {
+        pop.style.top = 'auto';
+        pop.style.bottom = (window.innerHeight - r.top + 4) + 'px';
+        maxList = Math.min(260, Math.max(100, ruangAtas - 12));
+      } else {
+        pop.style.bottom = 'auto';
+        pop.style.top = (r.bottom + 4) + 'px';
+        maxList = Math.min(260, Math.max(100, ruangBawah - 12));
+      }
+      daftar.style.maxHeight = maxList + 'px';
+    }
+
+    function onScrollOrResize(e) {
+      if (pop.hidden) return;
+      if (e && e.type === 'scroll' && pop.contains(e.target)) return;
+      tempatkan();
+    }
+
+    function buka(keepQuery) {
+      if (terbuka && terbuka !== ctl) terbuka.tutup(false);
+      pop.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      host.classList.add('tp-open');
+      terbuka = ctl;
+      if (!keepQuery) {
+        // Buka: tampilkan semua, biarkan user langsung ketik (select-all)
+        saring('');
+        try { input.select(); } catch (e) { /* */ }
+      } else {
+        saring(input.value);
+      }
+      tempatkan();
+      // Jika ada terpilih & query kosong, sorot terpilih; else first match
+      if (!String(input.value || '').trim() && terpilih && !terpilih.classList.contains('tp-hide')) {
+        setSorot(terpilih);
+      }
+      window.addEventListener('scroll', onScrollOrResize, true);
+      window.addEventListener('resize', onScrollOrResize);
+    }
+
+    function tutup(restore) {
+      if (pop.hidden) return;
+      pop.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+      host.classList.remove('tp-open');
+      if (terbuka === ctl) terbuka = null;
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+      setSorot(null);
+      if (restore) {
+        // Kembalikan label nilai yang tersimpan di <select>
+        var lab = labelTerpilih;
+        if (!lab && select.value) {
+          for (var x = 0; x < item.length; x++) {
+            if (item[x].getAttribute('data-v') === select.value) {
+              lab = item[x].textContent;
+              break;
+            }
+          }
+        }
+        input.value = lab || '';
+      }
+    }
+    ctl.tutup = function () { tutup(true); };
+
+    function pilih(node) {
+      if (!node || node.classList.contains('tp-hide')) return;
+      var nilai = node.getAttribute('data-v');
+      var teks = node.textContent;
+      select.value = nilai;
+      labelTerpilih = teks;
+      terpilih = node;
+      input.value = teks;
+      for (var x = 0; x < item.length; x++) {
+        item[x].setAttribute('aria-selected', item[x] === node ? 'true' : 'false');
+      }
+      try { select.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) { /* */ }
+      ignoreBlur = true;
+      tutup(false);
+      input.value = teks;
+      setTimeout(function () { ignoreBlur = false; input.blur(); }, 0);
+    }
+
+    input.addEventListener('focus', function () {
+      buka(false);
+    });
+
+    input.addEventListener('click', function () {
+      if (pop.hidden) buka(false);
+      else try { input.select(); } catch (e) { /* */ }
+    });
+
+    chevBtn.addEventListener('mousedown', function (e) {
+      e.preventDefault(); // jangan curi fokus dari input
+    });
+    chevBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      if (pop.hidden) {
+        input.focus();
+        buka(false);
+      } else {
+        tutup(true);
+      }
+    });
+
+    input.addEventListener('input', function () {
+      if (pop.hidden) buka(true);
+      saring(input.value);
+      tempatkan();
+    });
+
+    input.addEventListener('keydown', function (e) {
+      var v, i2;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (pop.hidden) buka(true);
+        v = tampak();
+        if (!v.length) return;
+        i2 = v.indexOf(ctl.sorot);
+        if (i2 < 0) i2 = e.key === 'ArrowDown' ? -1 : 0;
+        setSorot(e.key === 'ArrowDown' ? v[(i2 + 1) % v.length] : v[(i2 - 1 + v.length) % v.length]);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (ctl.sorot) pilih(ctl.sorot);
+        else {
+          // Enter tanpa sorotan: jika tepat 1 hasil, pilih itu
+          v = tampak();
+          if (v.length === 1) pilih(v[0]);
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        tutup(true);
+        input.blur();
+      } else if (e.key === 'Tab') {
+        tutup(true);
+      }
+    });
+
+    input.addEventListener('blur', function () {
+      if (ignoreBlur) return;
+      // tunda: klik opsi memicu blur dulu sebelum click
+      setTimeout(function () {
+        if (ignoreBlur) return;
+        if (pop.hidden) return;
+        // jika fokus pindah ke dalam pop, jangan tutup
+        var a = document.activeElement;
+        if (a && pop.contains(a)) return;
+        tutup(true);
+      }, 150);
+    });
+
+    daftar.addEventListener('mousedown', function (e) {
+      // cegah input blur sebelum click opsi
+      e.preventDefault();
+      ignoreBlur = true;
+    });
+    daftar.addEventListener('click', function (e) {
+      var node = e.target.closest ? e.target.closest('.tp-opt') : null;
+      if (node) pilih(node);
+      ignoreBlur = false;
+    });
+
+    select.parentNode.insertBefore(host, select.nextSibling);
+    select.classList.add('tp-native');
+    select.dataset.tpDone = '1';
+  }
+
+  /* ─── Mode toko (tombol + popover) — perilaku lama ─── */
+  function bangunToko(select) {
+    if (select.dataset.tpDone) return;
+    var form = select.form;
+    if (!form || !select.parentNode) return;
+
+    var grup = bacaOpsi(select), jumlah = 0, i, k;
+    for (i = 0; i < grup.length; i++) jumlah += grup[i].opsi.length;
+    if (!jumlah) return;
+
+    var id = 'tp' + (++seq);
+    var host = buat('div', 'tp-host' + (select.closest('.toko-pick') ? '' : ' tp-field'));
     var trigger = buat('button', 'tp-trigger');
     trigger.type = 'button';
     trigger.setAttribute('aria-haspopup', 'listbox');
@@ -117,23 +411,17 @@
     if (jumlah > AMBANG_CARI) {
       cari = buat('input', 'tp-cari');
       cari.type = 'text';
-      cari.placeholder = modeValue ? 'Cari jenis…' : 'Cari toko…';
+      cari.placeholder = 'Cari toko…';
       cari.autocomplete = 'off';
       cari.setAttribute('role', 'combobox');
       cari.setAttribute('aria-controls', daftar.id);
       cari.setAttribute('aria-expanded', 'true');
       cari.setAttribute('aria-autocomplete', 'list');
-      cari.setAttribute('aria-label', modeValue ? 'Cari jenis file' : 'Cari toko');
+      cari.setAttribute('aria-label', 'Cari toko');
       pop.appendChild(cari);
     }
     pop.appendChild(daftar);
-    var kosong = buat(
-      'div',
-      'tp-kosong',
-      modeValue ? 'Jenis tidak ditemukan.' : 'Toko tidak ditemukan.'
-    );
-    // role="status" (aria-live sopan): saringan yang nihil harus TERDENGAR juga,
-    // bukan cuma terlihat — pesannya muncul tanpa fokus pindah ke mana pun.
+    var kosong = buat('div', 'tp-kosong', 'Toko tidak ditemukan.');
     kosong.setAttribute('role', 'status');
     kosong.hidden = true;
     pop.appendChild(kosong);
@@ -150,41 +438,28 @@
       }
       for (k = 0; k < grup[i].opsi.length; k++) {
         var o = grup[i].opsi[k];
-        // Opsi placeholder disabled (value="") tidak masuk daftar pilih —
-        // labelnya tetap di trigger bila belum ada deteksi.
-        if (o.disabled && !o.nilai) {
-          if (o.terpilih && !terpilih) {
-            kini.textContent = o.teks || '—';
-          }
-          continue;
-        }
+        if (o.disabled && !o.nilai) continue;
         var node = buat('div', 'tp-opt', o.teks);
         node.id = id + '-o' + item.length;
         node.setAttribute('role', 'option');
         node.setAttribute('aria-selected', o.terpilih ? 'true' : 'false');
-        node.dataset.v = o.nilai;
-        node.dataset.q = o.teks.toLowerCase();
+        node.setAttribute('data-v', o.nilai);
+        node.setAttribute('data-q', o.teks.toLowerCase());
         wadah.appendChild(node);
         item.push(node);
         if (o.terpilih) terpilih = node;
       }
     }
-    if (terpilih) {
-      kini.textContent = terpilih.textContent;
-    } else if (!kini.textContent) {
-      kini.textContent = '—';
-    }
-    trigger.title = modeValue
-      ? ('Jenis: ' + kini.textContent + ' — klik untuk mencari/ganti')
-      : ('Toko aktif: ' + kini.textContent + ' — klik untuk mengganti');
+    kini.textContent = terpilih ? terpilih.textContent : '—';
+    trigger.title = 'Toko aktif: ' + kini.textContent + ' — klik untuk mengganti';
 
     var ctl = { host: host, sorot: null, tutup: null };
-    var fokusAria = cari || daftar; // pembawa aria-activedescendant
+    var fokusAria = cari || daftar;
 
     function tampak() {
-      var v = [];
-      for (var x = 0; x < item.length; x++) {
-        if (!item[x].hidden && !item[x].classList.contains('tp-hide')) v.push(item[x]);
+      var v = [], x;
+      for (x = 0; x < item.length; x++) {
+        if (!item[x].classList.contains('tp-hide')) v.push(item[x]);
       }
       return v;
     }
@@ -195,114 +470,35 @@
       if (!node) { fokusAria.removeAttribute('aria-activedescendant'); return; }
       node.classList.add('tp-on');
       fokusAria.setAttribute('aria-activedescendant', node.id);
-      // Gulirkan di dalam daftar saja — jangan sampai menggeser halaman.
-      try {
-        if (typeof node.scrollIntoView === 'function') {
-          node.scrollIntoView({ block: 'nearest' });
-        } else {
-          var atas = node.offsetTop, bawah = atas + node.offsetHeight;
-          if (atas < daftar.scrollTop) daftar.scrollTop = atas;
-          else if (bawah > daftar.scrollTop + daftar.clientHeight) {
-            daftar.scrollTop = bawah - daftar.clientHeight;
-          }
-        }
-      } catch (err) { /* abaikan */ }
-    }
-
-    function norm(s) {
-      return String(s || '').toLowerCase().replace(/[_\s\-\.]+/g, '');
+      try { node.scrollIntoView({ block: 'nearest' }); } catch (e) { /* */ }
     }
 
     function saring() {
-      var raw = cari ? cari.value : '';
-      var q = String(raw).trim().toLowerCase();
-      var qn = norm(raw);
+      var q = cari ? cari.value : '';
       var n = 0, x;
       for (x = 0; x < item.length; x++) {
-        var hay = item[x].getAttribute('data-q') || item[x].dataset.q || '';
-        var hayV = item[x].getAttribute('data-v') || item[x].dataset.v || '';
-        var ok = !q
-          || hay.indexOf(q) !== -1
-          || String(hayV).toLowerCase().indexOf(q) !== -1
-          || (qn && norm(hay).indexOf(qn) !== -1)
-          || (qn && norm(hayV).indexOf(qn) !== -1);
-        item[x].hidden = !ok;
+        var hay = item[x].getAttribute('data-q') || '';
+        var hayV = item[x].getAttribute('data-v') || '';
+        var ok = cocok(hay, hayV, q);
         item[x].classList.toggle('tp-hide', !ok);
+        item[x].hidden = !ok;
         if (ok) n++;
       }
       var judul = daftar.querySelectorAll('.tp-grup');
       for (x = 0; x < judul.length; x++) {
-        var ada = !!judul[x].querySelector('.tp-opt:not(.tp-hide):not([hidden])');
-        judul[x].hidden = !ada;
+        var ada = !!judul[x].querySelector('.tp-opt:not(.tp-hide)');
         judul[x].classList.toggle('tp-hide', !ada);
+        judul[x].hidden = !ada;
       }
       kosong.hidden = n > 0;
-      // Saat mengetik: selalu mulai dari atas daftar ter-filter
       daftar.scrollTop = 0;
       setSorot(n ? tampak()[0] : null);
     }
 
-    // Popover: parser di sel tabel pakai position:fixed agar lolos overflow
-    // .twrap (overflow-x:auto → clipping). Kotak cari di luar .tp-list (flex)
-    // supaya tidak ikut gulir. Toko bilah atas tetap absolute di host.
     function tempatkan() {
       daftar.style.maxHeight = '';
-      if (modeValue) {
-        var r = trigger.getBoundingClientRect();
-        var lebar = Math.max(Math.ceil(r.width), 220);
-        var left = Math.min(r.left, window.innerWidth - lebar - 8);
-        if (left < 8) left = 8;
-        pop.classList.add('tp-pop-fixed');
-        pop.style.position = 'fixed';
-        pop.style.left = left + 'px';
-        pop.style.right = 'auto';
-        pop.style.width = lebar + 'px';
-        pop.style.minWidth = lebar + 'px';
-        pop.style.zIndex = '200';
-        var ruangBawah = window.innerHeight - r.bottom - 12;
-        var ruangAtas = r.top - 12;
-        var headH = cari ? 48 : 8; // perkiraan tinggi kotak cari + margin
-        var maxList = 260;
-        if (ruangBawah < 160 && ruangAtas > ruangBawah) {
-          // buka ke atas
-          pop.style.top = 'auto';
-          pop.style.bottom = (window.innerHeight - r.top + 6) + 'px';
-          maxList = Math.min(260, Math.max(120, ruangAtas - headH));
-        } else {
-          pop.style.bottom = 'auto';
-          pop.style.top = (r.bottom + 6) + 'px';
-          maxList = Math.min(260, Math.max(120, ruangBawah - headH));
-        }
-        daftar.style.maxHeight = maxList + 'px';
-        return;
-      }
-      pop.classList.remove('tp-pop-fixed');
-      pop.style.position = '';
-      pop.style.left = '';
-      pop.style.right = '';
-      pop.style.top = '';
-      pop.style.bottom = '';
-      pop.style.width = '';
-      pop.style.minWidth = '';
-      pop.style.zIndex = '';
       var luber = pop.getBoundingClientRect().bottom + 8 - batasBawah(host);
       if (luber > 0) daftar.style.maxHeight = Math.max(140, daftar.clientHeight - luber) + 'px';
-    }
-
-    function onScrollOrResize(e) {
-      if (pop.hidden || !modeValue) return;
-      // Scroll di dalam daftar opsi jangan memicu re-layout (bisa ganggu ketik/filter)
-      if (e && e.type === 'scroll' && pop.contains(e.target)) return;
-      tempatkan();
-    }
-
-    function fokusCari() {
-      if (!cari) return;
-      try {
-        cari.focus();
-        // select() memudahkan ganti kata kunci; abaikan bila browser menolak
-        if (typeof cari.select === 'function' && cari.value) cari.select();
-      } catch (err) { /* abaikan */ }
     }
 
     function buka() {
@@ -312,21 +508,12 @@
       terbuka = ctl;
       if (cari) cari.value = '';
       saring();
-      // Tinggi final dulu, baru sorot: menggulir toko aktif ke dalam pandangan
-      // butuh tinggi daftar yang sudah dipangkas, kalau tidak ia meleset.
       tempatkan();
-      if (terpilih && !terpilih.hidden && !terpilih.classList.contains('tp-hide')) {
-        setSorot(terpilih);
-      }
-      // Fokus ke kotak cari — WAJIB ditunda: click pada <button> mengembalikan
-      // fokus ke tombol SETELAH handler click selesai, sehingga ketikan user
-      // tidak masuk ke input (filter kosong, daftar tetap penuh).
-      fokusCari();
-      setTimeout(fokusCari, 0);
-      if (modeValue) {
-        window.addEventListener('scroll', onScrollOrResize, true);
-        window.addEventListener('resize', onScrollOrResize);
-      }
+      if (terpilih && !terpilih.classList.contains('tp-hide')) setSorot(terpilih);
+      setTimeout(function () {
+        if (cari) cari.focus();
+        else daftar.focus();
+      }, 0);
     }
 
     function tutup(kembalikanFokus) {
@@ -334,96 +521,43 @@
       pop.hidden = true;
       trigger.setAttribute('aria-expanded', 'false');
       if (terbuka === ctl) terbuka = null;
-      if (modeValue) {
-        window.removeEventListener('scroll', onScrollOrResize, true);
-        window.removeEventListener('resize', onScrollOrResize);
-        pop.classList.remove('tp-pop-fixed');
-        pop.style.position = '';
-        pop.style.left = '';
-        pop.style.right = '';
-        pop.style.top = '';
-        pop.style.bottom = '';
-        pop.style.width = '';
-        pop.style.minWidth = '';
-        pop.style.zIndex = '';
-        daftar.style.maxHeight = '';
-      }
       if (kembalikanFokus) trigger.focus();
     }
     ctl.tutup = tutup;
 
     function pilih(node) {
-      var nilai = node.dataset.v;
-      // Memilih nilai yang sedang aktif = tak ada perubahan.
+      var nilai = node.getAttribute('data-v');
       if (select.value === nilai) { tutup(true); return; }
       select.value = nilai;
-      // Segarkan label + aria pada opsi
-      for (var x = 0; x < item.length; x++) {
-        item[x].setAttribute('aria-selected', item[x] === node ? 'true' : 'false');
-      }
-      terpilih = node;
-      kini.textContent = node.textContent;
-      trigger.title = modeValue
-        ? ('Jenis: ' + kini.textContent + ' — klik untuk mencari/ganti')
-        : ('Toko aktif: ' + kini.textContent + ' — klik untuk mengganti');
-      try {
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      } catch (err) { /* IE tua — abaikan */ }
-      if (modeValue) {
-        tutup(true);
-        return;
-      }
       tutup(false);
-      if (form) form.submit();
+      form.submit();
     }
 
-    // cegah tombol mengambil fokus pada mousedown — biar fokusCari menang
     trigger.addEventListener('mousedown', function (e) {
       if (pop.hidden) e.preventDefault();
     });
-
     trigger.addEventListener('click', function () {
       if (pop.hidden) buka(); else tutup(true);
     });
-
-    // Handler panah di bawah menempel di popover, jadi saat popover tertutup
-    // pemicu tuli terhadap panah — padahal <select> bawaan membuka daftarnya
-    // dgn ArrowDown/ArrowUp. Samakan.
     trigger.addEventListener('keydown', function (e) {
       if (pop.hidden && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-        e.preventDefault(); // jangan menggulir halaman
-        buka();
-      }
-      // Ketik huruf saat trigger fokus → buka + isi pencarian
-      if (pop.hidden && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         buka();
-        if (cari) {
-          cari.value = e.key;
-          saring();
-          setTimeout(fokusCari, 0);
-        }
       }
     });
-
     daftar.addEventListener('click', function (e) {
       var node = e.target.closest ? e.target.closest('.tp-opt') : null;
       if (node && !node.classList.contains('tp-hide')) pilih(node);
     });
-
     if (cari) {
-      cari.addEventListener('input', function () { saring(); });
-      cari.addEventListener('keyup', function () { saring(); });
-      // Cegah Enter di kotak cari mensubmit form commit upload
+      cari.addEventListener('input', saring);
       cari.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
           e.preventDefault();
-          e.stopPropagation();
           if (ctl.sorot) pilih(ctl.sorot);
         }
       });
     }
-
     pop.addEventListener('keydown', function (e) {
       var v, i2;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -433,52 +567,42 @@
         i2 = v.indexOf(ctl.sorot);
         setSorot(e.key === 'ArrowDown' ? v[(i2 + 1) % v.length] : v[(i2 - 1 + v.length) % v.length]);
       } else if (e.key === 'Enter') {
-        e.preventDefault(); // kotak cari ada DI DALAM form — jangan submit implisit
+        e.preventDefault();
         if (ctl.sorot) pilih(ctl.sorot);
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        e.stopPropagation(); // jangan ikut menutup modal Pengingat Toko
+        e.stopPropagation();
         tutup(true);
       } else if (e.key === 'Tab') {
-        // Fokus keluar → popover tak boleh tertinggal terbuka. Fokus WAJIB
-        // dikembalikan ke pemicu di sini juga (masih sebelum aksi bawaan Tab
-        // jalan): menyembunyikan popover saat fokus masih di dalamnya membuat
-        // Firefox membuang fokus ke <body>, jadi Tab melempar pengguna ke puncak
-        // halaman. Dgn pemicu yang kembali berfokus, Tab lanjut ke kontrol
-        // berikutnya persis seperti <select> bawaan.
         tutup(true);
       }
     });
 
-    // Host baru menyentuh halaman di baris ini — dan select bawaan baru
-    // disembunyikan setelahnya: bila ada yang meledak di atas, pemilih lama utuh.
     select.parentNode.insertBefore(host, select.nextSibling);
     select.classList.add('tp-native');
     select.dataset.tpDone = '1';
   }
 
-  // pointerdown, bukan mousedown: iOS Safari hanya mensintesis event tetikus
-  // untuk target yang dianggapnya bisa diklik, jadi ketukan di latar halaman
-  // yang inert tak akan menutup popover. pointerdown menyeragamkan tetikus,
-  // sentuh, dan pena — dan 375px adalah viewport kelas satu di app ini.
+  function bangun(select) {
+    if (select.dataset.tpDone) return;
+    try {
+      if (select.classList.contains('parser-pick')) bangunParser(select);
+      else bangunToko(select);
+    } catch (err) { /* biarkan select bawaan */ }
+  }
+
   document.addEventListener('pointerdown', function (e) {
-    if (terbuka && !terbuka.host.contains(e.target)) terbuka.tutup(false);
+    if (terbuka && !terbuka.host.contains(e.target)) terbuka.tutup();
   });
 
   function init() {
     var s = document.querySelectorAll(
       'select[name="toko_id"]:not([data-tp-done]), select.parser-pick:not([data-tp-done])'
     );
-    for (var i = 0; i < s.length; i++) {
-      // Kegagalan satu kontrol tidak boleh mematikan pemilih: diam saja,
-      // select bawaannya masih tampil. Halaman tanpa select ini (mis. login)
-      // sama sekali tak terpengaruh.
-      try { bangun(s[i]); } catch (err) { /* sengaja diabaikan */ }
-    }
+    for (var i = 0; i < s.length; i++) bangun(s[i]);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
-  // htmx bisa mengganti potongan halaman setelah skrip ini jalan.
   document.addEventListener('htmx:afterSettle', init);
 })();

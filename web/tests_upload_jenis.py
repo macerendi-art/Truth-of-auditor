@@ -84,8 +84,8 @@ class PratinjauJenisTests(_Masuk):
         self.assertIn('class="f parser-pick"', html)
         # Placeholder deteksi gagal tetap di markup server
         self.assertIn('value="" selected disabled', html)
-        # CSS sel tabel + popover fixed agar search tidak terpotong scroll
-        self.assertIn("td .tp-host.tp-field", html)
+        # CSS combobox satu-field + popover fixed
+        self.assertIn("tp-combo-input", html)
         self.assertIn("tp-pop-fixed", html)
 
     def test_badge_menggantikan_nol_persen(self):
