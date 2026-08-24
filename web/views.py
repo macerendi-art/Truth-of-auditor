@@ -1338,15 +1338,66 @@ def reconcile(request):
     bank = request.GET.get("bank", "")
     if bank not in ("bank", "gateway"):
         bank = ""  # nilai tak dikenal → perlakukan sebagai "semua sumber"
+    # Filter bulan Riwayat Batch: YYYY-MM → tampil batch recon_date tgl 1–akhir bulan.
+    bulan = (request.GET.get("bulan") or "").strip()
+    bulan_dari = bulan_sampai = None
+    if re.fullmatch(r"\d{4}-\d{2}", bulan or ""):
+        try:
+            y, m = int(bulan[:4]), int(bulan[5:7])
+            if 1 <= m <= 12:
+                bulan_dari = date_cls(y, m, 1)
+                if m == 12:
+                    bulan_sampai = date_cls(y + 1, 1, 1) - timedelta(days=1)
+                else:
+                    bulan_sampai = date_cls(y, m + 1, 1) - timedelta(days=1)
+            else:
+                bulan = ""
+        except ValueError:
+            bulan = ""
+    else:
+        bulan = ""
+
     # Nomor dihitung dari SEMUA batch toko dulu (posisi asli), BARU difilter —
-    # supaya nomor batch tidak berubah saat filter sumber uang aktif.
+    # supaya nomor batch tidak berubah saat filter sumber/bulan aktif.
     all_batches = list(ReconBatch.objects.filter(toko=active).order_by("-id"))
     total = len(all_batches)
     for i, b in enumerate(all_batches):
         b.no = total - i
     if bank:
         all_batches = [b for b in all_batches if (b.completeness or {}).get(bank)]
-    batches = all_batches[:20]
+    if bulan_dari is not None:
+        all_batches = [
+            b for b in all_batches
+            if b.recon_date and bulan_dari <= b.recon_date <= bulan_sampai
+        ]
+        # Satu bulan biasanya ≤31 batch — tampilkan semua di bulan itu
+        batches = all_batches
+    else:
+        batches = all_batches[:20]
+
+    # Opsi dropdown bulan: dari recon_date batch toko (terbaru dulu) + bulan ini
+    bulan_set = set()
+    for rd in (
+        ReconBatch.objects.filter(toko=active, recon_date__isnull=False)
+        .values_list("recon_date", flat=True)
+        .distinct()
+    ):
+        if rd:
+            bulan_set.add((rd.year, rd.month))
+    today = date_cls.today()
+    bulan_set.add((today.year, today.month))
+    _NAMA_BLN = (
+        "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+        "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+    )
+    bulan_options = [
+        {
+            "value": f"{y:04d}-{m:02d}",
+            "label": f"{_NAMA_BLN[m]} {y}",
+        }
+        for y, m in sorted(bulan_set, reverse=True)
+    ]
+
     comp = check_completeness(active, df, dt)
     comp_keys = ["panel_dp", "panel_wd", "bracket", "bank", "gateway"]
     comp_ready = sum(1 for k in comp_keys if comp.get(k))
@@ -1364,6 +1415,8 @@ def reconcile(request):
         "tolerances": ToleranceProfile.objects.all(),
         "batches": batches,
         "bank": bank,
+        "bulan": bulan,
+        "bulan_options": bulan_options,
         "date_from": df or "", "date_to": dt or "",
         "panel_dates": panel_dates,
         "panel_dates_count": len(panel_dates),
