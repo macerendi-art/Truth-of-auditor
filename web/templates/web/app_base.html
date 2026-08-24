@@ -148,6 +148,9 @@ h1,h2,h3,.disp{font-family:'Sora',sans-serif;letter-spacing:-.02em}
 .tp-pop{position:absolute;top:calc(100% + 6px);right:0;z-index:70;min-width:230px;max-width:calc(100vw - 24px);padding:6px;
   background:var(--panel);border:1px solid var(--line-2);border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);
   display:flex;flex-direction:column;gap:0;overflow:hidden}
+/* WAJIB: .tp-pop{display:flex} menimpa UA [hidden]{display:none} — tanpa ini
+   popover tidak pernah hilang setelah pilih (dropdown “nempel” di layar). */
+.tp-pop[hidden]{display:none!important}
 .tp-host.tp-field .tp-pop{left:0;right:0;min-width:0;max-width:none}
 /* Preview Upload: dropdown jenis parser di sel tabel — lebar wajar + z-index di atas baris */
 td .tp-host.tp-field{min-width:168px;max-width:240px}

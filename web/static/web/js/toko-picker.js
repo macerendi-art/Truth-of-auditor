@@ -227,21 +227,40 @@
       tempatkan();
     }
 
+    function showPop() {
+      pop.hidden = false;
+      pop.removeAttribute('hidden');
+      pop.style.display = 'flex';
+      // Portal ke body: hindari clipping/offset aneh dari <table>/<td>
+      if (pop.parentNode !== document.body) {
+        document.body.appendChild(pop);
+      }
+    }
+
+    function hidePop() {
+      pop.hidden = true;
+      pop.setAttribute('hidden', '');
+      pop.style.display = 'none';
+      // Kembalikan ke host agar DOM rapih saat baris di-render ulang
+      if (pop.parentNode !== host) {
+        host.appendChild(pop);
+      }
+    }
+
     function buka(keepQuery) {
       if (terbuka && terbuka !== ctl) terbuka.tutup(false);
-      pop.hidden = false;
+      showPop();
       input.setAttribute('aria-expanded', 'true');
       host.classList.add('tp-open');
       terbuka = ctl;
       if (!keepQuery) {
-        // Buka: tampilkan semua, biarkan user langsung ketik (select-all)
+        // Buka: tampilkan semua; biarkan user ketik (select-all mengganti query)
         saring('');
         try { input.select(); } catch (e) { /* */ }
       } else {
         saring(input.value);
       }
       tempatkan();
-      // Jika ada terpilih & query kosong, sorot terpilih; else first match
       if (!String(input.value || '').trim() && terpilih && !terpilih.classList.contains('tp-hide')) {
         setSorot(terpilih);
       }
@@ -250,8 +269,9 @@
     }
 
     function tutup(restore) {
-      if (pop.hidden) return;
-      pop.hidden = true;
+      // Jangan early-return hanya dari .hidden — CSS lama bisa menipu
+      var wasOpen = !pop.hasAttribute('hidden') || pop.style.display === 'flex' || terbuka === ctl;
+      hidePop();
       input.setAttribute('aria-expanded', 'false');
       host.classList.remove('tp-open');
       if (terbuka === ctl) terbuka = null;
@@ -259,7 +279,6 @@
       window.removeEventListener('resize', onScrollOrResize);
       setSorot(null);
       if (restore) {
-        // Kembalikan label nilai yang tersimpan di <select>
         var lab = labelTerpilih;
         if (!lab && select.value) {
           for (var x = 0; x < item.length; x++) {
@@ -271,13 +290,16 @@
         }
         input.value = lab || '';
       }
+      return wasOpen;
     }
     ctl.tutup = function () { tutup(true); };
+    ctl.pop = pop;
+    ctl.host = host;
 
     function pilih(node) {
       if (!node || node.classList.contains('tp-hide')) return;
       var nilai = node.getAttribute('data-v');
-      var teks = node.textContent;
+      var teks = (node.textContent || '').trim();
       select.value = nilai;
       labelTerpilih = teks;
       terpilih = node;
@@ -289,7 +311,10 @@
       ignoreBlur = true;
       tutup(false);
       input.value = teks;
-      setTimeout(function () { ignoreBlur = false; input.blur(); }, 0);
+      setTimeout(function () {
+        ignoreBlur = false;
+        try { input.blur(); } catch (e2) { /* */ }
+      }, 0);
     }
 
     input.addEventListener('focus', function () {
@@ -297,16 +322,17 @@
     });
 
     input.addEventListener('click', function () {
-      if (pop.hidden) buka(false);
+      if (pop.hidden || pop.style.display === 'none') buka(false);
       else try { input.select(); } catch (e) { /* */ }
     });
 
     chevBtn.addEventListener('mousedown', function (e) {
-      e.preventDefault(); // jangan curi fokus dari input
+      e.preventDefault();
     });
     chevBtn.addEventListener('click', function (e) {
       e.preventDefault();
-      if (pop.hidden) {
+      e.stopPropagation();
+      if (pop.hidden || pop.style.display === 'none') {
         input.focus();
         buka(false);
       } else {
@@ -315,7 +341,7 @@
     });
 
     input.addEventListener('input', function () {
-      if (pop.hidden) buka(true);
+      if (pop.hidden || pop.style.display === 'none') buka(true);
       saring(input.value);
       tempatkan();
     });
@@ -324,7 +350,7 @@
       var v, i2;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
-        if (pop.hidden) buka(true);
+        if (pop.hidden || pop.style.display === 'none') buka(true);
         v = tampak();
         if (!v.length) return;
         i2 = v.indexOf(ctl.sorot);
@@ -335,7 +361,6 @@
         e.stopPropagation();
         if (ctl.sorot) pilih(ctl.sorot);
         else {
-          // Enter tanpa sorotan: jika tepat 1 hasil, pilih itu
           v = tampak();
           if (v.length === 1) pilih(v[0]);
         }
@@ -351,27 +376,26 @@
 
     input.addEventListener('blur', function () {
       if (ignoreBlur) return;
-      // tunda: klik opsi memicu blur dulu sebelum click
       setTimeout(function () {
         if (ignoreBlur) return;
-        if (pop.hidden) return;
-        // jika fokus pindah ke dalam pop, jangan tutup
         var a = document.activeElement;
-        if (a && pop.contains(a)) return;
+        if (a && (host.contains(a) || pop.contains(a))) return;
         tutup(true);
       }, 150);
     });
 
     daftar.addEventListener('mousedown', function (e) {
-      // cegah input blur sebelum click opsi
       e.preventDefault();
       ignoreBlur = true;
     });
     daftar.addEventListener('click', function (e) {
       var node = e.target.closest ? e.target.closest('.tp-opt') : null;
       if (node) pilih(node);
-      ignoreBlur = false;
+      setTimeout(function () { ignoreBlur = false; }, 0);
     });
+
+    // pastikan state awal tertutup
+    hidePop();
 
     select.parentNode.insertBefore(host, select.nextSibling);
     select.classList.add('tp-native');
@@ -401,6 +425,7 @@
 
     var pop = buat('div', 'tp-pop');
     pop.hidden = true;
+    pop.style.display = 'none';
     host.appendChild(pop);
     var daftar = buat('div', 'tp-list');
     daftar.id = id + '-list';
@@ -453,7 +478,7 @@
     kini.textContent = terpilih ? terpilih.textContent : '—';
     trigger.title = 'Toko aktif: ' + kini.textContent + ' — klik untuk mengganti';
 
-    var ctl = { host: host, sorot: null, tutup: null };
+    var ctl = { host: host, pop: pop, sorot: null, tutup: null };
     var fokusAria = cari || daftar;
 
     function tampak() {
@@ -504,6 +529,8 @@
     function buka() {
       if (terbuka && terbuka !== ctl) terbuka.tutup(false);
       pop.hidden = false;
+      pop.removeAttribute('hidden');
+      pop.style.display = 'flex';
       trigger.setAttribute('aria-expanded', 'true');
       terbuka = ctl;
       if (cari) cari.value = '';
@@ -517,8 +544,9 @@
     }
 
     function tutup(kembalikanFokus) {
-      if (pop.hidden) return;
       pop.hidden = true;
+      pop.setAttribute('hidden', '');
+      pop.style.display = 'none';
       trigger.setAttribute('aria-expanded', 'false');
       if (terbuka === ctl) terbuka = null;
       if (kembalikanFokus) trigger.focus();
@@ -537,10 +565,11 @@
       if (pop.hidden) e.preventDefault();
     });
     trigger.addEventListener('click', function () {
-      if (pop.hidden) buka(); else tutup(true);
+      if (pop.hidden || pop.style.display === 'none') buka();
+      else tutup(true);
     });
     trigger.addEventListener('keydown', function (e) {
-      if (pop.hidden && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      if ((pop.hidden || pop.style.display === 'none') && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
         e.preventDefault();
         buka();
       }
@@ -592,7 +621,18 @@
   }
 
   document.addEventListener('pointerdown', function (e) {
-    if (terbuka && !terbuka.host.contains(e.target)) terbuka.tutup();
+    if (!terbuka) return;
+    var t = e.target;
+    if (terbuka.host && terbuka.host.contains(t)) return;
+    if (terbuka.pop && terbuka.pop.contains(t)) return;
+    terbuka.tutup();
+  });
+
+  // Escape global menutup dropdown yang terbuka
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && terbuka) {
+      terbuka.tutup();
+    }
   });
 
   function init() {
