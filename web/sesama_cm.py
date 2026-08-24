@@ -290,6 +290,41 @@ def _is_gateway_member_money(desc: str) -> bool:
     return any(d.startswith(p) for p in prefixes)
 
 
+def _is_bank_dp_upload(upload) -> bool:
+    """True bila nama file mutasi bank bertoken DP (Deposit).
+
+    Contoh: ``23-08-2026 TGS MUTASI DP BRI KARIS….csv``, ``( BRI DP ) KARIS…``.
+    Seluruh baris di file DP = uang masuk ke rekening — **bukan** Sesama CM
+    (TGS/BTS 23-08: BFST/DANA + norek FR ikut badge CM).
+    """
+    if upload is None:
+        return False
+    name = getattr(upload, "original_name", None) or ""
+    if not name:
+        return False
+    try:
+        from sources.flow import detect_flow
+        return detect_flow(name) == "dp"
+    except Exception:
+        return False
+
+
+def _q_bukan_bank_dp_upload(toko_id: int) -> Q:
+    """ORM: kecualikan baris dari upload bank berlabel DP di nama file."""
+    from sources.models import Upload
+
+    dp_ids = [
+        u.id
+        for u in Upload.objects.filter(toko_id=toko_id, source_type__key="bank")
+        .only("id", "original_name")
+        .iterator(chunk_size=200)
+        if _is_bank_dp_upload(u)
+    ]
+    if not dp_ids:
+        return Q()  # tidak mengecualikan apa pun
+    return ~Q(upload_id__in=dp_ids)
+
+
 def _q_bukan_gateway_member() -> Q:
     """ORM: kecualikan DP/WD member gateway (tetap izinkan tampung)."""
     # Tampung lolos lewat cabang T terpisah; di sini blok member-only.
@@ -318,11 +353,9 @@ def q_sesama_cm(toko_id: int) -> Q:
 
     Cabang:
     1. **Tampung QR** — desc memuat `QRFLYER TAMPUNG` / `QRISELITE TAMPUNG`
-       (seluruh payout float → rekening; penerima tak harus di daftar CM FR)
     2. Nama/no.rek CM di cp/desc (bukan owner file sendiri) — **bukan** gateway
-       member (QHOKI/Flyer/…)
-    3. Kredit opaque ke rekening CM (owner≈CM, cp kosong) — **hanya bank**,
-       bukan gateway
+       member dan **bukan** file bank berlabel DP
+    3. Kredit opaque ke rekening CM — hanya bank non-DP
     """
     names, reks = identitas_cm_toko(toko_id)
 
@@ -340,6 +373,7 @@ def q_sesama_cm(toko_id: int) -> Q:
         return total
 
     bukan_gw_member = _q_bukan_gateway_member()
+    bukan_bank_dp = _q_bukan_bank_dp_upload(toko_id)
 
     for nama in names:
         vars_ = _varian(nama)
@@ -350,24 +384,21 @@ def q_sesama_cm(toko_id: int) -> Q:
         for v in vars_:
             hit |= Q(counterparty__icontains=v) | Q(description__icontains=v)
             self_owner |= Q(upload__owner_name__icontains=v)
-        # owner singkat "SERVA" / "NASRUL" harus self-exclude juga
         first = (nama.split() or [""])[0]
         if len(first) >= 4 and first.upper() not in _NOISE:
             self_owner |= Q(upload__owner_name__icontains=first)
-        total |= hit & ~self_owner & bukan_gw_member
+        total |= hit & ~self_owner & bukan_gw_member & bukan_bank_dp
         any_branch = True
 
-    # No. rek CM: cocok di deskripsi/counterparty — bukan di RRN gateway member
     for d in reks:
         total |= (
             (Q(counterparty__icontains=d) | Q(description__icontains=d))
             & bukan_gw_member
+            & bukan_bank_dp
         )
         any_branch = True
 
-    # A) Kredit opaque masuk rekening CM: owner file = CM, counterparty kosong
-    # Hanya **bank** (statement). Gateway DP (QHOKI dll) punya cp kosong + credit
-    # tapi itu DP member, bukan pindah dana Sesama CM.
+    # A) Kredit opaque — bank saja, dan BUKAN file DP (uang masuk member/DANA)
     for nama in names:
         vars_ = _varian(nama)
         if not vars_:
@@ -383,6 +414,7 @@ def q_sesama_cm(toko_id: int) -> Q:
             & Q(money_delta__gt=0)
             & (Q(counterparty="") | Q(counterparty__isnull=True))
             & Q(source_type__key="bank")
+            & bukan_bank_dp
         )
         any_branch = True
 
@@ -412,14 +444,21 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
             r.is_sesama_cm = False
             continue
 
-        if not names and not reks:
-            r.is_sesama_cm = False
-            continue
-
         owner_raw = ""
         up = getattr(r, "upload", None)
         if up is not None:
             owner_raw = up.owner_name or ""
+
+        src = getattr(getattr(r, "source_type", None), "key", None) or ""
+        # File mutasi bank berlabel DP → seluruh baris Deposit/biaya, bukan Sesama CM
+        if src == "bank" and _is_bank_dp_upload(up):
+            r.is_sesama_cm = False
+            continue
+
+        if not names and not reks:
+            r.is_sesama_cm = False
+            continue
+
         owner_l = owner_raw.lower()
         owner_c = _NON_ALNUM.sub("", owner_raw).upper()
         blob = f"{r.counterparty or ''} {r.description or ''}"
@@ -451,20 +490,14 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
                 if d and d in blob_digits:
                     hit = True
                     break
-        # A opaque credit on CM-owned **bank** statement only
-        if not hit:
-            src = getattr(getattr(r, "source_type", None), "key", None) or ""
+        # A opaque credit on CM-owned **bank** statement only (bukan file DP)
+        if not hit and src == "bank" and not _is_bank_dp_upload(up):
             try:
                 md = r.money_delta
                 is_credit = md is not None and md > 0
             except Exception:
                 is_credit = False
-            if (
-                src == "bank"
-                and is_credit
-                and not str(r.counterparty or "").strip()
-                and owner_raw
-            ):
+            if is_credit and not str(r.counterparty or "").strip() and owner_raw:
                 for nama, _keys, _c in prepared:
                     if cm_names_match(owner_raw, nama):
                         hit = True

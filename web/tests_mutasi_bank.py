@@ -398,6 +398,71 @@ class MutasiBankSesamaCmTests(MutasiBankBase):
         r_cm = self.client.get(reverse("bank_mutations"), {"flow": "cm", "source": "gateway"})
         self.assertNotContains(r_cm, "QHOKI 623533338726")
 
+    def test_bank_file_dp_bukan_sesama_cm_meski_norek_fr_di_desc(self):
+        """TGS/BTS: MUTASI DP BRI a/n CM — BFST/DANA + norek FR tetap Deposit.
+
+        File bertoken DP = uang masuk; jangan badge Sesama CM lewat norek/opaque.
+        """
+        from web.sesama_cm import clear_cm_cache, q_sesama_cm, tandai_sesama_cm
+        br = SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})[0]
+        fr_up = Upload.objects.create(source_type=br, toko=self.lbs, original_name="fr.xlsx")
+        Transaction.objects.create(
+            upload=fr_up, source_type=br, toko=self.lbs, jenis="lainnya",
+            amount=Decimal("0"), money_delta=Decimal("0"),
+            occurred_at=datetime(2026, 8, 23, 10, 0),
+            raw={
+                "Kategori": "Sesama CM",
+                "Bank": "BANK BRI | KARIS NATHALIA FEBRIN | TAMPUNG",
+                "No. Rek Bank Member": "BRI 7800588426",
+            },
+            row_hash=f"fr-karis-{next(_seq)}",
+        )
+        Transaction.objects.create(
+            upload=fr_up, source_type=br, toko=self.lbs, jenis="lainnya",
+            amount=Decimal("0"), money_delta=Decimal("0"),
+            occurred_at=datetime(2026, 8, 23, 10, 1),
+            raw={
+                "Kategori": "Sesama CM",
+                "Bank": "BANK BRI | ELISA PRATIWI | TAMPUNG",
+                "No. Rek Bank Member": "BRI 040401063175505",
+            },
+            row_hash=f"fr-elisa-{next(_seq)}",
+        )
+        up = self._up(
+            self.bank,
+            "23-08-2026 TGS MUTASI DP BRI KARIS NATHALIA FEBRIN.csv",
+            owner="KARIS NATHALIA FEBRIN",
+        )
+        t_nbmb = self._tx(
+            up, self.bank, jenis="depo", counterparty="ALEX SANJAYA",
+            description="NBMB ALEX SANJAYA TO KARIS NATHALIA FE ESB:NBMB:0001500F:199476140562",
+            amount="500000", dt=datetime(2026, 8, 23, 15, 43),
+        )
+        t_bfst = self._tx(
+            up, self.bank, jenis="wd", counterparty="",
+            description="BFST7800588426 NBMB:CENAIDJA 20260823BRINIDJA010O0240710105",
+            amount="-550000", dt=datetime(2026, 8, 23, 15, 44),
+        )
+        t_dana = self._tx(
+            up, self.bank, jenis="depo", counterparty="",
+            description="BFST040401063175505SITI AZLINA :BMRIIDJA 20260823BMRIIDJA010O022602595",
+            amount="25000", dt=datetime(2026, 8, 23, 20, 12),
+        )
+        clear_cm_cache()
+        for t in (t_nbmb, t_bfst, t_dana):
+            self.assertFalse(
+                Transaction.objects.filter(id=t.id).filter(q_sesama_cm(self.lbs.id)).exists(),
+                msg=t.description,
+            )
+        rows = [t_nbmb, t_bfst, t_dana]
+        tandai_sesama_cm(rows, self.lbs.id)
+        self.assertFalse(t_nbmb.is_sesama_cm)
+        self.assertFalse(t_bfst.is_sesama_cm)
+        self.assertFalse(t_dana.is_sesama_cm)
+        r_cm = self.client.get(reverse("bank_mutations"), {"flow": "cm", "source": "bank"})
+        self.assertNotContains(r_cm, "BFST7800588426")
+        self.assertNotContains(r_cm, "SITI AZLINA")
+
 
 class MutasiBankPhoneLookupTests(MutasiBankBase):
     def test_baris_ewallet_tampilkan_hp_dan_nama_panel(self):
