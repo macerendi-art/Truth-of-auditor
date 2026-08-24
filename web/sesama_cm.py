@@ -127,29 +127,34 @@ def cm_names_match(a: str, b: str, *, min_ratio: float = 90.0) -> bool:
 
     Contoh: YULIAYANTI PRATIWI ≈ YULIYANTI PRATIWI (ratio ~97),
     KIKI SUASANTO ≈ KIKISUASANTO, SERVA ≈ SERVA MUHAMAD SEBASTIAN (prefix token).
+
+    **Bukan** cocok pendek: `HOKI` ⊂ `TPQRISHOKIUNITED` — itu menelan seluruh
+    mutasi DP QHOKI (owner file a/n HOKI) sebagai Sesama CM (BTS 23-08-2026).
+    Substring containment butuh min 6 karakter di sisi pendek.
     """
     ca, cb = _compact_nama(a), _compact_nama(b)
     if not ca or not cb or len(ca) < 4 or len(cb) < 4:
         return False
-    if ca == cb or ca in cb or cb in ca:
+    if ca == cb:
+        return True
+    # containment: sisi pendek ≥6 agar "HOKI"/"RPAY" tidak menelan channel FR
+    short, long_ = (ca, cb) if len(ca) <= len(cb) else (cb, ca)
+    if len(short) >= 6 and short in long_:
         return True
     # token pertama sama + cukup panjang (SERVA vs SERVAMUHAMAD…)
     ta = (str(a or "").split() or [""])[0]
     tb = (str(b or "").split() or [""])[0]
     cta, ctb = _compact_nama(ta), _compact_nama(tb)
-    if cta and ctb and len(cta) >= 4 and cta == ctb and (len(ca) >= 6 or len(cb) >= 6):
-        # hindari token generik
+    if cta and ctb and len(cta) >= 5 and cta == ctb and (len(ca) >= 6 or len(cb) >= 6):
         if cta not in _NOISE:
             return True
     try:
         from rapidfuzz import fuzz
         if min(len(ca), len(cb)) >= 8 and fuzz.ratio(ca, cb) >= min_ratio:
             return True
-        # partial: nama pendek di dalam nama panjang
         if min(len(ca), len(cb)) >= 6 and fuzz.partial_ratio(ca, cb) >= 95:
             return True
     except Exception:
-        # fallback tanpa rapidfuzz: beda 1-2 char
         if abs(len(ca) - len(cb)) <= 2 and len(ca) >= 8:
             diff = sum(1 for x, y in zip(ca, cb) if x != y) + abs(len(ca) - len(cb))
             if diff <= 2:
@@ -251,14 +256,73 @@ def nama_cm_toko(toko_id: int) -> list[str]:
     return list(identitas_cm_toko(toko_id)[0])
 
 
+def _is_tampung_qr_desc(desc: str) -> bool:
+    """True bila deskripsi baris mutasi tampung Flyer/Elite."""
+    d = (desc or "").upper()
+    return "QRFLYER TAMPUNG" in d or "QRISELITE TAMPUNG" in d
+
+
+def _is_gateway_member_money(desc: str) -> bool:
+    """DP/WD member gateway (QHOKI, Flyer, …) — BUKAN Sesama CM.
+
+    Sesama CM untuk jalur gateway hanya mutasi **tampung** (payout float).
+    DP QRIS HOKI owner=HOKI dulu tertelan karena `HOKI` ⊂ `TP QRISHOKI UNITED`
+    (BTS 23-08-2026).
+    """
+    d = (desc or "").strip().upper()
+    if not d:
+        return False
+    if _is_tampung_qr_desc(d):
+        return False
+    prefixes = (
+        "QHOKI",
+        "QRFLYER",
+        "QRISELITE",
+        "NXPAY",
+        "RPAY",
+        "KINGSPAY",
+        "ZPAY",
+        "COR QRIS",
+        "CORQRIS",
+        "QRIS HOKI",
+        "QRISHOKI",
+    )
+    return any(d.startswith(p) for p in prefixes)
+
+
+def _q_bukan_gateway_member() -> Q:
+    """ORM: kecualikan DP/WD member gateway (tetap izinkan tampung)."""
+    # Tampung lolos lewat cabang T terpisah; di sini blok member-only.
+    blok = (
+        Q(description__istartswith="QHOKI")
+        | Q(description__istartswith="NXPAY")
+        | Q(description__istartswith="RPAY")
+        | Q(description__istartswith="KINGSPAY")
+        | Q(description__istartswith="ZPAY")
+        | Q(description__istartswith="COR QRIS")
+        | Q(description__istartswith="CORQRIS")
+        | (
+            Q(description__istartswith="QRFLYER")
+            & ~Q(description__icontains="TAMPUNG")
+        )
+        | (
+            Q(description__istartswith="QRISELITE")
+            & ~Q(description__icontains="TAMPUNG")
+        )
+    )
+    return ~blok
+
+
 def q_sesama_cm(toko_id: int) -> Q:
     """Filter ORM: mutasi pindah dana Sesama CM (bukan DP/WD member).
 
     Cabang:
     1. **Tampung QR** — desc memuat `QRFLYER TAMPUNG` / `QRISELITE TAMPUNG`
        (seluruh payout float → rekening; penerima tak harus di daftar CM FR)
-    2. Nama/no.rek CM di cp/desc (bukan owner file sendiri)
-    3. Kredit opaque ke rekening CM (owner≈CM, cp kosong)
+    2. Nama/no.rek CM di cp/desc (bukan owner file sendiri) — **bukan** gateway
+       member (QHOKI/Flyer/…)
+    3. Kredit opaque ke rekening CM (owner≈CM, cp kosong) — **hanya bank**,
+       bukan gateway
     """
     names, reks = identitas_cm_toko(toko_id)
 
@@ -275,6 +339,8 @@ def q_sesama_cm(toko_id: int) -> Q:
     if not names and not reks:
         return total
 
+    bukan_gw_member = _q_bukan_gateway_member()
+
     for nama in names:
         vars_ = _varian(nama)
         if not vars_:
@@ -288,19 +354,20 @@ def q_sesama_cm(toko_id: int) -> Q:
         first = (nama.split() or [""])[0]
         if len(first) >= 4 and first.upper() not in _NOISE:
             self_owner |= Q(upload__owner_name__icontains=first)
-        total |= hit & ~self_owner
+        total |= hit & ~self_owner & bukan_gw_member
         any_branch = True
 
-    # No. rek CM: cocok di deskripsi/counterparty. Self-exclusion kasar:
-    # baris yang HANYA memuat rek tanpa nama tetap lolos (pindah via norek).
-    # Owner file jarang menulis norek sendiri di deskripsi WD member.
+    # No. rek CM: cocok di deskripsi/counterparty — bukan di RRN gateway member
     for d in reks:
-        total |= Q(counterparty__icontains=d) | Q(description__icontains=d)
+        total |= (
+            (Q(counterparty__icontains=d) | Q(description__icontains=d))
+            & bukan_gw_member
+        )
         any_branch = True
 
     # A) Kredit opaque masuk rekening CM: owner file = CM, counterparty kosong
-    # (settlement gateway/APFT tanpa nama di desc). Tidak menelan semua mutasi
-    # owner CM — hanya money_delta>0 + cp kosong.
+    # Hanya **bank** (statement). Gateway DP (QHOKI dll) punya cp kosong + credit
+    # tapi itu DP member, bukan pindah dana Sesama CM.
     for nama in names:
         vars_ = _varian(nama)
         if not vars_:
@@ -315,18 +382,13 @@ def q_sesama_cm(toko_id: int) -> Q:
             own
             & Q(money_delta__gt=0)
             & (Q(counterparty="") | Q(counterparty__isnull=True))
+            & Q(source_type__key="bank")
         )
         any_branch = True
 
     if not any_branch:
         return Q(pk__in=[])
     return total
-
-
-def _is_tampung_qr_desc(desc: str) -> bool:
-    """True bila deskripsi baris mutasi tampung Flyer/Elite."""
-    d = (desc or "").upper()
-    return "QRFLYER TAMPUNG" in d or "QRISELITE TAMPUNG" in d
 
 
 def tandai_sesama_cm(rows, toko_id: int) -> None:
@@ -343,6 +405,11 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
         # Tampung QR dulu — tidak butuh daftar CM FR
         if _is_tampung_qr_desc(r.description or ""):
             r.is_sesama_cm = True
+            continue
+
+        # DP/WD member gateway (QHOKI, Flyer biasa, …) → Deposit/Withdraw, bukan CM
+        if _is_gateway_member_money(r.description or ""):
+            r.is_sesama_cm = False
             continue
 
         if not names and not reks:
@@ -384,14 +451,20 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
                 if d and d in blob_digits:
                     hit = True
                     break
-        # A opaque credit on CM-owned statement
+        # A opaque credit on CM-owned **bank** statement only
         if not hit:
+            src = getattr(getattr(r, "source_type", None), "key", None) or ""
             try:
                 md = r.money_delta
                 is_credit = md is not None and md > 0
             except Exception:
                 is_credit = False
-            if is_credit and not str(r.counterparty or "").strip() and owner_raw:
+            if (
+                src == "bank"
+                and is_credit
+                and not str(r.counterparty or "").strip()
+                and owner_raw
+            ):
                 for nama, _keys, _c in prepared:
                     if cm_names_match(owner_raw, nama):
                         hit = True

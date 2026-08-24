@@ -330,6 +330,64 @@ class MutasiBankSesamaCmTests(MutasiBankBase):
             Transaction.objects.filter(id=t.id).filter(q_sesama_cm(self.lbs.id)).exists()
         )
 
+    def test_qhoki_dp_bukan_sesama_cm_meski_owner_hoki_mirip_fr(self):
+        """BTS: DP QRIS HOKI (owner=HOKI) jangan jadi Sesama CM lewat FR TP QRISHOKI UNITED.
+
+        Badge harus Deposit; Sesama CM gateway hanya tampung.
+        """
+        from web.sesama_cm import (
+            clear_cm_cache,
+            cm_names_match,
+            q_sesama_cm,
+            tandai_sesama_cm,
+        )
+        br = SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})[0]
+        # FR channel label — mirip owner HOKI bila substring longgar
+        Upload.objects.create(
+            source_type=br, toko=self.lbs, original_name="fr.xlsx",
+        )
+        fr_up = Upload.objects.filter(toko=self.lbs, source_type=br).latest("id")
+        Transaction.objects.create(
+            upload=fr_up, source_type=br, toko=self.lbs, jenis="lainnya",
+            amount=Decimal("0"), money_delta=Decimal("0"),
+            occurred_at=datetime(2026, 8, 23, 10, 0),
+            raw={
+                "Kategori": "Sesama CM",
+                "Bank": "BANK BCA | TP QRISHOKI UNITED | TAMPUNG",
+                "No. Rek Bank Member": "BCA 5830314051",
+            },
+            row_hash=f"fr-hoki-{next(_seq)}",
+        )
+        gw = SourceType.objects.get_or_create(key="gateway", defaults={"name": "Gateway"})[0]
+        up = self._up(gw, "23-08-2026 BTS MUTASI DP QRIS HOKI.csv", owner="HOKI")
+        t_dp = self._tx(
+            up, gw, jenis="depo", counterparty="",
+            description="QHOKI 623533338726",
+            amount="25000", dt=datetime(2026, 8, 23, 16, 49),
+        )
+        t_wd = self._tx(
+            up, gw, jenis="wd", counterparty="",
+            description="QHOKI 999888777666",
+            amount="-30000", dt=datetime(2026, 8, 23, 17, 0),
+        )
+        clear_cm_cache()
+        self.assertFalse(cm_names_match("HOKI", "TP QRISHOKI UNITED"))
+        self.assertFalse(
+            Transaction.objects.filter(id=t_dp.id).filter(q_sesama_cm(self.lbs.id)).exists()
+        )
+        self.assertFalse(
+            Transaction.objects.filter(id=t_wd.id).filter(q_sesama_cm(self.lbs.id)).exists()
+        )
+        rows = [t_dp, t_wd]
+        tandai_sesama_cm(rows, self.lbs.id)
+        self.assertFalse(t_dp.is_sesama_cm)
+        self.assertFalse(t_wd.is_sesama_cm)
+        # UI: flow deposit masih menampilkan baris; flow cm tidak
+        r_dp = self.client.get(reverse("bank_mutations"), {"flow": "depo", "source": "gateway"})
+        self.assertContains(r_dp, "QHOKI 623533338726")
+        r_cm = self.client.get(reverse("bank_mutations"), {"flow": "cm", "source": "gateway"})
+        self.assertNotContains(r_cm, "QHOKI 623533338726")
+
 
 class MutasiBankPhoneLookupTests(MutasiBankBase):
     def test_baris_ewallet_tampilkan_hp_dan_nama_panel(self):
