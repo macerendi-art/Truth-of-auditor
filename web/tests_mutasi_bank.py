@@ -270,6 +270,66 @@ class MutasiBankSesamaCmTests(MutasiBankBase):
             "KIKI SUASANTO",
         )
 
+    def test_qrflyer_tampung_selalu_sesama_cm_meski_penerima_bukan_daftar_cm(self):
+        """MUTASI TAMPUNG QR FLYER = pindah dana float → rekening; seluruh baris Sesama CM.
+
+        Prod MUL: 10/81 baris ke STANLEY/UBAY (bukan di identitas FR) kosong di
+        filter flow=cm — padahal file tampung seluruhnya internal.
+        """
+        from web.sesama_cm import clear_cm_cache, q_sesama_cm, tandai_sesama_cm
+        gw = SourceType.objects.get_or_create(key="gateway", defaults={"name": "Gateway"})[0]
+        up = self._up(gw, "MUTASI TAMPUNG QR FLYER MUL 22-08.csv", owner="MUL ZMGZCRT")
+        # penerima TIDAK ada di FR Sesama CM
+        t_out = self._tx(
+            up, gw, jenis="wd", counterparty="STANLEY",
+            description="QRFLYER TAMPUNG BCA 5370534162 STANLEY",
+            amount="-35000000", dt=datetime(2026, 8, 22, 8, 0),
+        )
+        t_in = self._tx(
+            up, gw, jenis="wd", counterparty="KIKISUASANTO",
+            description="QRFLYER TAMPUNG BRI 119101022152500 KIKISUASANTO",
+            amount="-23787096", dt=datetime(2026, 8, 22, 8, 44),
+        )
+        # member gateway biasa — BUKAN tampung
+        t_member = self._tx(
+            up, gw, jenis="depo", counterparty="PLAYER",
+            description="QRFLYER deposit PLAYER ticket D1",
+            amount="100000", dt=datetime(2026, 8, 22, 9, 0),
+        )
+        clear_cm_cache()
+        self.assertTrue(
+            Transaction.objects.filter(id=t_out.id).filter(q_sesama_cm(self.lbs.id)).exists()
+        )
+        self.assertTrue(
+            Transaction.objects.filter(id=t_in.id).filter(q_sesama_cm(self.lbs.id)).exists()
+        )
+        self.assertFalse(
+            Transaction.objects.filter(id=t_member.id).filter(q_sesama_cm(self.lbs.id)).exists()
+        )
+        rows = [t_out, t_in, t_member]
+        tandai_sesama_cm(rows, self.lbs.id)
+        self.assertTrue(t_out.is_sesama_cm)
+        self.assertTrue(t_in.is_sesama_cm)
+        self.assertFalse(t_member.is_sesama_cm)
+        r = self.client.get(reverse("bank_mutations"), {"flow": "cm", "source": "gateway"})
+        self.assertContains(r, "STANLEY")
+        self.assertContains(r, "QRFLYER TAMPUNG")
+        self.assertNotContains(r, "deposit PLAYER")
+
+    def test_qris_elite_tampung_selalu_sesama_cm(self):
+        from web.sesama_cm import clear_cm_cache, q_sesama_cm
+        gw = SourceType.objects.get_or_create(key="gateway", defaults={"name": "Gateway"})[0]
+        up = self._up(gw, "MUTASI TAMPUNG QR ELITE.csv", owner="")
+        t = self._tx(
+            up, gw, jenis="wd", counterparty="ORANG LUAR",
+            description="QRISELITE TAMPUNG 1191010221 ORANG LUAR REF1",
+            amount="-24996500", dt=datetime(2026, 8, 22, 12, 0),
+        )
+        clear_cm_cache()
+        self.assertTrue(
+            Transaction.objects.filter(id=t.id).filter(q_sesama_cm(self.lbs.id)).exists()
+        )
+
 
 class MutasiBankPhoneLookupTests(MutasiBankBase):
     def test_baris_ewallet_tampilkan_hp_dan_nama_panel(self):

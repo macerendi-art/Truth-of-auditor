@@ -252,13 +252,28 @@ def nama_cm_toko(toko_id: int) -> list[str]:
 
 
 def q_sesama_cm(toko_id: int) -> Q:
-    """Filter ORM: mutasi yang merujuk nama/no.rek CM lain (bukan owner file)."""
+    """Filter ORM: mutasi pindah dana Sesama CM (bukan DP/WD member).
+
+    Cabang:
+    1. **Tampung QR** — desc memuat `QRFLYER TAMPUNG` / `QRISELITE TAMPUNG`
+       (seluruh payout float → rekening; penerima tak harus di daftar CM FR)
+    2. Nama/no.rek CM di cp/desc (bukan owner file sendiri)
+    3. Kredit opaque ke rekening CM (owner≈CM, cp kosong)
+    """
     names, reks = identitas_cm_toko(toko_id)
-    if not names and not reks:
-        return Q(pk__in=[])
 
     total = Q()
     any_branch = False
+
+    # T) Mutasi tampung Flyer/Elite — produk = pindah dana internal
+    total |= (
+        Q(description__icontains="QRFLYER TAMPUNG")
+        | Q(description__icontains="QRISELITE TAMPUNG")
+    )
+    any_branch = True
+
+    if not names and not reks:
+        return total
 
     for nama in names:
         vars_ = _varian(nama)
@@ -308,13 +323,15 @@ def q_sesama_cm(toko_id: int) -> Q:
     return total
 
 
+def _is_tampung_qr_desc(desc: str) -> bool:
+    """True bila deskripsi baris mutasi tampung Flyer/Elite."""
+    d = (desc or "").upper()
+    return "QRFLYER TAMPUNG" in d or "QRISELITE TAMPUNG" in d
+
+
 def tandai_sesama_cm(rows, toko_id: int) -> None:
     """Set atribut transient `is_sesama_cm` pada tiap baris (badge UI)."""
     names, reks = identitas_cm_toko(toko_id)
-    if not names and not reks:
-        for r in rows:
-            r.is_sesama_cm = False
-        return
 
     prepared = []
     for nama in names:
@@ -323,6 +340,15 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
         prepared.append((nama, keys, compact))
 
     for r in rows:
+        # Tampung QR dulu — tidak butuh daftar CM FR
+        if _is_tampung_qr_desc(r.description or ""):
+            r.is_sesama_cm = True
+            continue
+
+        if not names and not reks:
+            r.is_sesama_cm = False
+            continue
+
         owner_raw = ""
         up = getattr(r, "upload", None)
         if up is not None:
@@ -358,6 +384,18 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
                 if d and d in blob_digits:
                     hit = True
                     break
+        # A opaque credit on CM-owned statement
+        if not hit:
+            try:
+                md = r.money_delta
+                is_credit = md is not None and md > 0
+            except Exception:
+                is_credit = False
+            if is_credit and not str(r.counterparty or "").strip() and owner_raw:
+                for nama, _keys, _c in prepared:
+                    if cm_names_match(owner_raw, nama):
+                        hit = True
+                        break
         r.is_sesama_cm = hit
 
 
