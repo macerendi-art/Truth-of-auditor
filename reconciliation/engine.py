@@ -996,11 +996,15 @@ def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
     """Skor identitas FR Sesama CM vs baris mutasi.
 
     Urutan kuat → lemah:
-    1. norek FR di blob mutasi (penuh / prefiks mask)
+    1. norek FR di blob mutasi (penuh / prefiks mask) — cp+desc saja
+    1b. **A** kredit masuk: norek FR = NOREK rekening statement (raw), hanya money_delta>0
     2. nama CM FR di **counterparty** mutasi (bukan noise deskripsi sendiri)
+    2b. **B** channel tampung: FR FLYER/ELITE ↔ desc QRFLYER/QRISELITE TAMPUNG
     3. owner file = pemegang rekening FR **dan** lawan = CM lain / norek CM lain
+    3b. **A** owner≈FR + kredit opaque (cp kosong)
     4. nama FR di deskripsi hanya jika owner file **bukan** rekening FR itu
-      (statement rekening lain yang menyebut CM ini)
+    5. **C** toleransi typo nama (ratio longgar) **hanya** bila sinyal A/B struktural
+       (channel tampung atau norek di blob) — bukan primary sendiri
 
     Nama memakai `cm_names_match` (typo FR YULIAYANTI ≈ owner YULIYANTI).
     """
@@ -1016,16 +1020,20 @@ def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
 
     raw = fr.raw or {}
     frek = re.sub(r"\D", "", str(raw.get("No. Rek Bank Member") or ""))
-    parts = [p.strip() for p in str(raw.get("Bank") or "").split("|")]
-    fname_raw = parts[1] if len(parts) >= 2 else str(raw.get("Bank") or "")
+    bank_label = str(raw.get("Bank") or "")
+    parts = [p.strip() for p in bank_label.split("|")]
+    fname_raw = parts[1] if len(parts) >= 2 else bank_label
     fname = _bersih_nama(fname_raw) or fname_raw
     fname_c = _compact_alnum(fname)
+    bank_u = bank_label.upper()
 
     cp = bank.counterparty or ""
     desc = bank.description or ""
     cp_c = _compact_alnum(cp)
     desc_c = _compact_alnum(desc)
+    # Blob identitas default: hanya teks lawan di mutasi (bukan NOREK rekening sendiri)
     blob_d = re.sub(r"\D", "", f"{cp} {desc}")
+    desc_u = desc.upper()
 
     owner_raw = ""
     up = getattr(bank, "upload", None)
@@ -1037,18 +1045,52 @@ def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
     cm_list = list(cm_names or ())
     cm_rek_list = [r for r in (cm_reks or ()) if r and len(r) >= 8]
 
-    # 1) norek FR di mutasi
+    raw_bank = getattr(bank, "raw", None) or {}
+    try:
+        md = getattr(bank, "money_delta", None)
+        is_credit = md is not None and md > 0
+    except Exception:
+        is_credit = False
+
+    stmt_rek = ""
+    for k in ("NOREK", "Beneficiary Account", "BANK_NO", "ACCOUNT_NO", "account"):
+        d = re.sub(r"\D", "", str(raw_bank.get(k) or ""))
+        if len(d) >= 8:
+            stmt_rek = d
+            break
+
+    rek_in_blob = False
+    # 1) norek FR di mutasi (cp/desc — lawan / tujuan)
     if frek and len(frek) >= 8 and frek in blob_d:
+        rek_in_blob = True
         return 100.0, "amount+rek"
     if frek and blob_d and len(frek) >= 10 and len(blob_d) >= 10:
         if frek.startswith(blob_d) or blob_d.startswith(frek[:10]):
+            rek_in_blob = True
             return 100.0, "amount+rek"
 
-    # 2) nama FR di counterparty (fuzzy)
+    # 1b) A — kredit masuk ke rekening FR: frek == NOREK statement (bukan untuk debit)
+    if is_credit and frek and stmt_rek and len(frek) >= 8:
+        if frek == stmt_rek or (
+            len(frek) >= 10 and len(stmt_rek) >= 10
+            and (frek.startswith(stmt_rek[:10]) or stmt_rek.startswith(frek[:10]))
+        ):
+            return 100.0, "amount+rek"
+
+    # 2) nama FR di counterparty (fuzzy standar)
     if fname and cp and cm_names_match(fname, cp):
         return 95.0, "amount+name_cm"
     if fname_c and len(fname_c) >= 6 and fname_c in cp_c:
         return 95.0, "amount+name_cm"
+
+    # 2b) B — channel tampung QR Flyer / Elite ↔ FR channel yang sama
+    money_flyer = "QRFLYER TAMPUNG" in desc_u
+    money_elite = "QRISELITE TAMPUNG" in desc_u
+    fr_flyer = "FLYER" in bank_u
+    fr_elite = "ELITE" in bank_u or "QRISELITE" in bank_u
+    channel_tampung = (fr_flyer and money_flyer) or (fr_elite and money_elite)
+    if channel_tampung:
+        return 96.0, "amount+channel_tampung"
 
     # 3) baris di rekening FR (owner ≈ FR) + lawan CM / norek CM lain
     owner_is_fr = bool(fname and owner_clean and cm_names_match(fname, owner_clean))
@@ -1073,6 +1115,9 @@ def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
                 rk.startswith(blob_d) or blob_d.startswith(rk[:10])
             ):
                 return 94.0, "owner_fr+rek_cm"
+        # 3b) A — kredit opaque di rekening FR (settlement tanpa lawan di blob)
+        if is_credit and not str(cp).strip():
+            return 91.0, "owner_fr+kredit_masuk"
 
     # 4) nama FR di deskripsi pada statement rekening LAIN
     if fname and not owner_is_fr:
@@ -1080,6 +1125,24 @@ def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
             fname_c and len(fname_c) >= 6 and fname_c in desc_c
         ):
             return 90.0, "amount+name_cm"
+
+    # 5) C — toleransi typo nama hanya bila sinyal A/B struktural (bukan primary)
+    # channel sudah return di 2b; di sini rek_in_blob atau dest norek CM di blob + soft name
+    struktural_ab = bool(rek_in_blob or money_flyer or money_elite)
+    if not struktural_ab and frek and len(frek) >= 8 and frek in blob_d:
+        struktural_ab = True
+    if not struktural_ab:
+        for rk in cm_rek_list:
+            if rk and len(rk) >= 8 and rk in blob_d:
+                struktural_ab = True
+                break
+    if struktural_ab and cp:
+        soft_kw = {"min_ratio": 82.0}
+        if fname and cm_names_match(fname, cp, **soft_kw):
+            return 92.0, "amount+name_cm"
+        for nm in cm_list:
+            if cm_names_match(nm, cp, **soft_kw):
+                return 92.0, "amount+name_cm"
 
     return 0.0, ""
 

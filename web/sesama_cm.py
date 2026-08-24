@@ -283,6 +283,26 @@ def q_sesama_cm(toko_id: int) -> Q:
         total |= Q(counterparty__icontains=d) | Q(description__icontains=d)
         any_branch = True
 
+    # A) Kredit opaque masuk rekening CM: owner file = CM, counterparty kosong
+    # (settlement gateway/APFT tanpa nama di desc). Tidak menelan semua mutasi
+    # owner CM — hanya money_delta>0 + cp kosong.
+    for nama in names:
+        vars_ = _varian(nama)
+        if not vars_:
+            continue
+        own = Q()
+        for v in vars_:
+            own |= Q(upload__owner_name__icontains=v)
+        first = (nama.split() or [""])[0]
+        if len(first) >= 4 and first.upper() not in _NOISE:
+            own |= Q(upload__owner_name__icontains=first)
+        total |= (
+            own
+            & Q(money_delta__gt=0)
+            & (Q(counterparty="") | Q(counterparty__isnull=True))
+        )
+        any_branch = True
+
     if not any_branch:
         return Q(pk__in=[])
     return total

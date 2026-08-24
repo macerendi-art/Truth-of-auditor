@@ -269,3 +269,174 @@ class SesamaCmReconTests(TestCase):
         )
         um = (batch.summary or {}).get("unmatched_money") or {}
         self.assertGreaterEqual((um.get("c") or {}).get("n", 0), 1)
+
+    def test_a_kredit_opaque_owner_cm_cocok_fr_masuk(self):
+        """A: kredit masuk rekening CM (owner≈FR, cp kosong, desc ESB) ↔ FR masuk."""
+        dt = datetime(2026, 8, 22, 8, 44)
+        fr = self._fr_cm(
+            "BANK BRI | KIKI SUASANTO | TAMPUNG LAYER 2", "BRI 119101022152500",
+            "23787096", dt, desc="PINDAH DANA FYLER + BIAYA TRANSFER",
+        )
+        money = self._tx(
+            self.bank, self.up_k, jenis="depo", amount="23787096", money="23787096",
+            dt=dt, counterparty="",
+            description="1787363038aA8P7PC WS_OB ESB:APFT:000TP00F:000372912238",
+            raw={"NOREK": "119101022152500", "MUTASI_KREDIT": "23787096.00", "GLSIGN": "Cr"},
+        )
+        clear_cm_cache()
+        run = run_match(
+            MatchRun.Relation.BRACKET_BANK, self.tol, toko=self.toko,
+            date_from=dt.date(), date_to=dt.date(),
+        )
+        r_ok = MatchResult.objects.get(run=run, left=fr)
+        self.assertEqual(r_ok.bucket, "cocok")
+        self.assertEqual(r_ok.right_id, money.id)
+        self.assertIn(r_ok.reason_code, ("amount+rek", "owner_fr+kredit_masuk"))
+
+    def test_a_outbound_tidak_cocok_hanya_karena_raw_norek_sendiri(self):
+        """A aman: FR keluar + WD member amount sama TIDAK cocok hanya karena NOREK rekening sendiri."""
+        dt = datetime(2026, 8, 22, 9, 0)
+        fr = self._fr_cm(
+            "BANK BRI | KIKI SUASANTO | TAMPUNG", "BRI 119101022152500",
+            "-5000000", dt,
+        )
+        # WD member di rekening Kiki — raw NOREK = rekening sendiri, lawan bukan CM
+        money = self._tx(
+            self.bank, self.up_k, jenis="wd", amount="5000000", money="-5000000",
+            dt=dt, counterparty="ANWAR PEMAIN",
+            description="NBMB Kikisuasanto TO ANWAR PEMAIN",
+            raw={"NOREK": "119101022152500"},
+        )
+        clear_cm_cache()
+        run = run_match(
+            MatchRun.Relation.BRACKET_BANK, self.tol, toko=self.toko,
+            date_from=dt.date(), date_to=dt.date(),
+        )
+        r = MatchResult.objects.get(run=run, left=fr)
+        self.assertEqual(r.bucket, "tidak_cocok")
+        self.assertEqual(r.reason_code, "no_money")
+        # money boleh no_fr atau tidak masuk right — yang penting tidak dipasangkan ke FR ini
+        self.assertFalse(
+            MatchResult.objects.filter(run=run, left=fr, right=money, bucket="cocok").exists()
+        )
+
+    def test_b_flyer_tampung_cocok_fr_keluar_channel(self):
+        """B: FR keluar channel QRIS FLYER ↔ mutasi QRFLYER TAMPUNG (norek tujuan CM)."""
+        gw = SourceType.objects.get_or_create(key="gateway", defaults={"name": "Gateway"})[0]
+        up_g = Upload.objects.create(
+            source_type=gw, toko=self.toko, original_name="flyer_tampung.csv",
+            owner_name="MUL ZMGZCRT",
+        )
+        dt = datetime(2026, 8, 22, 8, 44, 1)
+        fr = self._fr_cm(
+            "QRIS FLYER | DEPOSIT / WITHDRAW", "QRIS 000000556677",
+            "-23787096", dt, desc="PINDAH DANA FYLER + BIAYA TRANSFER",
+        )
+        # seed norek tujuan sebagai CM (FR masuk terpisah — identitas norek)
+        self._fr_cm(
+            "BANK BRI | KIKI SUASANTO | TAMPUNG LAYER 2", "BRI 119101022152500",
+            "1000", datetime(2026, 8, 20, 10, 0),
+        )
+        money = self._tx(
+            gw, up_g, jenis="wd", amount="23787096", money="-23787096",
+            dt=dt, counterparty="KIKISUASANTO",
+            description="QRFLYER TAMPUNG BRI 119101022152500 KIKISUASANTO",
+        )
+        clear_cm_cache()
+        run = run_match(
+            MatchRun.Relation.BRACKET_BANK, self.tol, toko=self.toko,
+            date_from=dt.date(), date_to=dt.date(),
+        )
+        r_ok = MatchResult.objects.get(run=run, left=fr)
+        self.assertEqual(r_ok.bucket, "cocok")
+        self.assertEqual(r_ok.right_id, money.id)
+        self.assertEqual(r_ok.reason_code, "amount+channel_tampung")
+
+    def test_c_typo_kilo_tanpa_sinyal_ab_tolak(self):
+        """C: typo KILO≈KIKI saja tanpa sinyal A/B → score 0 (bukan primary)."""
+        from types import SimpleNamespace
+
+        from reconciliation.engine import _sesama_cm_identity
+
+        fr = SimpleNamespace(raw={
+            "Bank": "BANK BRI | NASRUL | DEPOSIT",
+            "No. Rek Bank Member": "BRI 1550016356993",
+        })
+        bank = SimpleNamespace(
+            counterparty="KILOSUASANTO",
+            description="TRSF KE KILOSUASANTO",
+            money_delta=Decimal("-100000"),
+            upload=SimpleNamespace(owner_name="NASRUL"),
+            raw={},
+        )
+        sc, reason = _sesama_cm_identity(
+            fr, bank,
+            cm_names=("KIKI SUASANTO", "NASRUL"),
+            cm_reks=("1550016356993", "119101022152500"),
+        )
+        self.assertEqual(sc, 0.0)
+        self.assertEqual(reason, "")
+
+    def test_c_typo_kilo_dengan_sinyal_b_channel(self):
+        """C: typo KILO≈KIKI diizinkan bila ada sinyal channel tampung (B)."""
+        from types import SimpleNamespace
+
+        from reconciliation.engine import _sesama_cm_identity
+
+        fr = SimpleNamespace(raw={
+            "Bank": "QRIS FLYER | DEPOSIT / WITHDRAW",
+            "No. Rek Bank Member": "QRIS 000000556677",
+        })
+        bank = SimpleNamespace(
+            counterparty="KILOSUASANTO",
+            description="QRFLYER TAMPUNG BRI 119101022152500 KILOSUASANTO",
+            money_delta=Decimal("-23787096"),
+            upload=SimpleNamespace(owner_name="MUL ZMGZCRT"),
+            raw={"Beneficiary Account": "119101022152500"},
+        )
+        sc, reason = _sesama_cm_identity(
+            fr, bank,
+            cm_names=("KIKI SUASANTO", "NASRUL"),
+            cm_reks=("000000556677", "119101022152500"),
+        )
+        self.assertGreaterEqual(sc, 90)
+        self.assertIn(reason, ("amount+channel_tampung", "amount+name_cm"))
+
+    def test_abc_pasangan_pindah_flyer_ke_kiki(self):
+        """E2E MUL-like: FR keluar Flyer + FR masuk Kiki ↔ tampung WD + kredit BRI."""
+        gw = SourceType.objects.get_or_create(key="gateway", defaults={"name": "Gateway"})[0]
+        up_g = Upload.objects.create(
+            source_type=gw, toko=self.toko, original_name="MUTASI TAMPUNG QR FLYER.csv",
+            owner_name="MUL ZMGZCRT",
+        )
+        dt = datetime(2026, 8, 22, 8, 44)
+        fr_out = self._fr_cm(
+            "QRIS FLYER | DEPOSIT / WITHDRAW", "QRIS 000000556677",
+            "-23787096", dt, desc="PINDAH DANA FYLER + BIAYA TRANSFER",
+        )
+        fr_in = self._fr_cm(
+            "BANK BRI | KIKI SUASANTO | TAMPUNG LAYER 2", "BRI 119101022152500",
+            "23787096", dt, desc="PINDAH DANA FYLER + BIAYA TRANSFER",
+        )
+        flyer = self._tx(
+            gw, up_g, jenis="wd", amount="23787096", money="-23787096",
+            dt=dt, counterparty="KILOSUASANTO",
+            description="QRFLYER TAMPUNG BRI 119101022152500 KILOSUASANTO",
+        )
+        bri = self._tx(
+            self.bank, self.up_k, jenis="depo", amount="23787096", money="23787096",
+            dt=dt, counterparty="",
+            description="1787363038aA8P7PC WS_OB ESB:APFT:000TP00F:000372912238",
+            raw={"NOREK": "119101022152500", "GLSIGN": "Cr"},
+        )
+        clear_cm_cache()
+        run = run_match(
+            MatchRun.Relation.BRACKET_BANK, self.tol, toko=self.toko,
+            date_from=dt.date(), date_to=dt.date(),
+        )
+        r_out = MatchResult.objects.get(run=run, left=fr_out)
+        r_in = MatchResult.objects.get(run=run, left=fr_in)
+        self.assertEqual(r_out.bucket, "cocok")
+        self.assertEqual(r_out.right_id, flyer.id)
+        self.assertEqual(r_in.bucket, "cocok")
+        self.assertEqual(r_in.right_id, bri.id)

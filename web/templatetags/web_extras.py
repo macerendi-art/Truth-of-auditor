@@ -23,8 +23,10 @@ REASON_LABELS = {
     "amount+date+name": ("Nominal · tanggal · nama", "ok"),
     "amount+rek":       ("Nominal · no. rek CM",     "ok"),
     "amount+name_cm":   ("Nominal · nama CM",        "ok"),
+    "amount+channel_tampung": ("Nominal · channel tampung", "ok"),
     "owner_fr+counterparty_cm": ("Rekening FR · lawan CM", "ok"),
     "owner_fr+rek_cm":  ("Rekening FR · norek lawan", "ok"),
+    "owner_fr+kredit_masuk": ("Rekening FR · kredit masuk", "ok"),
     # perlu tinjau
     "amount_fee":       ("Selisih biaya transfer",   "warn"),
     "amount_mismatch":  ("Selisih nominal",          "warn"),
