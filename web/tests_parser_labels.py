@@ -1,4 +1,4 @@
-"""Label jenis parser cor_* → vgr_*/tmg_* di Impor (UI only)."""
+"""Label jenis parser cor_* → Vgr_*/Tmg_* di Impor (UI only)."""
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase
@@ -12,24 +12,26 @@ class LabelParserUnitTests(SimpleTestCase):
     def test_vigor_ganti_cor(self):
         self.assertEqual(
             label_parser("cor_panel_manual_dp", "vigor"),
-            "vgr_panel_manual_dp",
+            "Vgr_panel_manual_dp",
         )
-        self.assertEqual(label_parser("cor_panel_bank", "vigor"), "vgr_panel_bank")
-        self.assertEqual(label_parser("cor_qris_gateway", "vigor"), "vgr_qris_gateway")
+        self.assertEqual(label_parser("cor_panel_bank", "vigor"), "Vgr_panel_bank")
+        self.assertEqual(label_parser("cor_qris_gateway", "vigor"), "Vgr_qris_gateway")
 
     def test_tm_gaming_ganti_cor(self):
         self.assertEqual(
             label_parser("cor_panel_manual_dp", "tm_gaming"),
-            "tmg_panel_manual_dp",
+            "Tmg_panel_manual_dp",
         )
-        self.assertEqual(label_parser("cor_panel_qris", Toko.PANEL_TMG), "tmg_panel_qris")
+        self.assertEqual(label_parser("cor_panel_qris", Toko.PANEL_TMG), "Tmg_panel_qris")
 
-    def test_nexus_jadi_nx(self):
-        self.assertEqual(label_parser("cor_panel_bank", "nexus"), "nx_panel_bank")
+    def test_nexus_jadi_vgr_bukan_nx(self):
+        """Owner: nx_panel_bank → Vgr_panel_bank (bukan awalan nx_)."""
+        self.assertEqual(label_parser("cor_panel_bank", "nexus"), "Vgr_panel_bank")
         self.assertEqual(
             label_parser("cor_panel_manual_dp", Toko.PANEL_NEXUS),
-            "nx_panel_manual_dp",
+            "Vgr_panel_manual_dp",
         )
+        self.assertNotEqual(label_parser("cor_panel_bank", "nexus"), "nx_panel_bank")
         # panel kosong / tak dikenal: tetap cor_
         self.assertEqual(label_parser("cor_panel_bank", ""), "cor_panel_bank")
         self.assertEqual(label_parser("cor_panel_bank", "lain"), "cor_panel_bank")
@@ -37,14 +39,15 @@ class LabelParserUnitTests(SimpleTestCase):
     def test_bukan_cor_tidak_diubah(self):
         self.assertEqual(label_parser("qris_elite", "tm_gaming"), "qris_elite")
         self.assertEqual(label_parser("bri", "vigor"), "bri")
-        # substring di tengah tidak disentuh
         self.assertEqual(label_parser("score_board", "vigor"), "score_board")
 
     def test_parser_options_key_tetap_cor_label_berganti(self):
         opts = {o["key"]: o["label"] for o in parser_options("tm_gaming")}
         self.assertIn("cor_panel_manual_dp", opts)
-        self.assertEqual(opts["cor_panel_manual_dp"], "tmg_panel_manual_dp")
+        self.assertEqual(opts["cor_panel_manual_dp"], "Tmg_panel_manual_dp")
         self.assertEqual(opts["qris_elite"], "qris_elite")
+        opts_nx = {o["key"]: o["label"] for o in parser_options("nexus")}
+        self.assertEqual(opts_nx["cor_panel_bank"], "Vgr_panel_bank")
 
 
 class LabelParserUploadViewTests(TestCase):
@@ -68,15 +71,13 @@ class LabelParserUploadViewTests(TestCase):
         )
         r = self.client.post(reverse("upload"), {"action": "analyze", "files": [f]})
         html = r.content.decode()
-        # value POST tetap key internal
         self.assertIn('value="cor_panel_manual_dp"', html)
-        # teks opsi pakai tmg_
-        self.assertIn(">tmg_panel_manual_dp<", html)
+        self.assertIn(">Tmg_panel_manual_dp<", html)
         self.assertNotIn(">cor_panel_manual_dp<", html)
-        # non-cor tidak diubah
+        self.assertNotIn(">tmg_panel_manual_dp<", html)
         self.assertIn(">qris_elite<", html)
 
-    def test_dropdown_label_nx_untuk_toko_nexus(self):
+    def test_dropdown_label_vgr_untuk_toko_nexus(self):
         lbs = Toko.objects.filter(key="lbs").first()
         if not lbs:
             lbs = Toko.objects.create(
@@ -92,5 +93,6 @@ class LabelParserUploadViewTests(TestCase):
         r = self.client.post(reverse("upload"), {"action": "analyze", "files": [f]})
         html = r.content.decode()
         self.assertIn('value="cor_panel_bank"', html)
-        self.assertIn(">nx_panel_bank<", html)
+        self.assertIn(">Vgr_panel_bank<", html)
         self.assertNotIn(">cor_panel_bank<", html)
+        self.assertNotIn(">nx_panel_bank<", html)

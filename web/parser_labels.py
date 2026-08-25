@@ -1,9 +1,9 @@
 """Label tampilan jenis parser di Impor data (UI only — value POST tetap key).
 
 Prefix internal ``cor_*`` diganti di label sesuai panel toko:
-- ``panel=vigor`` → ``vgr_*``
-- ``panel=tm_gaming`` → ``tmg_*``
-- ``panel=nexus`` → ``nx_*``
+- ``panel=vigor`` → ``Vgr_*``
+- ``panel=tm_gaming`` → ``Tmg_*``
+- ``panel=nexus`` → ``Vgr_*``  (bukan nx_ — permintaan owner)
 - panel kosong / tak dikenal → tetap ``cor_*``
 
 Value ``<option>`` dan commit ingest **tidak** berubah — hanya teks yang
@@ -14,11 +14,11 @@ from __future__ import annotations
 from sources.models import Toko
 from sources.services import PARSERS
 
-# panel toko → pengganti awalan "cor"
+# panel toko → pengganti awalan "cor" (casing label: Vgr / Tmg)
 _PANEL_PREFIX = {
-    Toko.PANEL_VIGOR: "vgr",
-    Toko.PANEL_TMG: "tmg",
-    Toko.PANEL_NEXUS: "nx",
+    Toko.PANEL_VIGOR: "Vgr",
+    Toko.PANEL_TMG: "Tmg",
+    Toko.PANEL_NEXUS: "Vgr",
 }
 
 
