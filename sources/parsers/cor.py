@@ -34,6 +34,38 @@ def resolve_oth_bank(code, name):
     return m.group(1).upper() if m else code
 
 
+def _cor_bank_title_chip(op_code_eff, op_name, bank_title_default):
+    """Chip `bank_title` untuk rail bank COR.
+
+    Destinasi QRIS ELITE diekspor sebagai ``QRIS - <norek> - QRISELITE``.
+    ``derive_bank_fields`` hanya mengambil segmen pertama → ``QRIS``, sama
+    dengan rail UNOPAY generik — kanal ELITE hilang di chip filter, channel
+    guard, dan Control Bracket. Bila nama pemilik memuat ELITE, chip =
+    ``QRISELITE`` (masih mengandung ``QR`` → kelas metode tetap QRIS).
+    ``raw[\"Bank Title\"]`` tetap triplet penuh ``QRIS|QRISELITE|<norek>``.
+    """
+    code = (op_code_eff or "").strip().upper()
+    name_u = (op_name or "").strip().upper()
+    if code == "QRIS" and "ELITE" in name_u:
+        return "QRISELITE"
+    return bank_title_default
+
+
+def _cor_panel_bank_waktu(r):
+    """Requested/Approved Date (bentuk lama) ATAU kolom tunggal Date (W25 ELITE).
+
+    Ekspor DP ELITE panel Vigor/TM Gaming 2026-08 hanya punya ``Date`` (waktu
+    approve). Tanpa fallback ini occurred/posted_date NULL → baris tak masuk
+    jendela rekon meski baris ter-parse.
+    """
+    approved = parse_dt(r.get("Approved Date"))
+    requested = parse_dt(r.get("Requested Date"))
+    single = parse_dt(r.get("Date"))
+    posted = approved or single
+    occurred = requested or approved or single
+    return occurred, posted
+
+
 class CORPanelBankParser(BaseParser):
     source_key = "panel"
 
@@ -55,12 +87,12 @@ class CORPanelBankParser(BaseParser):
             pk_code, pk_acct, pk_name = parse_bank_triplet(player_raw)
             op_code, op_acct, op_name = parse_bank_triplet(oper_raw)
             op_code_eff = resolve_oth_bank(op_code, op_name)
-            occurred = parse_dt(r.get("Requested Date"))
-            posted = parse_dt(r.get("Approved Date"))
+            occurred, posted = _cor_panel_bank_waktu(r)
             raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
             raw["Player Bank"] = f"{pk_code}|{pk_name}|{pk_acct}"
             raw["Bank Title"] = f"{op_code_eff}|{op_name}|{op_acct}"
             player_bank, bank_title = derive_bank_fields("panel", raw)
+            bank_title = _cor_bank_title_chip(op_code_eff, op_name, bank_title)
             row = {
                 "source_type": "panel",
                 "occurred_at": occurred,

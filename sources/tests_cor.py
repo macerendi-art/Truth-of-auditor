@@ -184,6 +184,59 @@ class CORPanelBankTests(SimpleTestCase):
             os.remove(path)
         self.assertEqual(rows[0]["bank_title"], "DANA")
 
+    def test_dp_date_tunggal_qriselite_chip_dan_tanggal(self):
+        """DP ELITE panel Vigor/TM: kolom Date saja + Destination QRISELITE.
+
+        W25 24-08-2026: tanpa Approved/Requested Date; Destination Bank =
+        ``QRIS - 5615607894 - QRISELITE``. Chip bank_title harus QRISELITE
+        (bukan QRIS generik), tanggal terisi, raw triplet utuh.
+        """
+        header = ["#", "Date", "Username", "From Bank", "Destination Bank",
+                  "Amount", "Status", "By"]
+        path = _xlsx([
+            header,
+            ["1", "24 Aug 2026 23:59:54", "raditya2015",
+             "MANDIRI - 1140020947027 - HASNIDAR",
+             "QRIS - 5615607894 - QRISELITE", "35000", "approved", "win25sub1400"],
+        ])
+        try:
+            rows = CORPanelBankParser().parse(path, flow="dp")
+        finally:
+            os.remove(path)
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["jenis"], "depo")
+        self.assertEqual(r["username"], "raditya2015")
+        self.assertEqual(r["amount"], Decimal("35000"))
+        self.assertEqual(r["bank_title"], "QRISELITE")
+        self.assertEqual(r["player_bank"], "MANDIRI")
+        self.assertEqual(r["posted_date"], date(2026, 8, 24))
+        self.assertEqual(r["occurred_at"], datetime(2026, 8, 24, 23, 59, 54))
+        self.assertEqual(r["raw"]["Bank Title"], "QRIS|QRISELITE|5615607894")
+        self.assertEqual(r["raw"]["Destination Bank"],
+                         "QRIS - 5615607894 - QRISELITE")
+        self.assertIn("QRISELITE", r["description"])
+        # Segmen tengah = nama kanal — _expected_owner tidak jatuh ke "QRIS".
+        t = SimpleNamespace(raw=r["raw"])
+        self.assertEqual(_expected_owner(t), "QRISELITE")
+        # Kelas metode dashboard: "QR" ⊂ QRISELITE → QRIS.
+        self.assertEqual(kelas_metode("depo", r["bank_title"]), "QRIS")
+
+    def test_dp_qris_non_elite_tetap_chip_qris(self):
+        """Destinasi QRIS tanpa ELITE di nama → chip tetap QRIS (rail lain)."""
+        path = _xlsx([
+            self.HEADER,
+            ["1", "01 Jul 2026 23:52:18", "01 Jul 2026 23:50:06", "febri72",
+             "DANA - 081270670097 - FEBRIA MEGASARI",
+             "QRIS - 111 - UNOPAY", "200000", "approved", "op"],
+        ])
+        try:
+            rows = CORPanelBankParser().parse(path, flow="dp")
+        finally:
+            os.remove(path)
+        self.assertEqual(rows[0]["bank_title"], "QRIS")
+        self.assertEqual(rows[0]["raw"]["Bank Title"], "QRIS|UNOPAY|111")
+
 
 class ResolveOthBankTests(SimpleTestCase):
     """Unit test `resolve_oth_bank` — dipakai parser & command backfill."""

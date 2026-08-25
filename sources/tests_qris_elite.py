@@ -150,6 +150,36 @@ class QRISEliteParserTests(SimpleTestCase):
         self.assertIn("RECORD DATE", str(ctx.exception))
         self.assertIn("D1234567", str(ctx.exception))
 
+    def test_ticket_done_vigor_tm_username_anchor_hash_unik(self):
+        """Vigor/TM: TICKET=Done → ticket_no kosong; hash pakai ID (bukan Done).
+
+        Sampel W25 24-08: 137 baris SUCCESS semua TICKET=Done; hash lama
+        [Done, nominal] menabrak 95 baris. Nexus D… tetap di jalur ticket.
+        """
+        rows = self._parse([
+            _baris_elite(**{
+                "ID": "id-a", "TICKET": "Done", "MEMBER": "logic25",
+                "RECORD VALUE": "26222",
+            }),
+            _baris_elite(**{
+                "ID": "id-b", "TICKET": "Done", "MEMBER": "hokii8899",
+                "RECORD VALUE": "26222",
+            }),
+            _baris_elite(**{
+                "ID": "id-c", "TICKET": "done", "MEMBER": "king123",
+                "RECORD VALUE": "100000",
+            }),
+        ])
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([r["ticket_no"] for r in rows], ["", "", ""])
+        self.assertEqual(rows[0]["username"], "logic25")
+        self.assertTrue(rows[0]["description"].startswith("QRIS ELITE"))
+        hashes = {r["row_hash"] for r in rows}
+        self.assertEqual(len(hashes), 3)
+        # Nexus ticket nyata tidak ikut digeser ke jalur Done.
+        nexus = self._parse([_baris_elite(**{"TICKET": "D9998887"})])[0]
+        self.assertEqual(nexus["ticket_no"], "D9998887")
+
 
 class QRISEliteRegistrasiDanDeteksiTests(SimpleTestCase):
     def test_parser_terdaftar(self):

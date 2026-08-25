@@ -215,12 +215,32 @@ class QRFlyerParser(BaseParser):
         return out
 
 
+def _qris_elite_tiket_nyata(ticket):
+    """True bila kolom TICKET adalah tiket panel Nexus (D…/W…), bukan status.
+
+    Vigor/TM Gaming (W25 24-08-2026): TICKET vendor selalu ``Done`` — bukan
+    kunci transaksi. Memakai ``Done`` sebagai ticket_no + bahan row_hash
+    menabrak ratusan baris beda user/nominal sama (95/137 hash bentrok pada
+    sampel). Nexus BBS tetap mengirim D… nyata → jalur ticket tak berubah.
+    """
+    t = (ticket or "").strip()
+    if len(t) < 2:
+        return False
+    head, rest = t[0].upper(), t[1:]
+    return head in ("D", "W") and any(ch.isdigit() for ch in rest)
+
+
 class QRISEliteParser(BaseParser):
-    """QRIS ELITE CSV — gateway deposit panel Nexus.
+    """QRIS ELITE CSV — gateway deposit (Nexus ticket ATAU Vigor/TM username).
 
     Baris pertama adalah judul dan baris kedua header. ``RECORD DATE`` sudah
     WIB walaupun suffix vendor rusak menjadi ``+07:00+007``; hanya 19 karakter
     tanggal-jam pertama yang dipakai. ``APPROVE`` sengaja tidak dipakai.
+
+    Dua bentuk kolom TICKET:
+    - Nexus: ``D…``/``W…`` → ``ticket_no`` terisi, anchor pass 0.
+    - Vigor/TM: ``Done`` (atau non-tiket) → ``ticket_no`` kosong, anchor
+      username (+ ``ID`` di row_hash supaya nominal kembar beda user aman).
     """
 
     source_key = "gateway"
@@ -250,9 +270,9 @@ class QRISEliteParser(BaseParser):
         jumlah_transaksi = 0
         status_ditemukan = set()
         for r in rows:
-            ticket = str(r.get(kolom("TICKET"), "") or "").strip()
+            ticket_raw = str(r.get(kolom("TICKET"), "") or "").strip()
             identitas = str(r.get(kolom("ID"), "") or "").strip()
-            if not ticket and not identitas:
+            if not ticket_raw and not identitas:
                 continue
             jumlah_transaksi += 1
             status = str(r.get(kolom("STATUS"), "") or "").strip().upper()
@@ -265,11 +285,14 @@ class QRISEliteParser(BaseParser):
             if not occurred:
                 raise ValueError(
                     "QRIS ELITE: RECORD DATE tidak dapat dibaca untuk tiket %s: %r."
-                    % (ticket or identitas, waktu_raw)
+                    % (ticket_raw or identitas, waktu_raw)
                 )
             amount = abs(parse_decimal(r.get(kolom("RECORD VALUE"))))
             fee = abs(parse_decimal(r.get(kolom("RECORD FEE"))))
             raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
+            username = str(r.get(kolom("MEMBER"), "") or "").strip()
+            tiket_nyata = _qris_elite_tiket_nyata(ticket_raw)
+            ticket_no = ticket_raw if tiket_nyata else ""
 
             # Kalibrasi 85/85 BBS: panel.Approved − RECORD DATE median +37 dtk
             # (rentang +11..+358, nol negatif), sedangkan terhadap APPROVE
@@ -288,8 +311,8 @@ class QRISEliteParser(BaseParser):
                 "fee": fee,
                 "bonus": Decimal("0"),
                 "balance_after": None,
-                "ticket_no": ticket,
-                "username": str(r.get(kolom("MEMBER"), "") or "").strip(),
+                "ticket_no": ticket_no,
+                "username": username,
                 "reference": "",
                 "counterparty": "",
                 "description": "QRIS ELITE %s" % str(
@@ -298,7 +321,15 @@ class QRISEliteParser(BaseParser):
                 "raw": raw,
             }
             nominal_kanonik = format(amount.normalize(), "f")
-            row["row_hash"] = row_hash("qris_elite", [ticket, nominal_kanonik])
+            # Nexus: hash [ticket, nominal] — jangan diubah (baris prod ada).
+            # Vigor/TM TICKET=Done: hash [ID, nominal] (+ username fallback
+            # bila ID kosong) supaya nominal kembar beda user tidak bentrok.
+            if tiket_nyata:
+                row["row_hash"] = row_hash("qris_elite", [ticket_no, nominal_kanonik])
+            else:
+                row["row_hash"] = row_hash(
+                    "qris_elite", [identitas or username, nominal_kanonik]
+                )
             out.append(row)
 
         if jumlah_transaksi and not out:

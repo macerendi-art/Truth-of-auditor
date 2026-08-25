@@ -142,7 +142,13 @@ def detect_source(path, filename=""):
             add("cor_qris_wd_gateway", 0.95)
         if _has(t, "whitelabel transaction id") and _has(t, "nmid"):
             add("qhoki", 0.95)
-        if _has(t, "from bank") and _has(t, "destination bank") and _has(t, "approved date"):
+        # Rail bank COR/Vigor/TM: From+Destination Bank. Bentuk lama pakai
+        # Approved Date; DP ELITE panel W25 (2026-08) hanya kolom Date.
+        # Tanpa cabang Date, berkas ELITE jatuh ke qrflyer 0.85 (sel data
+        # memuat "QRIS - … - QRISELITE" → token qris).
+        if _has(t, "from bank") and _has(t, "destination bank") and (
+            _has(t, "approved date") or (_has(t, "date") and _has(t, "username"))
+        ):
             add("cor_panel_bank", 0.95)
         if _has(t, "transaction id") and _has(t, "username") and _has(t, "requested date") \
                 and not _has(t, "kategori") and not _has(t, "orderid"):
