@@ -20,6 +20,7 @@ from .parsers.bonus import (BracketBonusParser, CORPanelBonusParser,
 from .parsers.bracket import BracketParser
 from .parsers.cor import (
     CORPanelBankParser,
+    CORPanelManualDepositParser,
     CORPanelQRISParser,
     CORQRISGatewayParser,
     CORQRISWDGatewayParser,
@@ -55,6 +56,7 @@ PARSERS = {
     "qrflyer": QRFlyerParser,
     "qrflyer_tampung": QRFlyerTampungParser,
     "cor_panel_bank": CORPanelBankParser,
+    "cor_panel_manual_dp": CORPanelManualDepositParser,
     "cor_panel_qris": CORPanelQRISParser,
     "cor_qris_gateway": CORQRISGatewayParser,
     "cor_qris_wd_gateway": CORQRISWDGatewayParser,

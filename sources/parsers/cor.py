@@ -35,7 +35,7 @@ def resolve_oth_bank(code, name):
 
 
 def _cor_bank_title_chip(op_code_eff, op_name, bank_title_default):
-    """Chip `bank_title` untuk rail bank COR.
+    """Chip `bank_title` untuk rail bank COR / manual deposit.
 
     Destinasi QRIS ELITE diekspor sebagai ``QRIS - <norek> - QRISELITE``.
     ``derive_bank_fields`` hanya mengambil segmen pertama → ``QRIS``, sama
@@ -51,22 +51,13 @@ def _cor_bank_title_chip(op_code_eff, op_name, bank_title_default):
     return bank_title_default
 
 
-def _cor_panel_bank_waktu(r):
-    """Requested/Approved Date (bentuk lama) ATAU kolom tunggal Date (W25 ELITE).
-
-    Ekspor DP ELITE panel Vigor/TM Gaming 2026-08 hanya punya ``Date`` (waktu
-    approve). Tanpa fallback ini occurred/posted_date NULL → baris tak masuk
-    jendela rekon meski baris ter-parse.
-    """
-    approved = parse_dt(r.get("Approved Date"))
-    requested = parse_dt(r.get("Requested Date"))
-    single = parse_dt(r.get("Date"))
-    posted = approved or single
-    occurred = requested or approved or single
-    return occurred, posted
-
-
 class CORPanelBankParser(BaseParser):
+    """Panel rail bank COR klasik: Approved Date + Requested Date + From/Destination.
+
+    Bukan ekspor manual deposit (kolom ``Date`` tunggal) — itu
+    ``CORPanelManualDepositParser`` / ``cor_panel_manual_dp``.
+    """
+
     source_key = "panel"
 
     def parse(self, path, flow=""):
@@ -87,7 +78,8 @@ class CORPanelBankParser(BaseParser):
             pk_code, pk_acct, pk_name = parse_bank_triplet(player_raw)
             op_code, op_acct, op_name = parse_bank_triplet(oper_raw)
             op_code_eff = resolve_oth_bank(op_code, op_name)
-            occurred, posted = _cor_panel_bank_waktu(r)
+            occurred = parse_dt(r.get("Requested Date"))
+            posted = parse_dt(r.get("Approved Date"))
             raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
             raw["Player Bank"] = f"{pk_code}|{pk_name}|{pk_acct}"
             raw["Bank Title"] = f"{op_code_eff}|{op_name}|{op_acct}"
@@ -116,6 +108,83 @@ class CORPanelBankParser(BaseParser):
             row["row_hash"] = row_hash("cor_panel_bank",
                                        [username, amt, occurred, pk_acct])
             out.append(row)
+        return out
+
+
+class CORPanelManualDepositParser(BaseParser):
+    """Panel manual deposit Vigor/TM Gaming (DP ELITE / deposit manual bank-rail).
+
+    Bentuk header beda dari ``cor_panel_bank``:
+    ``# | Date | Username | From Bank | Destination Bank | Amount | Status | By``
+    — **satu** kolom ``Date`` (bukan Approved/Requested). Contoh destinasi
+    ELITE: ``QRIS - 5615607894 - QRISELITE``.
+
+    Selalu **deposit** (bukan WD): flow nama berkas diabaikan supaya
+    ``… DP ELITE PANEL`` tidak bisa kebalik jadi wd. source_key tetap
+    ``panel`` (ikut SourceType panel, tanpa migrasi).
+    """
+
+    source_key = "panel"
+    MARKER = "cor_panel_manual_dp"
+
+    def parse(self, path, flow=""):
+        _, rows = read_xlsx_rows(path, header_row=1)
+        out = []
+        for r in rows:
+            username = str(r.get("Username", "") or "").strip()
+            if not username or str(r.get("Status", "") or "").strip().lower() != "approved":
+                continue
+            amt = parse_decimal(r.get("Amount"))
+            # DP: pemain = From Bank, operator/tujuan = Destination Bank
+            pk_code, pk_acct, pk_name = parse_bank_triplet(r.get("From Bank"))
+            op_code, op_acct, op_name = parse_bank_triplet(r.get("Destination Bank"))
+            op_code_eff = resolve_oth_bank(op_code, op_name)
+            when = parse_dt(r.get("Date"))
+            if not when:
+                # Jangan emit baris dateless — guard ingest akan menolak seluruh
+                # file; lebih jelas gagal di sini per-baris hanya jika SEMUA
+                # gagal (kembalikan [] → zero-yield / bertanggal).
+                continue
+            raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
+            raw["Player Bank"] = f"{pk_code}|{pk_name}|{pk_acct}"
+            raw["Bank Title"] = f"{op_code_eff}|{op_name}|{op_acct}"
+            raw["Sumber"] = self.MARKER
+            player_bank, bank_title = derive_bank_fields("panel", raw)
+            bank_title = _cor_bank_title_chip(op_code_eff, op_name, bank_title)
+            row = {
+                "source_type": "panel",
+                "occurred_at": when,
+                "posted_date": when.date(),
+                "jenis": "depo",
+                "amount": amt,
+                "credit_delta": -amt,
+                "money_delta": amt,
+                "fee": Decimal("0"),
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": "",
+                "username": username,
+                "reference": "",
+                "counterparty": pk_name,
+                "description": f"{op_code} {op_name}".strip(),
+                "player_bank": player_bank,
+                "bank_title": bank_title,
+                "raw": raw,
+            }
+            # Namespace hash terpisah dari cor_panel_bank — file yang sama
+            # diurai dua parser tidak saling menimpa dedup.
+            row["row_hash"] = row_hash(
+                self.MARKER, [username, amt, when, pk_acct, op_acct]
+            )
+            out.append(row)
+        if rows and not out:
+            raise ValueError(
+                "Panel manual deposit: berkas punya baris tetapi tidak satu pun "
+                "lolos (Status=approved + Username + Date terbaca). Header yang "
+                "dikenal: Date, Username, From Bank, Destination Bank, Amount, "
+                "Status. Jangan samakan dengan cor_panel_bank (Approved/"
+                "Requested Date)."
+            )
         return out
 
 

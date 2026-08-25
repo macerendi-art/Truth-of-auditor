@@ -59,9 +59,9 @@ class DetectMultiBrandTests(SimpleTestCase):
         self.assertIn("cor_panel_bank", keys)
 
     def test_deteksi_cor_panel_bank_date_tunggal_bukan_qrflyer(self):
-        """DP ELITE panel: Date (bukan Approved Date) + sel data memuat QRIS.
+        """DP ELITE / manual deposit: Date (bukan Approved) → cor_panel_manual_dp.
 
-        Sebelum cabang Date, detect cuma qrflyer 0.85 (token qris di Destination).
+        Bukan cor_panel_bank; bukan qrflyer 0.85 (token qris di Destination).
         """
         path = _xlsx([
             ["#", "Date", "Username", "From Bank", "Destination Bank",
@@ -74,8 +74,11 @@ class DetectMultiBrandTests(SimpleTestCase):
             hasil = detect_source(path, "24_08_2026 W25 DP ELITE PANEL.xlsx")
         finally:
             os.remove(path)
-        self.assertEqual(hasil[0]["parser_key"], "cor_panel_bank")
+        self.assertEqual(hasil[0]["parser_key"], "cor_panel_manual_dp")
         self.assertGreaterEqual(hasil[0]["confidence"], 0.95)
+        keys = [d["parser_key"] for d in hasil]
+        self.assertNotEqual(keys[0], "cor_panel_bank")
+        self.assertNotEqual(keys[0], "qrflyer")
 
     def test_deteksi_cor_panel_qris(self):
         path = _xlsx([["#", "Approved Date", "Requested Date", "Username",
