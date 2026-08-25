@@ -1,9 +1,10 @@
 """Label tampilan jenis parser di Impor data (UI only — value POST tetap key).
 
-Prefix internal ``cor_*`` (keluarga Vigor/TM Gaming) diganti di label:
-- toko ``panel=vigor`` → ``vgr_*``
-- toko ``panel=tm_gaming`` → ``tmg_*``
-- nexus / panel kosong / lain → tetap ``cor_*``
+Prefix internal ``cor_*`` diganti di label sesuai panel toko:
+- ``panel=vigor`` → ``vgr_*``
+- ``panel=tm_gaming`` → ``tmg_*``
+- ``panel=nexus`` → ``nx_*``
+- panel kosong / tak dikenal → tetap ``cor_*``
 
 Value ``<option>`` dan commit ingest **tidak** berubah — hanya teks yang
 terlihat + pencarian combobox Jenis terdeteksi.
@@ -17,6 +18,7 @@ from sources.services import PARSERS
 _PANEL_PREFIX = {
     Toko.PANEL_VIGOR: "vgr",
     Toko.PANEL_TMG: "tmg",
+    Toko.PANEL_NEXUS: "nx",
 }
 
 

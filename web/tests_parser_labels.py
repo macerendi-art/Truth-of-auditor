@@ -24,9 +24,15 @@ class LabelParserUnitTests(SimpleTestCase):
         )
         self.assertEqual(label_parser("cor_panel_qris", Toko.PANEL_TMG), "tmg_panel_qris")
 
-    def test_nexus_tetap_cor(self):
-        self.assertEqual(label_parser("cor_panel_bank", "nexus"), "cor_panel_bank")
+    def test_nexus_jadi_nx(self):
+        self.assertEqual(label_parser("cor_panel_bank", "nexus"), "nx_panel_bank")
+        self.assertEqual(
+            label_parser("cor_panel_manual_dp", Toko.PANEL_NEXUS),
+            "nx_panel_manual_dp",
+        )
+        # panel kosong / tak dikenal: tetap cor_
         self.assertEqual(label_parser("cor_panel_bank", ""), "cor_panel_bank")
+        self.assertEqual(label_parser("cor_panel_bank", "lain"), "cor_panel_bank")
 
     def test_bukan_cor_tidak_diubah(self):
         self.assertEqual(label_parser("qris_elite", "tm_gaming"), "qris_elite")
@@ -69,3 +75,22 @@ class LabelParserUploadViewTests(TestCase):
         self.assertNotIn(">cor_panel_manual_dp<", html)
         # non-cor tidak diubah
         self.assertIn(">qris_elite<", html)
+
+    def test_dropdown_label_nx_untuk_toko_nexus(self):
+        lbs = Toko.objects.filter(key="lbs").first()
+        if not lbs:
+            lbs = Toko.objects.create(
+                key="lbsx", name="LBSX", panel=Toko.PANEL_NEXUS, is_active=True
+            )
+        else:
+            lbs.panel = Toko.PANEL_NEXUS
+            lbs.save(update_fields=["panel"])
+        self.client.post(reverse("set_toko"), {"toko_id": lbs.id})
+        f = SimpleUploadedFile(
+            "entah.csv", b"kolom_a,kolom_b\n1,2\n", content_type="text/csv"
+        )
+        r = self.client.post(reverse("upload"), {"action": "analyze", "files": [f]})
+        html = r.content.decode()
+        self.assertIn('value="cor_panel_bank"', html)
+        self.assertIn(">nx_panel_bank<", html)
+        self.assertNotIn(">cor_panel_bank<", html)
