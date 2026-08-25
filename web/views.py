@@ -68,6 +68,7 @@ from web.hutang import (
 from web.kelengkapan import status_sumber
 from web.models import FRKoreksi, HutangManual, RekapManual, RekapPenyebab
 from web.monthly import monthly_summary
+from web.parser_labels import parser_options
 from web.penjaga import periksa_upload
 from web.quotes import random_login_tagline
 from web.rekap import FIELDS as REKAP_FIELDS
@@ -1028,7 +1029,8 @@ def upload(request):
                 + ".",
             )
         return render(request, "web/upload.html", {
-            "preview": preview, "parsers": sorted(PARSERS.keys()),
+            "preview": preview,
+            "parsers": parser_options(getattr(active, "panel", "") or ""),
             "flows": ["", "dp", "wd"], "active_toko": active,
             "uploads": _uploads_page(active, request, q=q),
             "semua_toko_tulis": mode_semua(request),
@@ -1036,7 +1038,8 @@ def upload(request):
     from reconciliation.engine import check_completeness
 
     return render(request, "web/upload.html", {
-        "parsers": sorted(PARSERS.keys()), "active_toko": active,
+        "parsers": parser_options(getattr(active, "panel", "") or ""),
+        "active_toko": active,
         "uploads": _uploads_page(active, request, q=q),
         "comp": check_completeness(active),
         "q": q,

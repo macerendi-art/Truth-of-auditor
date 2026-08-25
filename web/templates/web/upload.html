@@ -187,7 +187,7 @@
             "Cari jenis…" (select asli tetap sumber kebenaran / fallback no-JS).
             {% endcomment %}
             {% if not p.parser_key %}<option value="" selected disabled>— tidak terdeteksi, pilih jenis —</option>{% endif %}
-            {% for pk in parsers %}<option value="{{ pk }}" {% if pk == p.parser_key %}selected{% endif %}>{{ pk }}</option>{% endfor %}
+            {% for opt in parsers %}<option value="{{ opt.key }}" {% if opt.key == p.parser_key %}selected{% endif %}>{{ opt.label }}</option>{% endfor %}
           </select>
         </td>
         <td>{% if not p.parser_key %}<span class="badge warn">tidak terdeteksi</span>{% elif p.needs_confirm %}<span class="badge warn">{{ p.confidence }}% — cek</span>{% else %}<span class="badge ok">{{ p.confidence }}%</span>{% endif %}</td>
