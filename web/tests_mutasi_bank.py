@@ -463,6 +463,84 @@ class MutasiBankSesamaCmTests(MutasiBankBase):
         self.assertNotContains(r_cm, "BFST7800588426")
         self.assertNotContains(r_cm, "SITI AZLINA")
 
+    def test_muhammad_depan_umum_tidak_telan_wd_member(self):
+        """BTS 25-08: CM FR «MUHAMMAD YUDHA» jangan badge Sesama CM ke WD member
+        «MUHAMMAD ICHSAN» / «MUHAMMAD ILHAM…» (token depan umum).
+
+        Transfer benar ke MUHAMMAD YUDHA tetap Sesama CM.
+        """
+        from web.sesama_cm import (
+            _varian,
+            clear_cm_cache,
+            cm_names_match,
+            q_sesama_cm,
+            tandai_sesama_cm,
+        )
+        br = SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})[0]
+        fr_up = Upload.objects.create(source_type=br, toko=self.lbs, original_name="fr.xlsx")
+        Transaction.objects.create(
+            upload=fr_up, source_type=br, toko=self.lbs, jenis="lainnya",
+            amount=Decimal("0"), money_delta=Decimal("0"),
+            occurred_at=datetime(2026, 8, 25, 10, 0),
+            raw={
+                "Kategori": "Sesama CM",
+                "Bank": "BANK BCA | MUHAMMAD YUDHA | TAMPUNG",
+                "No. Rek Bank Member": "BCA 5830314051",
+            },
+            row_hash=f"fr-yudha-{next(_seq)}",
+        )
+        up = self._up(
+            self.bank,
+            "25-08-2026 BTS MUTASI WD BCA DIMAS BAYU LEGOWO.CSV",
+            owner="DIMAS BAYU LEGOWO",
+        )
+        t_ichsan = self._tx(
+            up, self.bank, jenis="wd", counterparty="MUHAMMAD ICHSAN",
+            description="TRSF E-BANKING DB 2508/FTSCY/WS95031         100000.00MUHAMMAD ICHSAN",
+            amount="-100000", dt=datetime(2026, 8, 25, 0, 0),
+        )
+        t_ilham = self._tx(
+            up, self.bank, jenis="wd", counterparty="MUHAMMAD ILHAM RAM",
+            description="TRSF E-BANKING DB 2508/FTSCY/WS95031         800000.00MUHAMMAD ILHAM R",
+            amount="-800000", dt=datetime(2026, 8, 25, 0, 1),
+        )
+        t_misbah = self._tx(
+            up, self.bank, jenis="wd", counterparty="MUHAMMAD MISBAHUDDM-BCA",
+            description="BI-FAST DB TRANSFER   KE 542 MUHAMMAD MISBAHUDDM-BCA",
+            amount="-600000", dt=datetime(2026, 8, 25, 0, 2),
+        )
+        t_yudha = self._tx(
+            up, self.bank, jenis="depo", counterparty="MUHAMMAD YUDHA",
+            description="TRSF E-BANKING CR 2508/FTSCY/WS95271         640000.00MUHAMMAD YUDHA",
+            amount="640000", dt=datetime(2026, 8, 25, 0, 3),
+        )
+        clear_cm_cache()
+        vars_y = _varian("MUHAMMAD YUDHA")
+        self.assertNotIn("MUHAMMAD", [v.upper() for v in vars_y])
+        self.assertFalse(cm_names_match("MUHAMMAD ICHSAN", "MUHAMMAD YUDHA"))
+        self.assertFalse(cm_names_match("MUHAMMAD ILHAM RAM", "MUHAMMAD YUDHA"))
+        self.assertTrue(cm_names_match("MUHAMMAD YUDHA", "MUHAMMAD YUDHA"))
+        self.assertTrue(cm_names_match("SERVA", "SERVA MUHAMAD SEBASTIAN"))
+        for t in (t_ichsan, t_ilham, t_misbah):
+            self.assertFalse(
+                Transaction.objects.filter(id=t.id).filter(q_sesama_cm(self.lbs.id)).exists(),
+                msg=t.counterparty,
+            )
+        self.assertTrue(
+            Transaction.objects.filter(id=t_yudha.id).filter(q_sesama_cm(self.lbs.id)).exists()
+        )
+        rows = [t_ichsan, t_ilham, t_misbah, t_yudha]
+        tandai_sesama_cm(rows, self.lbs.id)
+        self.assertFalse(t_ichsan.is_sesama_cm)
+        self.assertFalse(t_ilham.is_sesama_cm)
+        self.assertFalse(t_misbah.is_sesama_cm)
+        self.assertTrue(t_yudha.is_sesama_cm)
+        r_cm = self.client.get(reverse("bank_mutations"), {"flow": "cm", "source": "bank"})
+        self.assertContains(r_cm, "MUHAMMAD YUDHA")
+        self.assertNotContains(r_cm, "MUHAMMAD ICHSAN")
+        self.assertNotContains(r_cm, "MUHAMMAD ILHAM")
+        self.assertNotContains(r_cm, "MISBAHUDDM")
+
 
 class MutasiBankPhoneLookupTests(MutasiBankBase):
     def test_baris_ewallet_tampilkan_hp_dan_nama_panel(self):

@@ -30,6 +30,15 @@ _NOISE = frozenset({
     "LAINLAIN", "LAIN",
 })
 
+# Nama depan sangat umum di ID — jangan jadi varian/token-match mandiri.
+# BTS 25-08: CM FR «MUHAMMAD YUDHA» menelan WD member «MUHAMMAD ICHSAN» /
+# «MUHAMMAD ILHAM…» / «MUHAMMAD MISBAHUDDIN» lewat icontains «MUHAMMAD».
+_NAMA_DEPAN_UMUM = frozenset({
+    "MUHAMMAD", "MUHAMAD", "MOHAMMAD", "MOHAMAD", "MUHAMMED", "MOHAMMED",
+    "MOCH", "MOCHAMAD", "MOCHAMMAD", "MUCHAMMAD", "MUH", "MOH",
+    "AHMAD", "AHMED", "ABDUL", "ABD", "SITI", "NUR",
+})
+
 _SUFFIX_CUT = re.compile(
     r"\b(TAMPUNG|LAYER|DEPOSIT|WITHDRAW|WITHDRAWAL|WD|DP)\b.*$",
     re.IGNORECASE,
@@ -110,9 +119,16 @@ def _varian(nama: str) -> list[str]:
             continue
         seen.add(key)
         out.append(v)
-    # token pertama ≥4 (owner file sering cuma "SERVA" / "NASRUL")
+    # token pertama ≥4 (owner file sering cuma "SERVA" / "NASRUL") —
+    # jangan nama depan umum (MUHAMMAD) agar WD member beda orang tidak tertelan.
     first = n.split()[0] if n.split() else ""
-    if len(first) >= 4 and first.lower() not in seen and first.upper() not in _NOISE:
+    fu = first.upper()
+    if (
+        len(first) >= 4
+        and first.lower() not in seen
+        and fu not in _NOISE
+        and fu not in _NAMA_DEPAN_UMUM
+    ):
         out.append(first)
         seen.add(first.lower())
     return out
@@ -141,13 +157,23 @@ def cm_names_match(a: str, b: str, *, min_ratio: float = 90.0) -> bool:
     short, long_ = (ca, cb) if len(ca) <= len(cb) else (cb, ca)
     if len(short) >= 6 and short in long_:
         return True
-    # token pertama sama + cukup panjang (SERVA vs SERVAMUHAMAD…)
+    # token pertama sama + cukup panjang — HANYA bila salah satu sisi single-token
+    # (SERVA ≈ SERVA MUHAMAD SEBASTIAN). Bukan MUHAMMAD ICHSAN ≈ MUHAMMAD YUDHA
+    # (keduanya multi-kata, orang beda; BTS 25-08 false Sesama CM).
     ta = (str(a or "").split() or [""])[0]
     tb = (str(b or "").split() or [""])[0]
     cta, ctb = _compact_nama(ta), _compact_nama(tb)
-    if cta and ctb and len(cta) >= 5 and cta == ctb and (len(ca) >= 6 or len(cb) >= 6):
-        if cta not in _NOISE:
-            return True
+    if (
+        cta
+        and ctb
+        and len(cta) >= 5
+        and cta == ctb
+        and cta not in _NOISE
+        and cta not in _NAMA_DEPAN_UMUM
+        and (len(ca) == len(cta) or len(cb) == len(ctb))
+        and (len(ca) >= 6 or len(cb) >= 6)
+    ):
+        return True
     try:
         from rapidfuzz import fuzz
         if min(len(ca), len(cb)) >= 8 and fuzz.ratio(ca, cb) >= min_ratio:
