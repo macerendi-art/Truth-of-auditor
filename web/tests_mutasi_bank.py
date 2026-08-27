@@ -717,6 +717,10 @@ class MutasiBankFeeTests(MutasiBankBase):
         self.assertIn("#mutasi-table tfoot td", html)
         self.assertIn("position:sticky", html)
         self.assertIn("bottom:0", html)
+        # anti bleed-through: collapse separate + pelat solid ::before
+        self.assertIn("border-collapse:separate", html)
+        self.assertIn("#mutasi-table tfoot td::before", html)
+        self.assertIn("background:#fff", html)
 
 
 class MutasiBankCoverageTests(MutasiBankBase):
