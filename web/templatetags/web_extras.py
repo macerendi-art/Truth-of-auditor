@@ -122,6 +122,21 @@ def aksi_tone(code):
     return AKSI_LABELS.get(code, (code, "muted"))[1] if code else "muted"
 
 
+@register.filter
+def abs_num(value):
+    """Nilai absolut — Fee NXPAY di export bertanda −; UI tampil biaya positif."""
+    if value is None or value == "":
+        return value
+    try:
+        from decimal import Decimal
+        return abs(Decimal(str(value)))
+    except Exception:
+        try:
+            return abs(value)
+        except Exception:
+            return value
+
+
 @register.inclusion_tag("web/_pager.html", takes_context=True)
 def pager(context, page, on_each_side=5, on_ends=1):
     """Pager bernomor jendela-geser (elided) yang mempertahankan semua query kecuali `page`."""

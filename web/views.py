@@ -2082,12 +2082,34 @@ def bank_mutations(request):
     _resolve_wallet_names(page.object_list, active)
     from web.sesama_cm import tandai_sesama_cm
     tandai_sesama_cm(page.object_list, active.id)
+    # Total Fee + Nominal: per lembar (halaman paginator) + keseluruhan filter aktif.
+    # Fee = Transaction.fee — sumber per parser:
+    #   QRIS ELITE: RECORD FEE · NXPAY: Agent Fee (fallback Admin Fee) ·
+    #   UNOPAY/COR QRIS DP: GrandTotal − BranchNominal · gateway lain: kolom Fee.
+    # Abs: export NXPAY menyimpan fee bertanda −; total biaya = Σ |fee|.
+    from decimal import Decimal as _Dec
+    from django.db.models.functions import Abs
+    _nol = _Dec("0")
+    fee_page = _nol
+    fee_page_nominal = _nol
+    for _t in page.object_list:
+        fee_page += abs(_t.fee or _nol)
+        fee_page_nominal += _t.amount or _nol
+    _agg = qs.aggregate(f=Sum(Abs("fee")), n=Sum("amount"), c=Count("id"))
+    fee_all = _agg["f"] or _nol
+    fee_all_nominal = _agg["n"] or _nol
+    fee_all_n = _agg["c"] or 0
     return render(request, "web/mutasi_bank.html", {
         "page": page, "active_toko": active,
         "src": src, "flow": flow,
         "uploads": uploads, "sel_upload": sel_upload,
         "date_from": request.GET.get("from", "") if date_from else "",
         "date_to": request.GET.get("to", "") if date_to else "",
+        "fee_page": fee_page,
+        "fee_page_nominal": fee_page_nominal,
+        "fee_all": fee_all,
+        "fee_all_nominal": fee_all_nominal,
+        "fee_all_n": fee_all_n,
     })
 
 

@@ -1,5 +1,5 @@
 """Sub-menu Mutasi Bank: mutasi bank + gateway QRIS urut sesuai file asli,
-lookup HP -> nama player dari panel, kolom saldo bila tersedia."""
+lookup HP -> nama player dari panel, kolom Fee (gateway RECORD FEE / Fee)."""
 from datetime import datetime
 from decimal import Decimal
 
@@ -31,10 +31,11 @@ class MutasiBankBase(TestCase):
         )
 
     def _tx(self, up, st, *, toko=None, jenis="depo", counterparty="", description="",
-            amount="10000", balance=None, dt=datetime(2026, 6, 27, 10, 0)):
+            amount="10000", balance=None, fee="0", dt=datetime(2026, 6, 27, 10, 0)):
         return Transaction.objects.create(
             upload=up, source_type=st, toko=toko or self.lbs, jenis=jenis,
             amount=Decimal(amount), money_delta=Decimal(amount),
+            fee=Decimal(fee),
             balance_after=None if balance is None else Decimal(balance),
             occurred_at=dt, counterparty=counterparty, description=description,
             raw={}, row_hash=f"mb-{next(_seq)}",
@@ -664,15 +665,44 @@ class MutasiBankNbmbFallbackTests(MutasiBankBase):
         self.assertContains(r, '<span class="faint">—</span>')
 
 
-class MutasiBankSaldoTests(MutasiBankBase):
-    def test_saldo_tampil_dan_none_aman(self):
-        upb = self._up(self.bank, "bca.csv")
-        self._tx(upb, self.bank, counterparty="ADA-SALDO", balance="4964637.00")
-        self._tx(upb, self.bank, counterparty="TANPA-SALDO", balance=None)
+class MutasiBankFeeTests(MutasiBankBase):
+    """Kolom Fee (bukan Saldo) + total per halaman + total keseluruhan."""
+
+    def test_header_fee_bukan_saldo(self):
+        up = self._up(self.gateway, "elite.csv")
+        self._tx(up, self.gateway, counterparty="X", fee="425")
         r = self.client.get(reverse("bank_mutations"))
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "4.964.637")  # locale id
-        self.assertContains(r, "TANPA-SALDO")
+        self.assertContains(r, ">Fee</th>")
+        self.assertNotContains(r, ">Saldo</th>")
+
+    def test_fee_tampil_dan_nol_aman(self):
+        # Acuan QRIS ELITE RECORD FEE: 425 / 850 — tampil di kolom Fee
+        upg = self._up(self.gateway, "26_08_W25_DP_QRIS_ELITE.csv")
+        self._tx(upg, self.gateway, counterparty="ADA-FEE", fee="425", amount="50000")
+        self._tx(upg, self.gateway, counterparty="TANPA-FEE", fee="0", amount="10000")
+        r = self.client.get(reverse("bank_mutations"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "425")
+        self.assertContains(r, "TANPA-FEE")
+        # balance_after tidak lagi ditampilkan sebagai kolom
+        self.assertNotContains(r, ">Saldo</th>")
+
+    def test_total_halaman_dan_keseluruhan(self):
+        upg = self._up(self.gateway, "elite.csv")
+        self._tx(upg, self.gateway, counterparty="F1", fee="425", amount="50000")
+        self._tx(upg, self.gateway, counterparty="F2", fee="850", amount="100000")
+        r = self.client.get(reverse("bank_mutations"))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["fee_page"], Decimal("1275"))
+        self.assertEqual(r.context["fee_all"], Decimal("1275"))
+        self.assertEqual(r.context["fee_page_nominal"], Decimal("150000"))
+        self.assertEqual(r.context["fee_all_nominal"], Decimal("150000"))
+        self.assertEqual(r.context["fee_all_n"], 2)
+        self.assertContains(r, "Total halaman ini")
+        self.assertContains(r, "Total keseluruhan")
+        self.assertContains(r, "1.275")  # locale id total fee
+        self.assertContains(r, "150.000")  # locale id total nominal
 
 
 class MutasiBankCoverageTests(MutasiBankBase):

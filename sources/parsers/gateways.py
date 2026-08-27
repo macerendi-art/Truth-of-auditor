@@ -40,6 +40,18 @@ def _nxpay_jenis(ticket, amount_signed, flow):
 class NXPayParser(BaseParser):
     source_key = "gateway"
 
+    @staticmethod
+    def _fee_baris(r):
+        """Fee NXPAY: acuan **Agent Fee** (tanda − di export = potongan).
+
+        Fallback **Admin Fee** untuk header pendek lama / tes yang belum
+        punya kolom Agent Fee. Selalu abs — UI kolom Fee menampilkan biaya
+        positif (selaras QRIS ELITE RECORD FEE & UNOPAY Grand−Branch).
+        """
+        if "Agent Fee" in r:
+            return abs(parse_decimal(r.get("Agent Fee")))
+        return abs(parse_decimal(r.get("Admin Fee")))
+
     def parse(self, path, flow=""):
         _, rows = read_xlsx_rows(path, header_row=2)  # baris 1 = judul report
         out = []
@@ -59,7 +71,7 @@ class NXPayParser(BaseParser):
                 "amount": amt,
                 "credit_delta": Decimal("0"),
                 "money_delta": -amt if jenis == "wd" else amt,
-                "fee": parse_decimal(r.get("Admin Fee")),
+                "fee": self._fee_baris(r),
                 "bonus": Decimal("0"),
                 "balance_after": None,
                 "ticket_no": ticket,

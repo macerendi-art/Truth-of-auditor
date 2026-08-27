@@ -53,7 +53,7 @@
 <div class="card pad0 reveal">
   <div class="table-wrap tall" style="border:none">
   <table id="mutasi-table" class="selectable">
-    <thead><tr><th style="width:56px" class="num">No</th><th style="width:110px">Tanggal</th><th style="width:150px">Sumber</th><th>Nama (sesuai mutasi)</th><th>Keterangan</th><th style="width:86px">Jenis</th><th class="num" style="width:110px">Nominal</th><th class="num" style="width:120px">Saldo</th></tr></thead>
+    <thead><tr><th style="width:56px" class="num">No</th><th style="width:110px">Tanggal</th><th style="width:150px">Sumber</th><th>Nama (sesuai mutasi)</th><th>Keterangan</th><th style="width:86px">Jenis</th><th class="num" style="width:110px">Nominal</th><th class="num" style="width:120px">Fee</th></tr></thead>
     <tbody>
     {% for t in page %}
     <tr>
@@ -69,12 +69,28 @@
       <td class="faint cell-tr" style="font-size:11.5px" title="{{ t.description }}">{{ t.description|truncatechars:90|default:"—" }}</td>
       <td>{% if t.is_sesama_cm %}<span class="badge src" title="Pindah dana antar rekening CM (selaras FR Sesama CM)">Sesama CM</span>{% elif t.jenis == 'depo' %}<span class="badge ok">Deposit</span>{% elif t.jenis == 'wd' %}<span class="badge bad">Withdraw</span>{% elif t.jenis == 'admin' %}<span class="badge">Biaya Admin</span>{% else %}<span class="badge">{{ t.get_jenis_display }}</span>{% endif %}</td>
       <td class="num mono" {% if t.money_delta < 0 %}style="color:var(--bad)"{% elif t.money_delta > 0 %}style="color:var(--ok)"{% endif %}>{{ t.amount|floatformat:0|intcomma }}</td>
-      <td class="num mono">{% if t.balance_after is not None %}{{ t.balance_after|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
+      <td class="num mono">{% if t.fee %}{{ t.fee|abs_num|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
     </tr>
     {% empty %}
     <tr><td colspan="8" class="cell-empty">Belum ada mutasi bank/gateway untuk filter ini.</td></tr>
     {% endfor %}
     </tbody>
+    {% if page.object_list %}
+    <tfoot>
+      <tr style="font-weight:700;background:var(--surface-2,rgba(0,0,0,.03))">
+        <td></td>
+        <td colspan="5" style="font-size:12.5px">Total halaman ini <span class="faint" style="font-weight:500">({{ page.object_list|length }} baris)</span></td>
+        <td class="num mono">{{ fee_page_nominal|floatformat:0|intcomma }}</td>
+        <td class="num mono">{% if fee_page %}{{ fee_page|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
+      </tr>
+      <tr style="font-weight:700;background:var(--surface-2,rgba(0,0,0,.03))">
+        <td></td>
+        <td colspan="5" style="font-size:12.5px">Total keseluruhan <span class="faint" style="font-weight:500">({{ fee_all_n|intcomma }} baris{% if page.paginator.num_pages > 1 %} · {{ page.paginator.num_pages }} lembar{% endif %})</span></td>
+        <td class="num mono">{{ fee_all_nominal|floatformat:0|intcomma }}</td>
+        <td class="num mono">{% if fee_all %}{{ fee_all|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
+      </tr>
+    </tfoot>
+    {% endif %}
   </table>
   </div>
 </div>
