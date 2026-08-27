@@ -76,14 +76,14 @@
     {% endfor %}
     </tbody>
     {% if page.object_list %}
-    <tfoot>
-      <tr style="font-weight:700;background:var(--surface-2,rgba(0,0,0,.03))">
+    <tfoot class="mutasi-foot">
+      <tr class="mutasi-foot-page">
         <td></td>
         <td colspan="5" style="font-size:12.5px">Total halaman ini <span class="faint" style="font-weight:500">({{ page.object_list|length }} baris)</span></td>
         <td class="num mono">{{ fee_page_nominal|floatformat:0|intcomma }}</td>
         <td class="num mono">{% if fee_page %}{{ fee_page|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
       </tr>
-      <tr style="font-weight:700;background:var(--surface-2,rgba(0,0,0,.03))">
+      <tr class="mutasi-foot-all">
         <td></td>
         <td colspan="5" style="font-size:12.5px">Total keseluruhan <span class="faint" style="font-weight:500">({{ fee_all_n|intcomma }} baris{% if page.paginator.num_pages > 1 %} · {{ page.paginator.num_pages }} lembar{% endif %})</span></td>
         <td class="num mono">{{ fee_all_nominal|floatformat:0|intcomma }}</td>

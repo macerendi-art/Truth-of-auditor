@@ -335,6 +335,15 @@ th.num,td.num{text-align:right} th.num{white-space:nowrap}
 .th-sort{color:inherit;display:inline-flex;align-items:center;gap:3px}
 .th-sort:hover{color:var(--ink)}
 .twrap.tall,.table-wrap.tall{max-height:72vh;overflow:auto}
+/* Mutasi Bank: total Fee/Nominal nempel bawah area scroll (tidak ikut geser baris). */
+#mutasi-table tfoot td{
+  position:sticky;z-index:3;background:var(--panel);border-top:1px solid var(--line-2);
+  box-shadow:0 -8px 16px -10px rgba(15,23,42,.22);font-weight:700;padding:9px 12px;
+}
+#mutasi-table tfoot tr:last-child td{bottom:0}
+/* baris "Total halaman ini" di atas baris keseluruhan — offset ≈ tinggi 1 baris tfoot */
+#mutasi-table tfoot tr:first-child:not(:last-child) td{bottom:2.55rem}
+#mutasi-table tfoot tr + tr td{border-top:1px solid var(--line)}
 table.dense tbody td{padding:6px 14px;font-size:12.5px}
 /* Mode "Rapatkan" untuk tabel hasil: serapat mungkin tapi tetap terbaca */
 #hasil-table.dense td,#hasil-table.dense th{padding-top:3px;padding-bottom:3px}

@@ -704,6 +704,20 @@ class MutasiBankFeeTests(MutasiBankBase):
         self.assertContains(r, "1.275")  # locale id total fee
         self.assertContains(r, "150.000")  # locale id total nominal
 
+    def test_tfoot_sticky_marker(self):
+        """Total di tfoot harus sticky bottom agar tidak ikut scroll baris."""
+        upg = self._up(self.gateway, "elite.csv")
+        self._tx(upg, self.gateway, counterparty="F1", fee="100", amount="1000")
+        r = self.client.get(reverse("bank_mutations"))
+        html = r.content.decode()
+        self.assertIn('class="mutasi-foot"', html)
+        self.assertIn("mutasi-foot-page", html)
+        self.assertIn("mutasi-foot-all", html)
+        # CSS sticky di app_base (inline di response layout)
+        self.assertIn("#mutasi-table tfoot td", html)
+        self.assertIn("position:sticky", html)
+        self.assertIn("bottom:0", html)
+
 
 class MutasiBankCoverageTests(MutasiBankBase):
     """Dropdown file & banner duplikat: file ekspor bank rolling saling tumpang-
