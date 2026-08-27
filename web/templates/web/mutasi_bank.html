@@ -50,8 +50,8 @@
 </div>
 {% endif %}
 
-<div class="card pad0 reveal">
-  <div class="table-wrap tall" style="border:none">
+<div class="card pad0 reveal mutasi-card">
+  <div class="table-wrap tall mutasi-scroll" style="border:none">
   <table id="mutasi-table" class="selectable">
     <thead><tr><th style="width:56px" class="num">No</th><th style="width:110px">Tanggal</th><th style="width:150px">Sumber</th><th>Nama (sesuai mutasi)</th><th>Keterangan</th><th style="width:86px">Jenis</th><th class="num" style="width:110px">Nominal</th><th class="num" style="width:120px">Fee</th></tr></thead>
     <tbody>
@@ -75,24 +75,23 @@
     <tr><td colspan="8" class="cell-empty">Belum ada mutasi bank/gateway untuk filter ini.</td></tr>
     {% endfor %}
     </tbody>
-    {% if page.object_list %}
-    <tfoot class="mutasi-foot">
-      <tr class="mutasi-foot-page">
-        <td></td>
-        <td colspan="5" style="font-size:12.5px">Total halaman ini <span class="faint" style="font-weight:500">({{ page.object_list|length }} baris)</span></td>
-        <td class="num mono">{{ fee_page_nominal|floatformat:0|intcomma }}</td>
-        <td class="num mono">{% if fee_page %}{{ fee_page|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
-      </tr>
-      <tr class="mutasi-foot-all">
-        <td></td>
-        <td colspan="5" style="font-size:12.5px">Total keseluruhan <span class="faint" style="font-weight:500">({{ fee_all_n|intcomma }} baris{% if page.paginator.num_pages > 1 %} · {{ page.paginator.num_pages }} lembar{% endif %})</span></td>
-        <td class="num mono">{{ fee_all_nominal|floatformat:0|intcomma }}</td>
-        <td class="num mono">{% if fee_all %}{{ fee_all|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
-      </tr>
-    </tfoot>
-    {% endif %}
   </table>
   </div>
+  {% if page.object_list %}
+  {# Di LUAR area scroll — tidak overlap/tembus baris (sticky tfoot gagal di browser). #}
+  <div class="mutasi-foot-bar" role="status" aria-label="Total nominal dan fee">
+    <div class="mutasi-foot-row mutasi-foot-page">
+      <div class="mutasi-foot-label">Total halaman ini <span class="faint" style="font-weight:500">({{ page.object_list|length }} baris)</span></div>
+      <div class="num mono mutasi-foot-nom">{{ fee_page_nominal|floatformat:0|intcomma }}</div>
+      <div class="num mono mutasi-foot-fee">{% if fee_page %}{{ fee_page|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</div>
+    </div>
+    <div class="mutasi-foot-row mutasi-foot-all">
+      <div class="mutasi-foot-label">Total keseluruhan <span class="faint" style="font-weight:500">({{ fee_all_n|intcomma }} baris{% if page.paginator.num_pages > 1 %} · {{ page.paginator.num_pages }} lembar{% endif %})</span></div>
+      <div class="num mono mutasi-foot-nom">{{ fee_all_nominal|floatformat:0|intcomma }}</div>
+      <div class="num mono mutasi-foot-fee">{% if fee_all %}{{ fee_all|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</div>
+    </div>
+  </div>
+  {% endif %}
 </div>
 
 {% pager page %}

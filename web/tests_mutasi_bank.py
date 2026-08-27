@@ -705,22 +705,22 @@ class MutasiBankFeeTests(MutasiBankBase):
         self.assertContains(r, "150.000")  # locale id total nominal
 
     def test_tfoot_sticky_marker(self):
-        """Total di tfoot harus sticky bottom agar tidak ikut scroll baris."""
+        """Total di LUAR area scroll (bukan sticky tfoot) — anti tembus baris."""
         upg = self._up(self.gateway, "elite.csv")
         self._tx(upg, self.gateway, counterparty="F1", fee="100", amount="1000")
         r = self.client.get(reverse("bank_mutations"))
         html = r.content.decode()
-        self.assertIn('class="mutasi-foot"', html)
+        self.assertIn("mutasi-foot-bar", html)
         self.assertIn("mutasi-foot-page", html)
         self.assertIn("mutasi-foot-all", html)
-        # CSS sticky di app_base (inline di response layout)
-        self.assertIn("#mutasi-table tfoot td", html)
-        self.assertIn("position:sticky", html)
-        self.assertIn("bottom:0", html)
-        # anti bleed-through: collapse separate + pelat solid ::before
-        self.assertIn("border-collapse:separate", html)
-        self.assertIn("#mutasi-table tfoot td::before", html)
+        self.assertIn("mutasi-card", html)
+        self.assertIn("mutasi-scroll", html)
+        # bilah total di luar table — tidak ada tfoot di mutasi-table
+        self.assertNotIn("<tfoot", html)
+        self.assertIn(".mutasi-foot-bar", html)
         self.assertIn("background:#fff", html)
+        self.assertContains(r, "Total halaman ini")
+        self.assertContains(r, "Total keseluruhan")
 
 
 class MutasiBankCoverageTests(MutasiBankBase):
