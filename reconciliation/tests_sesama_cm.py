@@ -233,6 +233,7 @@ class SesamaCmReconTests(TestCase):
         rels = list(batch.runs.values_list("relation", flat=True))
         self.assertIn("bracket_bank", rels)
         self.assertIn("panel_bank", rels)
+        self.assertIn("fr_bank", rels)
         bb = batch.runs.get(relation="bracket_bank")
         self.assertEqual(bb.summary.get("mode"), "sesama_cm")
         self.assertGreaterEqual(bb.summary.get("cocok", 0), 1)

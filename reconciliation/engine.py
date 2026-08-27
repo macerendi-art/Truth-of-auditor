@@ -51,10 +51,18 @@ _BRIVA_RE = re.compile(
 
 def _panel_phone(t):
     """Nomor HP/rekening wallet pemain dari raw['Player Bank'] (segmen ke-3),
-    dinormalisasi: buang non-digit + nol/62 di depan. '' bila tak ada."""
-    pb = (t.raw or {}).get("Player Bank") or ""
+    dinormalisasi: buang non-digit + nol/62 di depan. '' bila tak ada.
+
+    Sisi FR/Bracket: raw['No. Rek Bank Member'] (boleh berisi 'BCA 0812…' /
+    deret digit) — dipakai FrBankMatcher lewat identitas pass 1.
+    """
+    raw = t.raw or {}
+    pb = raw.get("Player Bank") or ""
     parts = pb.split("|")
     digits = re.sub(r"\D", "", parts[2] if len(parts) > 2 else "")
+    if not digits:
+        # FR: norek member utuh (bukan bank_code first-token)
+        digits = re.sub(r"\D", "", str(raw.get("No. Rek Bank Member") or ""))
     return digits.lstrip("0").removeprefix("62").lstrip("0")
 
 
@@ -873,7 +881,7 @@ class PanelBankMatcher(_MoneyMatcher):
     left_key = "panel"
 
     def sides(self, dfrom, dto, toko=None, include=None):
-        """Sisi uang tanpa pindah dana Sesama CM — itu jalur Bracket↔Bank."""
+        """Sisi uang tanpa pindah dana Sesama CM — itu jalur Bracket↔Bank Sesama."""
         left, right = super().sides(dfrom, dto, toko, include)
         if toko is None:
             return left, right
@@ -885,6 +893,49 @@ class PanelBankMatcher(_MoneyMatcher):
         tandai_sesama_cm(right, tid)
         right = [b for b in right if not getattr(b, "is_sesama_cm", False)]
         return left, right
+
+
+class FrBankMatcher(_MoneyMatcher):
+    """Bracket/FR DP·WD member ↔ mutasi bank/gateway — selaras Panel↔Mutasi Bank.
+
+    Kiri = baris FR `jenis` depo/wd (bukan Sesama CM `lainnya`). Kanan = uang
+    non-admin minus Sesama CM. Pass multi sama `_MoneyMatcher` (ticket, ref,
+    username, norek FR, nama Member).
+    """
+
+    left_key = "bracket"
+
+    def sides(self, dfrom, dto, toko=None, include=None):
+        left = Transaction.objects.filter(
+            source_type__key="bracket", is_duplicate=False,
+        ).filter(jenis__in=["depo", "wd"])
+        # FR file satu sumber — centang Bracket; tanpa panel_dp/wd di sisi FR.
+        if include is not None and not include.get("bracket", True):
+            left = left.none()
+        left = _date_filter(_active(_toko_filter(left, toko)), dfrom, dto)
+
+        money_keys = _included_money_sources(include)
+        right = _date_filter(
+            _active(_toko_filter(
+                Transaction.objects.filter(
+                    source_type__key__in=money_keys, is_duplicate=False,
+                ).exclude(jenis="admin"),
+                toko,
+            )),
+            dfrom, dto,
+        ).select_related("source_type", "upload")
+        left_l = list(left.order_by("id"))
+        right_l = list(right.order_by("id"))
+        if toko is None:
+            return left_l, right_l
+        tid = getattr(toko, "id", toko)
+        try:
+            from web.sesama_cm import tandai_sesama_cm
+        except Exception:
+            return left_l, right_l
+        tandai_sesama_cm(right_l, tid)
+        right_l = [b for b in right_l if not getattr(b, "is_sesama_cm", False)]
+        return left_l, right_l
 
 
 class BracketBankMatcher:
@@ -1153,6 +1204,7 @@ def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
 MATCHERS = {
     MatchRun.Relation.PANEL_BRACKET: PanelBracketMatcher,
     MatchRun.Relation.PANEL_BANK: PanelBankMatcher,
+    MatchRun.Relation.FR_BANK: FrBankMatcher,
     MatchRun.Relation.BRACKET_BANK: BracketBankMatcher,
 }
 
@@ -1278,7 +1330,11 @@ def _carried_qs(tokos):
         left__isnull=False, left__toko__in=tokos,
         left__consumed_by_batch__isnull=True,
         run__batch__isnull=False,
-        run__relation__in=[MatchRun.Relation.PANEL_BANK, MatchRun.Relation.BRACKET_BANK],
+        run__relation__in=[
+            MatchRun.Relation.PANEL_BANK,
+            MatchRun.Relation.FR_BANK,
+            MatchRun.Relation.BRACKET_BANK,
+        ],
     )
 
 
@@ -1732,10 +1788,24 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
         relations.append(MatchRun.Relation.PANEL_BANK)
     else:
         skipped.append(MatchRun.Relation.PANEL_BANK.value)
+    # FR_BANK = Bracket/FR DP·WD member ↔ mutasi (selaras panel_bank; bukan Sesama CM).
+    bracket_on = bool(comp.get("bracket") and _inc(include, "bracket"))
+    if bracket_on and money_present:
+        relations.append(MatchRun.Relation.FR_BANK)
+    else:
+        skipped.append(MatchRun.Relation.FR_BANK.value)
+        if not _inc(include, "bracket"):
+            alasan_fr = "sumber Bracket tidak diikutkan dalam run ini"
+        elif not comp.get("bracket"):
+            alasan_fr = "tidak ada baris Bracket (FR) dalam rentang tanggal"
+        elif not money_present:
+            alasan_fr = "tidak ada mutasi bank/gateway dalam rentang"
+        else:
+            alasan_fr = "Bracket ↔ Mutasi Bank tidak dijalankan"
+        skipped_detail[MatchRun.Relation.FR_BANK.value] = alasan_fr
     # BRACKET_BANK = FR Sesama CM ↔ mutasi pindah dana (bukan DP/WD member).
     # Jalan bila bracket + uang ada & dicentang. Matcher khusus kategori Sesama CM.
-    if (comp.get("bracket") and _inc(include, "bracket")
-            and money_present):
+    if bracket_on and money_present:
         relations.append(MatchRun.Relation.BRACKET_BANK)
     else:
         skipped.append(MatchRun.Relation.BRACKET_BANK.value)

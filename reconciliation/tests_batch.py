@@ -88,10 +88,10 @@ class RunBatchTests(TestCase):
         self._tx(self.bracket, "depo", "50000", "50000", "D1", "b1", username="budi")
         self._tx(self.bank, "depo", "50000", "50000", "", "k1", username="budi")
         batch = run_batch(self.lbs, self.tol)
-        # panel_bracket + panel_bank + bracket_bank (Sesama CM; boleh 0 cocok)
-        self.assertEqual(batch.runs.count(), 3)
+        # panel_bracket + panel_bank + fr_bank + bracket_bank (Sesama CM; boleh 0 cocok)
+        self.assertEqual(batch.runs.count(), 4)
         rels = set(batch.runs.values_list("relation", flat=True))
-        self.assertEqual(rels, {"panel_bracket", "panel_bank", "bracket_bank"})
+        self.assertEqual(rels, {"panel_bracket", "panel_bank", "fr_bank", "bracket_bank"})
         self.assertEqual(batch.summary["skipped"], [])
         self.assertEqual(batch.summary["dp"]["panel"], 50000.0)
 
