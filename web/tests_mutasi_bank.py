@@ -722,6 +722,21 @@ class MutasiBankFeeTests(MutasiBankBase):
         self.assertContains(r, "Total halaman ini")
         self.assertContains(r, "Total keseluruhan")
 
+    def test_per_halaman_50_baris(self):
+        from datetime import datetime
+        upg = self._up(self.gateway, "elite.csv")
+        for i in range(55):
+            self._tx(
+                upg, self.gateway, counterparty=f"R{i}", fee="1", amount="1000",
+                dt=datetime(2026, 8, 26, i // 60, i % 60),
+            )
+        r = self.client.get(reverse("bank_mutations"))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["page"].paginator.per_page, 50)
+        self.assertEqual(len(r.context["page"].object_list), 50)
+        self.assertEqual(r.context["fee_all_n"], 55)
+        self.assertContains(r, "(50 baris)")
+
 
 class MutasiBankCoverageTests(MutasiBankBase):
     """Dropdown file & banner duplikat: file ekspor bank rolling saling tumpang-

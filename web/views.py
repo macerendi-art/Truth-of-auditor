@@ -2078,7 +2078,7 @@ def bank_mutations(request):
             else:
                 qs = qs.filter(upload=sel_upload)
 
-    page = Paginator(qs, 40).get_page(request.GET.get("page"))
+    page = Paginator(qs, 50).get_page(request.GET.get("page"))
     _resolve_wallet_names(page.object_list, active)
     from web.sesama_cm import tandai_sesama_cm
     tandai_sesama_cm(page.object_list, active.id)
