@@ -217,7 +217,10 @@ class DropdownMutasiBankTests(_TibanWebBase):
 
         html = r.content.decode()
         # dipersempit ke dropdown file — pemilih Toko juga punya <option value=…>
-        daftar = re.search(r'<select name="upload">.*?</select>', html, re.S)
+        # `[^>]*` WAJIB: select-nya membawa atribut lain (class="file-pick"),
+        # dan regex lama yang menuntut tag tertutup persis setelah name= membuat
+        # tes ini gagal karena PERUBAHAN KELAS CSS, bukan karena fitur rusak.
+        daftar = re.search(r'<select name="upload"[^>]*>.*?</select>', html, re.S)
         self.assertIsNotNone(daftar, "dropdown file mutasi harus ada")
         opsi = re.search(rf'<option value="{lama.id}"[^>]*>[^<]*</option>', daftar.group(0))
         self.assertIsNotNone(opsi, "entri ketiban harus tetap ada sebagai opsi")
