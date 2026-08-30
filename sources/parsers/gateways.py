@@ -1219,3 +1219,128 @@ class QRISEliteTampungParser(BaseParser):
                 % (n_tx, ", ".join(sorted(status_ditemukan)) or "(kosong)")
             )
         return out
+
+
+class QRISEliteWDParser(BaseParser):
+    """QRIS ELITE CSV — gateway WITHDRAWAL. Bentuk BERBEDA dari DP, bukan varian.
+
+    Baris 1 berjudul ``WITHDRAWAL TRANSACTION`` (DP: ``MUTASI QRIS
+    TRANSACTION``) dan headernya tidak berbagi satu pun nama kolom dengan DP.
+    Karena itu ia parser tersendiri, bukan cabang di dalam `QRISEliteParser`.
+
+    Anchor: ``TICKET_ID`` (``W…``) == Ticket Number panel WD → pass 0.
+    Terkalibrasi 4/4 pada K25 29-08-2026.
+
+    Waktu diambil dari ``DATE_TRANSACTION_PANEL`` (stempel jam-menit-detik,
+    mis. ``2026-08-29T07:36:50.657``) dan bukan ``DATE_TRANSACTION`` yang hanya
+    tanggal — baris tanpa jam menumpuk di 00:00 dan mengaburkan urutan.
+
+    ``STATUS`` di-whitelist ``success``. ``failed verification`` adalah
+    pengecualian yang DISENGAJA dan terbukti ada di sampel: melolosnya berarti
+    mengarang uang keluar untuk penarikan yang ditolak. Sama seperti `unpaid`
+    di ZPay, ia dinamai di `STATUS_BUKAN_UANG` HANYA supaya pesan hasil-nol
+    bisa membedakan "semua ditolak" dari "status vendor berganti nama".
+
+    ``BALANCE_REVERT``: seluruh sampel bernilai ``0``, jadi maknanya saat
+    tidak-nol BELUM terbukti. Sengaja TIDAK dijadikan penyaring — menebak
+    aturan dari nol sampel persis kesalahan yang berulang di repo ini. Nilainya
+    tetap utuh di ``raw``; begitu sampel tidak-nol muncul, aturannya ditetapkan
+    dengan bukti.
+
+    ``ACCOUNT_NO`` datang TERSAMAR (``0422010368*****``) sehingga tidak layak
+    jadi kunci; ``ACCOUNT_NAME`` dipakai sebagai `counterparty`.
+    """
+
+    source_key = "gateway"
+    STATUS_UANG = frozenset({"SUCCESS"})
+    STATUS_BUKAN_UANG = frozenset({"FAILED VERIFICATION"})
+    KOLOM_WAJIB = ("TICKET_ID", "NOMINAL", "DATE_TRANSACTION_PANEL")
+
+    def parse(self, path, flow=""):
+        with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+            reader = csv.reader(f)
+            next(reader, None)  # baris 1 = judul "WITHDRAWAL TRANSACTION"
+            header = [str(h or "").strip() for h in (next(reader, None) or [])]
+            peta = {h.casefold(): h for h in header if h}
+            hilang = [h for h in self.KOLOM_WAJIB if h.casefold() not in peta]
+            if hilang:
+                raise ValueError(
+                    "Laporan WD QRIS ELITE tak dikenali: kolom %s tidak "
+                    "ditemukan. Header berkas: %s."
+                    % (
+                        " dan ".join(hilang),
+                        ", ".join(repr(h) for h in header if h) or "(kosong)",
+                    )
+                )
+            rows = [dict(zip(header, nilai)) for nilai in reader if any(nilai)]
+
+        kolom = lambda nama: peta.get(nama.casefold(), "\x00")  # noqa: E731
+        out = []
+        jumlah_transaksi = 0
+        status_ditemukan = set()
+        for r in rows:
+            ticket = str(r.get(kolom("TICKET_ID"), "") or "").strip()
+            identitas = str(r.get(kolom("ID"), "") or "").strip()
+            if not ticket and not identitas:
+                continue  # baris kaki/pemisah — dilewati secara struktural
+            jumlah_transaksi += 1
+            status = str(r.get(kolom("STATUS"), "") or "").strip().upper()
+            status_ditemukan.add(status or "(kosong)")
+            if status not in self.STATUS_UANG:
+                continue
+
+            waktu_raw = str(r.get(kolom("DATE_TRANSACTION_PANEL"), "") or "").strip()
+            occurred = parse_dt(waktu_raw[:19]) or parse_dt(
+                str(r.get(kolom("DATE_TRANSACTION"), "") or "").strip()
+            )
+            if not occurred:
+                raise ValueError(
+                    "WD QRIS ELITE: tanggal tidak dapat dibaca untuk tiket %s: %r."
+                    % (ticket or identitas, waktu_raw)
+                )
+            amount = abs(parse_decimal(r.get(kolom("NOMINAL"))))
+            raw = {k: ("" if v is None else str(v)) for k, v in r.items()}
+            row = {
+                "source_type": "gateway",
+                "occurred_at": occurred,
+                "posted_date": occurred.date(),
+                # Bentuk kolom vendor adalah penarikan. `flow` dari nama berkas
+                # diketik manusia dan tidak boleh membalik tanda uang.
+                "jenis": "wd",
+                "amount": amount,
+                "credit_delta": Decimal("0"),
+                "money_delta": -amount,
+                "fee": Decimal("0"),
+                "bonus": Decimal("0"),
+                "balance_after": None,
+                "ticket_no": ticket,
+                "username": str(r.get(kolom("MEMBER_NAME"), "") or "").strip(),
+                "reference": "",
+                "counterparty": str(r.get(kolom("ACCOUNT_NAME"), "") or "").strip(),
+                "description": "WD QRIS ELITE %s" % str(
+                    r.get(kolom("BANK_TYPE"), "") or ""
+                ).strip(),
+                "raw": raw,
+            }
+            row["row_hash"] = row_hash(
+                "qris_elite_wd",
+                [ticket or identitas, format(amount.normalize(), "f")],
+            )
+            out.append(row)
+
+        if jumlah_transaksi and not out:
+            asing = sorted(status_ditemukan - self.STATUS_BUKAN_UANG)
+            raise ValueError(
+                "WD QRIS ELITE: %d baris transaksi terbaca tetapi tidak satu pun "
+                "berstatus sukses. Status yang ditemukan: %s. %s"
+                % (
+                    jumlah_transaksi,
+                    ", ".join(sorted(status_ditemukan)),
+                    (
+                        "Laporkan status ini ke pengembang agar daftarnya bisa "
+                        "ditambah." if asing else
+                        "Semua penarikan di berkas ini ditolak — periksa periodenya."
+                    ),
+                )
+            )
+        return out

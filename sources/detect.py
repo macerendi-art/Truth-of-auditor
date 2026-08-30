@@ -184,6 +184,11 @@ def detect_source(path, filename=""):
             add("qris_elite_tampung", 0.85)
         # QRIS ELITE: kunci pada header, bukan nama berkas (sampel W25
         # mengeja "ELIT"). Keempat token ini tidak dimiliki gateway lain.
+        # WD QRIS ELITE — bentuk BERBEDA dari DP, nol kolom yang sama.
+        # `balance_revert` + `date_transaction_panel` tak dimiliki berkas lain.
+        if ("balance_revert" in c and "date_transaction_panel" in c
+                and "ticket_id" in c):
+            add("qris_elite_wd", 0.95)
         if all(token in c for token in
                ("record value", "record fee", "ticket", "member")):
             add("qris_elite", 0.95)
