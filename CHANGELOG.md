@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.20.0** · 36 rilis (1 besar, 20 fitur, 11 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.20.1** · 37 rilis (1 besar, 20 fitur, 12 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.20.1 — Dashboard Lebih Ringan & Tanggal Salah Ketik Tak Lagi Mematikan Halaman
+*Perbaikan · 29 Agustus 2026*
+
+- **Dashboard toko besar jauh lebih cepat dibuka.** Kartu "Transaksi per Sumber" sebelumnya memaksa database membaca 1,6 GB dari disk hanya untuk menampilkan enam angka. Sekarang jawabannya diambil langsung dari index. Pada toko G25 (1,49 juta baris) query itu turun dari 3,8 detik menjadi 0,9 detik, dan angka yang tampil sama persis seperti sebelumnya.
+- **Salah ketik tanggal tidak lagi mematikan halaman Rekonsiliasi.** Satu operator mengetik tahun "20026" (kelebihan satu angka nol) dan seluruh halaman berhenti dengan layar error. Sekarang aplikasi menolak dengan pesan yang jelas dan menyebut tanggal mana yang salah — rekonsiliasi tidak dijalankan, sehingga salah ketik tidak bisa diam-diam memperluas cakupan yang diproses.
+- **Halaman yang sesekali gagal terbuka kini tidak lagi.** Saat beberapa orang membuka halaman berat bersamaan, database kehabisan ruang memori bersama dan sebagian halaman membalas layar error. Setelan database sudah disesuaikan sehingga hal itu berhenti terjadi, tanpa perlu menghentikan aplikasi.
 
 ## v1.20.0 — QRIS ELITE & Arah UNOPAY yang Tepat
 *Rilis fitur · 16 Agustus 2026*

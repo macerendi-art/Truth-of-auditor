@@ -119,6 +119,32 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.20.1",
+        tanggal=_dt.date(2026, 8, 29),
+        nama="Dashboard Lebih Ringan & Tanggal Salah Ketik Tak Lagi Mematikan Halaman",
+        jenis=PATCH,
+        commit="",
+        sorotan=(
+            "**Dashboard toko besar jauh lebih cepat dibuka.** Kartu "
+            "\"Transaksi per Sumber\" sebelumnya memaksa database membaca "
+            "1,6 GB dari disk hanya untuk menampilkan enam angka. Sekarang "
+            "jawabannya diambil langsung dari index. Pada toko G25 (1,49 juta "
+            "baris) query itu turun dari 3,8 detik menjadi 0,9 detik, dan "
+            "angka yang tampil sama persis seperti sebelumnya.",
+            "**Salah ketik tanggal tidak lagi mematikan halaman Rekonsiliasi.** "
+            "Satu operator mengetik tahun \"20026\" (kelebihan satu angka nol) "
+            "dan seluruh halaman berhenti dengan layar error. Sekarang "
+            "aplikasi menolak dengan pesan yang jelas dan menyebut tanggal "
+            "mana yang salah — rekonsiliasi tidak dijalankan, sehingga salah "
+            "ketik tidak bisa diam-diam memperluas cakupan yang diproses.",
+            "**Halaman yang sesekali gagal terbuka kini tidak lagi.** Saat "
+            "beberapa orang membuka halaman berat bersamaan, database "
+            "kehabisan ruang memori bersama dan sebagian halaman membalas "
+            "layar error. Setelan database sudah disesuaikan sehingga hal itu "
+            "berhenti terjadi, tanpa perlu menghentikan aplikasi.",
+        ),
+    ),
+    Rilis(
         versi="1.20.0",
         tanggal=_dt.date(2026, 8, 16),
         nama="QRIS ELITE & Arah UNOPAY yang Tepat",
