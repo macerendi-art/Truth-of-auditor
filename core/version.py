@@ -119,6 +119,29 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.21.0",
+        tanggal=_dt.date(2026, 8, 29),
+        nama="Withdraw QRIS ELITE Bisa Diunggah",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**Berkas WD QRIS ELITE sekarang terbaca.** Sebelumnya jenisnya "
+            "tidak dikenali, dan karena satu berkas tak dikenali menahan "
+            "seluruh unggahan, tombol Simpan & Parse tidak bisa dijalankan "
+            "sampai berkas itu dikeluarkan. Bentuk WD ternyata sama sekali "
+            "berbeda dari DP — tidak satu pun nama kolomnya sama — sehingga "
+            "butuh pembacaan tersendiri, bukan sekadar penyesuaian.",
+            "**Pasangannya kunci pasti, bukan tebakan.** Nomor tiket "
+            "(W...) di berkas gateway sama persis dengan Ticket Number di "
+            "panel withdraw; pada berkas HK2 29 Agustus cocok 4 dari 4.",
+            "**Penarikan yang ditolak tidak dihitung sebagai uang keluar.** "
+            "Berkas memuat status \"failed verification\" berdampingan dengan "
+            "\"success\". Hanya yang sukses yang menjadi uang; kalau seluruh "
+            "isi berkas ditolak, aplikasi memberi tahu dengan jelas alih-alih "
+            "menyimpan berkas kosong yang terlihat berhasil.",
+        ),
+    ),
+    Rilis(
         versi="1.20.1",
         tanggal=_dt.date(2026, 8, 29),
         nama="Dashboard Lebih Ringan & Tanggal Salah Ketik Tak Lagi Mematikan Halaman",

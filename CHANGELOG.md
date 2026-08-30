@@ -3,11 +3,18 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.20.1** · 37 rilis (1 besar, 20 fitur, 12 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.21.0** · 38 rilis (1 besar, 21 fitur, 12 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.21.0 — Withdraw QRIS ELITE Bisa Diunggah
+*Rilis fitur · 29 Agustus 2026*
+
+- **Berkas WD QRIS ELITE sekarang terbaca.** Sebelumnya jenisnya tidak dikenali, dan karena satu berkas tak dikenali menahan seluruh unggahan, tombol Simpan & Parse tidak bisa dijalankan sampai berkas itu dikeluarkan. Bentuk WD ternyata sama sekali berbeda dari DP — tidak satu pun nama kolomnya sama — sehingga butuh pembacaan tersendiri, bukan sekadar penyesuaian.
+- **Pasangannya kunci pasti, bukan tebakan.** Nomor tiket (W...) di berkas gateway sama persis dengan Ticket Number di panel withdraw; pada berkas HK2 29 Agustus cocok 4 dari 4.
+- **Penarikan yang ditolak tidak dihitung sebagai uang keluar.** Berkas memuat status "failed verification" berdampingan dengan "success". Hanya yang sukses yang menjadi uang; kalau seluruh isi berkas ditolak, aplikasi memberi tahu dengan jelas alih-alih menyimpan berkas kosong yang terlihat berhasil.
 
 ## v1.20.1 — Dashboard Lebih Ringan & Tanggal Salah Ketik Tak Lagi Mematikan Halaman
 *Perbaikan · 29 Agustus 2026*
