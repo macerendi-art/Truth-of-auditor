@@ -413,14 +413,63 @@ def _q_bukan_gateway_member() -> Q:
     return ~blok
 
 
-def q_sesama_cm(toko_id: int) -> Q:
-    """Filter ORM: mutasi pindah dana Sesama CM (bukan DP/WD member).
+def _alnum_upper_expr(field_name: str):
+    """Ekspresi ORM: UPPER + buang spasi/tanda — setara `_compact_nama` di Python.
 
-    Cabang:
-    1. **Tampung QR** — desc memuat `QRFLYER TAMPUNG` / `QRISELITE TAMPUNG`
-    2. Nama/no.rek CM di cp/desc (bukan owner file sendiri) — **bukan** gateway
-       member dan **bukan** file bank berlabel DP
-    3. Kredit opaque ke rekening CM — hanya bank non-DP
+    Chained Replace (bukan regexp) → jalan di SQLite tes + Postgres prod.
+    OKE: `MARIO KARO-KARO` / `MARIO KARO KARO` ↔ compact `MARIOKAROKARO`.
+    """
+    from django.db.models import CharField, F, Value
+    from django.db.models.functions import Cast, Coalesce, Replace, Upper
+
+    # Cast ke CharField dulu — counterparty/desc bisa TextField vs CharField campur
+    expr = Upper(Coalesce(Cast(F(field_name), CharField()), Value("")))
+    for ch in (" ", "-", ".", "/", "|", "_", "'", '"', ","):
+        expr = Replace(expr, Value(ch), Value(""))
+    # pastikan output_field eksplisit (hindari FieldError mixed types)
+    return Cast(expr, CharField())
+
+
+def _is_settlement_counterparty(cp: str) -> bool:
+    """Kredit settlement ke rekening CM (bukan DP member).
+
+    OKE 30-08: `PT SAHABAT KIRIM D` / `SAHABAT KIRIM DIGITA` masuk BCA MARIO
+    (PINDAH DANA ROMEQR / PENCAIRAN QRIS ELITE) — cp terisi nama PT, dulu
+    ditolak cabang opaque (hanya cp kosong).
+    """
+    u = " ".join(str(cp or "").split()).strip().upper()
+    if not u:
+        return True  # opaque kosong = settlement/unknown credit di rekening CM
+    if u.startswith("PT ") or u.startswith("CV ") or u.startswith("UD "):
+        return True
+    markers = (
+        "SAHABAT KIRIM",
+        "KIRIM DIGIT",
+        "KIRIM DIGITA",
+        "ROMEQR",
+        "ROME QR",
+    )
+    return any(m in u for m in markers)
+
+
+def _q_settlement_or_empty_cp() -> Q:
+    return (
+        Q(counterparty="")
+        | Q(counterparty__isnull=True)
+        | Q(counterparty__istartswith="PT ")
+        | Q(counterparty__istartswith="CV ")
+        | Q(counterparty__istartswith="UD ")
+        | Q(counterparty__icontains="SAHABAT KIRIM")
+        | Q(counterparty__icontains="KIRIM DIGIT")
+        | Q(counterparty__icontains="ROMEQR")
+    )
+
+
+def _build_sesama_cm_q(toko_id: int, *, use_compact_ann: bool) -> Q:
+    """Inti filter Sesama CM.
+
+    `use_compact_ann=True` butuh queryset sudah di-annotate
+    `_scm_cp_c` / `_scm_desc_c` / `_scm_owner_c` (lihat `filter_sesama_cm`).
     """
     names, reks = identitas_cm_toko(toko_id)
 
@@ -440,23 +489,48 @@ def q_sesama_cm(toko_id: int) -> Q:
 
     bukan_gw_member = _q_bukan_gateway_member()
     bukan_bank_dp = _q_bukan_bank_dp_upload(toko_id)
+    settle_cp = _q_settlement_or_empty_cp()
 
     for nama in names:
         blob_vars = _varian_blob(nama)
         owner_vars = _varian(nama)
-        if not blob_vars and not owner_vars:
+        compact = _NON_ALNUM.sub("", nama).upper()
+        if not blob_vars and not owner_vars and len(compact) < 6:
             continue
         hit = Q()
         self_owner = Q()
         for v in blob_vars:
             hit |= Q(counterparty__icontains=v) | Q(description__icontains=v)
+        if use_compact_ann and len(compact) >= 6:
+            hit |= Q(_scm_cp_c__contains=compact) | Q(_scm_desc_c__contains=compact)
         for v in owner_vars:
             self_owner |= Q(upload__owner_name__icontains=v)
+        if use_compact_ann and len(compact) >= 6:
+            self_owner |= Q(_scm_owner_c__contains=compact)
         first = (nama.split() or [""])[0]
-        if len(first) >= 4 and first.upper() not in _NOISE and first.upper() not in _NAMA_DEPAN_UMUM:
+        fu = first.upper()
+        if len(first) >= 4 and fu not in _NOISE and fu not in _NAMA_DEPAN_UMUM:
             self_owner |= Q(upload__owner_name__icontains=first)
         if hit:
             total |= hit & ~self_owner & bukan_gw_member & bukan_bank_dp
+            any_branch = True
+
+        # A) Kredit opaque / settlement PT ke rekening CM (owner ≈ CM)
+        own = Q()
+        for v in owner_vars:
+            own |= Q(upload__owner_name__icontains=v)
+        if use_compact_ann and len(compact) >= 6:
+            own |= Q(_scm_owner_c__contains=compact)
+        if len(first) >= 4 and fu not in _NOISE and fu not in _NAMA_DEPAN_UMUM:
+            own |= Q(upload__owner_name__icontains=first)
+        if own:
+            total |= (
+                own
+                & Q(money_delta__gt=0)
+                & settle_cp
+                & Q(source_type__key="bank")
+                & bukan_bank_dp
+            )
             any_branch = True
 
     for d in reks:
@@ -467,29 +541,32 @@ def q_sesama_cm(toko_id: int) -> Q:
         )
         any_branch = True
 
-    # A) Kredit opaque — bank saja, dan BUKAN file DP (uang masuk member/DANA)
-    for nama in names:
-        vars_ = _varian(nama)
-        if not vars_:
-            continue
-        own = Q()
-        for v in vars_:
-            own |= Q(upload__owner_name__icontains=v)
-        first = (nama.split() or [""])[0]
-        if len(first) >= 4 and first.upper() not in _NOISE:
-            own |= Q(upload__owner_name__icontains=first)
-        total |= (
-            own
-            & Q(money_delta__gt=0)
-            & (Q(counterparty="") | Q(counterparty__isnull=True))
-            & Q(source_type__key="bank")
-            & bukan_bank_dp
-        )
-        any_branch = True
-
     if not any_branch:
         return Q(pk__in=[])
     return total
+
+
+def q_sesama_cm(toko_id: int) -> Q:
+    """Filter ORM kasar (icontains + settlement).
+
+    **Compact space/hyphen** (`MARIO KARO KARO` ↔ `MARIOKAROKARO`) butuh
+    `filter_sesama_cm(qs, toko_id)` — annotate + contains compact.
+    """
+    return _build_sesama_cm_q(toko_id, use_compact_ann=False)
+
+
+def filter_sesama_cm(qs, toko_id: int):
+    """Filter queryset mutasi Sesama CM — **compact-safe** (selaras `tandai_sesama_cm`).
+
+    Pakai ini di engine / Mutasi Bank / B2. Jangan andalkan `q_sesama_cm` saja
+    untuk pair nama ber-spasi/hyphen.
+    """
+    qs = qs.annotate(
+        _scm_cp_c=_alnum_upper_expr("counterparty"),
+        _scm_desc_c=_alnum_upper_expr("description"),
+        _scm_owner_c=_alnum_upper_expr("upload__owner_name"),
+    )
+    return qs.filter(_build_sesama_cm_q(toko_id, use_compact_ann=True)).distinct()
 
 
 def tandai_sesama_cm(rows, toko_id: int) -> None:
@@ -561,14 +638,14 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
                 if d and d in blob_digits:
                     hit = True
                     break
-        # A opaque credit on CM-owned **bank** statement only (bukan file DP)
+        # A opaque / settlement credit on CM-owned **bank** (bukan file DP)
         if not hit and src == "bank" and not _is_bank_dp_upload(up):
             try:
                 md = r.money_delta
                 is_credit = md is not None and md > 0
             except Exception:
                 is_credit = False
-            if is_credit and not str(r.counterparty or "").strip() and owner_raw:
+            if is_credit and owner_raw and _is_settlement_counterparty(r.counterparty or ""):
                 for nama, _kb, _ko, _c in prepared:
                     if cm_names_match(owner_raw, nama):
                         hit = True

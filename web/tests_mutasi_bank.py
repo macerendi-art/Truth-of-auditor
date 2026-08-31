@@ -639,6 +639,74 @@ class MutasiBankSesamaCmTests(MutasiBankBase):
         self.assertContains(r_cm_b, "APRI YANI")
         self.assertContains(r_cm_b, "ANDRI FIRMANSYAH")
 
+    def test_compact_mario_karo_karo_dan_settlement_pt_sahabat(self):
+        """OKE: MARIO KARO KARO (spasi) + PT SAHABAT KIRIM = Sesama CM.
+
+        q_sesama_cm icontains gagal pada compact; filter_sesama_cm + badge harus
+        cocok. Kredit settlement PT di rekening CM (owner) masuk CM.
+        """
+        from web.sesama_cm import (
+            clear_cm_cache,
+            filter_sesama_cm,
+            q_sesama_cm,
+            tandai_sesama_cm,
+        )
+        br = SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})[0]
+        fr_up = Upload.objects.create(source_type=br, toko=self.lbs, original_name="fr.xlsx")
+        Transaction.objects.create(
+            upload=fr_up, source_type=br, toko=self.lbs, jenis="lainnya",
+            amount=Decimal("0"), money_delta=Decimal("0"),
+            occurred_at=datetime(2026, 8, 30, 10, 0),
+            raw={
+                "Kategori": "Sesama CM",
+                "Bank": "BANK BCA | MARIO KAROKARO | TAMPUNG LAYER 1",
+                "No. Rek Bank Member": "BCA 5798108942",
+            },
+            row_hash=f"fr-mario-{next(_seq)}",
+        )
+        up_lus = self._up(self.bank, "30-08 WD BCA LUSIYATI.CSV", owner="LUSIYATI")
+        up_mario = self._up(self.bank, "30-08 BCA MARIO.CSV", owner="MARIO KARO-KARO")
+        t_space = self._tx(
+            up_lus, self.bank, jenis="depo", counterparty="MARIO KARO KARO",
+            description="BI-FAST CR TRANSFER   DR 009 MARIO KARO KARO",
+            amount="15000000", dt=datetime(2026, 8, 30, 12, 0),
+        )
+        t_hyphen = self._tx(
+            up_lus, self.bank, jenis="depo", counterparty="MARIO KARO-KARO",
+            description="TRSF E-BANKING CR MARIO KARO-KARO",
+            amount="10000000", dt=datetime(2026, 8, 30, 12, 1),
+        )
+        t_sahabat = self._tx(
+            up_mario, self.bank, jenis="depo", counterparty="PT SAHABAT KIRIM D",
+            description="BI-FAST CR TRANSFER   DR 490 PT SAHABAT KIRIM D",
+            amount="30000000", dt=datetime(2026, 8, 30, 12, 2),
+        )
+        # member DP ke LUSIYATI — bukan settlement
+        t_member = self._tx(
+            up_lus, self.bank, jenis="depo", counterparty="BUDI SANTOSO",
+            description="TRSF E-BANKING CR BUDI SANTOSO",
+            amount="50000", dt=datetime(2026, 8, 30, 12, 3),
+        )
+        clear_cm_cache()
+        # q kasar boleh miss compact space; filter wajib kena
+        self.assertFalse(
+            Transaction.objects.filter(id=t_space.id).filter(q_sesama_cm(self.lbs.id)).exists()
+        )
+        for t in (t_space, t_hyphen, t_sahabat):
+            self.assertTrue(
+                filter_sesama_cm(Transaction.objects.filter(id=t.id), self.lbs.id).exists(),
+                msg=t.counterparty,
+            )
+        self.assertFalse(
+            filter_sesama_cm(Transaction.objects.filter(id=t_member.id), self.lbs.id).exists()
+        )
+        rows = [t_space, t_hyphen, t_sahabat, t_member]
+        tandai_sesama_cm(rows, self.lbs.id)
+        self.assertTrue(t_space.is_sesama_cm)
+        self.assertTrue(t_hyphen.is_sesama_cm)
+        self.assertTrue(t_sahabat.is_sesama_cm)
+        self.assertFalse(t_member.is_sesama_cm)
+
 
 class MutasiBankPhoneLookupTests(MutasiBankBase):
     def test_baris_ewallet_tampilkan_hp_dan_nama_panel(self):

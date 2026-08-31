@@ -294,6 +294,68 @@ class SesamaCmReconTests(TestCase):
         self.assertEqual(r_ok.right_id, money.id)
         self.assertIn(r_ok.reason_code, ("amount+rek", "owner_fr+kredit_masuk"))
 
+    def test_a_kredit_settlement_pt_sahabat_owner_cm(self):
+        """OKE ROMEQR: kredit PT SAHABAT di rekening MARIO ↔ FR masuk Sesama CM."""
+        dt = datetime(2026, 8, 30, 12, 0)
+        up_m = Upload.objects.create(
+            source_type=self.bank, toko=self.toko, original_name="bca_mario.csv",
+            owner_name="MARIO KARO-KARO",
+        )
+        fr = self._fr_cm(
+            "BANK BCA | MARIO KAROKARO | TAMPUNG LAYER 1", "BCA 5798108942",
+            "30000000", dt, desc="PINDAH DANA ROMEQR",
+        )
+        money = self._tx(
+            self.bank, up_m, jenis="depo", amount="30000000", money="30000000",
+            dt=dt, counterparty="PT SAHABAT KIRIM D",
+            description="BI-FAST CR TRANSFER   DR 490 PT SAHABAT KIRIM D",
+        )
+        clear_cm_cache()
+        run = run_match(
+            MatchRun.Relation.BRACKET_BANK, self.tol, toko=self.toko,
+            date_from=dt.date(), date_to=dt.date(),
+        )
+        r_ok = MatchResult.objects.get(run=run, left=fr)
+        self.assertEqual(r_ok.bucket, "cocok")
+        self.assertEqual(r_ok.right_id, money.id)
+        self.assertEqual(r_ok.reason_code, "owner_fr+kredit_masuk")
+
+    def test_compact_name_mario_karo_karo_di_counterparty(self):
+        """FR MARIO KAROKARO ↔ mutasi cp MARIO KARO KARO (spasi) di rekening LUSIYATI."""
+        dt = datetime(2026, 8, 30, 13, 0)
+        up_l = Upload.objects.create(
+            source_type=self.bank, toko=self.toko, original_name="bca_lus.csv",
+            owner_name="LUSIYATI",
+        )
+        # seed LUSIYATI as CM too
+        self._fr_cm(
+            "BANK BCA | LUSIYATI | WITHDRAW", "BCA 0202419231",
+            "1000", datetime(2026, 8, 20, 10, 0),
+        )
+        fr = self._fr_cm(
+            "BANK BCA | MARIO KAROKARO | TAMPUNG LAYER 1", "BCA 5798108942",
+            "-15000000", dt, desc="TURUN TAMPUNG OPS",
+        )
+        # money: WD from Mario? Actually FR is -15jt on Mario side meaning money leaves Mario
+        # Better: FR +15jt LUSIYATI receiving from Mario with cp MARIO KARO KARO
+        fr_in = self._fr_cm(
+            "BANK BCA | LUSIYATI | WITHDRAW", "BCA 0202419231",
+            "15000000", dt, desc="TURUN TAMPUNG OPS",
+        )
+        money = self._tx(
+            self.bank, up_l, jenis="depo", amount="15000000", money="15000000",
+            dt=dt, counterparty="MARIO KARO KARO",
+            description="BI-FAST CR TRANSFER   DR 009 MARIO KARO KARO",
+        )
+        clear_cm_cache()
+        run = run_match(
+            MatchRun.Relation.BRACKET_BANK, self.tol, toko=self.toko,
+            date_from=dt.date(), date_to=dt.date(),
+        )
+        r_ok = MatchResult.objects.get(run=run, left=fr_in)
+        self.assertEqual(r_ok.bucket, "cocok")
+        self.assertEqual(r_ok.right_id, money.id)
+
     def test_a_outbound_tidak_cocok_hanya_karena_raw_norek_sendiri(self):
         """A aman: FR keluar + WD member amount sama TIDAK cocok hanya karena NOREK rekening sendiri."""
         dt = datetime(2026, 8, 22, 9, 0)

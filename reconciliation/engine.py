@@ -951,7 +951,6 @@ class BracketBankMatcher:
 
     def sides(self, dfrom, dto, toko=None, include=None):
         from django.db.models.fields.json import KeyTextTransform
-        from web.sesama_cm import q_sesama_cm
 
         left = Transaction.objects.filter(
             source_type__key="bracket", is_duplicate=False,
@@ -969,7 +968,9 @@ class BracketBankMatcher:
         right = _date_filter(_active(_toko_filter(right, toko)), dfrom, dto)
         if toko is not None:
             tid = getattr(toko, "id", toko)
-            right = right.filter(q_sesama_cm(tid))
+            # compact-safe (MARIO KARO KARO ↔ MARIOKAROKARO) + settlement PT
+            from web.sesama_cm import filter_sesama_cm
+            right = filter_sesama_cm(right, tid)
         right = right.select_related("source_type", "upload")
         return list(left.order_by("id")), list(right.order_by("id"))
 
@@ -1169,9 +1170,15 @@ def _sesama_cm_identity(fr, bank, cm_names=(), cm_reks=()):
                 rk.startswith(blob_d) or blob_d.startswith(rk[:10])
             ):
                 return 94.0, "owner_fr+rek_cm"
-        # 3b) A — kredit opaque di rekening FR (settlement tanpa lawan di blob)
-        if is_credit and not str(cp).strip():
-            return 91.0, "owner_fr+kredit_masuk"
+        # 3b) A — kredit opaque / settlement PT di rekening FR
+        if is_credit:
+            try:
+                from web.sesama_cm import _is_settlement_counterparty
+                settle = _is_settlement_counterparty(cp)
+            except Exception:
+                settle = not str(cp).strip()
+            if settle:
+                return 91.0, "owner_fr+kredit_masuk"
 
     # 4) nama FR di deskripsi pada statement rekening LAIN
     if fname and not owner_is_fr:
@@ -1943,9 +1950,10 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
             # belum di-upload). Jangan buat no_panel di panel_bank.
             if batch.toko_id:
                 try:
-                    from web.sesama_cm import q_sesama_cm
-                    cm_qs = um_qs.filter(q_sesama_cm(batch.toko_id))
-                    for t in cm_qs.iterator():
+                    from web.sesama_cm import filter_sesama_cm
+                    cm_qs = filter_sesama_cm(um_qs, batch.toko_id)
+                    cm_ids = list(cm_qs.values_list("id", flat=True))
+                    for t in um_qs.filter(id__in=cm_ids).iterator():
                         st = stats["c"]
                         st["n"] += 1
                         md = float(t.money_delta)
@@ -1953,7 +1961,7 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
                             st["dp"] += md
                         else:
                             st["wd"] += -md
-                    um_qs = um_qs.exclude(q_sesama_cm(batch.toko_id))
+                    um_qs = um_qs.exclude(id__in=cm_ids)
                 except Exception:
                     pass
             for t in um_qs:

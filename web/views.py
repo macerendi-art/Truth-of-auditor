@@ -2033,8 +2033,9 @@ def bank_mutations(request):
         flow = ""
     if flow == "cm":
         # Pindah dana antar rekening CM toko (bukan DP/WD member).
-        from web.sesama_cm import q_sesama_cm
-        qs = qs.filter(q_sesama_cm(active.id))
+        # compact-safe: MARIO KARO KARO ↔ MARIOKAROKARO
+        from web.sesama_cm import filter_sesama_cm
+        qs = filter_sesama_cm(qs, active.id)
     elif flow:
         qs = qs.filter(jenis=flow)
 
