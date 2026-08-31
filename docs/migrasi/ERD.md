@@ -15,10 +15,14 @@ disentuh** · **Basis kode:** `origin/main` v1.21.0 + branch migrasi
 > berubah sebelum dan sesudah skrip berjalan.
 
 **18 model** di enam app (`core`, `accounts`, `sources`, `transactions`, `reconciliation`,
-`web`). Produksi punya **29 tabel** — selisihnya adalah tabel-antara M2M (mis.
-`sources_upload_duplicate_transactions`, `accounts_user_allowed_tokos`) plus tabel bawaan
-Django (`django_migrations`, `django_session`, `auth_*`, `django_content_type`), yang tidak
-punya kelas model sendiri. **Jangan pernah menghitung tabel dari diagram ini** — gerbang
+`web`), plus **2 entitas bawaan Django** (`auth_group`, `auth_permission`) yang ditarik masuk
+karena `accounts_user` benar-benar punya M2M ke keduanya — tabelnya nyata di produksi dan ikut
+dihitung gerbang, jadi relasinya tidak boleh disembunyikan hanya karena modelnya milik Django.
+
+Produksi punya **29 tabel**. Selisihnya adalah tabel-antara M2M yang **bukan model** (mis.
+`sources_upload_duplicate_transactions` 2,86 juta baris, `accounts_user_allowed_tokos`,
+`accounts_user_groups`) plus tabel bawaan (`django_migrations`, `django_session`,
+`django_content_type`). **Jangan pernah menghitung tabel dari diagram ini** — gerbang
 memakai inventaris `information_schema`, bukan daftar hardcoded.
 
 ---
@@ -158,6 +162,12 @@ erDiagram
     BigAuto id PK
     Char cidr
     ForeignKey dibuat_oleh FK
+  }
+  auth_group {
+    _ bawaan_django
+  }
+  auth_permission {
+    _ bawaan_django
   }
   accounts_user ||--o{ core_auditlog : "user SET_NULL"
   accounts_user ||--o{ reconciliation_matchrun : "created_by SET_NULL"

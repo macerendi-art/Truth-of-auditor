@@ -39,6 +39,12 @@ PENTING = {
 }
 
 entitas, relasi = [], []
+# Model di luar APPS yang tetap ditunjuk relasi (auth.Group, auth.Permission).
+# Tabelnya NYATA di produksi dan ikut dihitung gerbang, jadi relasinya tidak boleh
+# dibuang — tapi entitas tujuannya harus tetap dideklarasikan, kalau tidak mermaid
+# menggambar kotak kosong tanpa keterangan dan pembaca mengira itu tabel kita.
+luar = set()
+
 for model in apps.get_models():
     if model._meta.app_label not in APPS:
         continue
@@ -50,6 +56,8 @@ for model in apps.get_models():
         tipe = f.get_internal_type().replace("Field", "")  # mermaid menolak spasi
         if f.many_to_many:
             lawan = f.related_model._meta.db_table
+            if f.related_model._meta.app_label not in APPS:
+                luar.add(lawan)
             relasi.append(f'  {tabel} }}o--o{{ {lawan} : "{f.name} M2M"')
             baris.append(f"    M2M {f.name}")
             continue
@@ -58,6 +66,8 @@ for model in apps.get_models():
                 getattr(f.remote_field, "on_delete", None), "__name__", "?"
             ).upper()
             lawan = f.related_model._meta.db_table
+            if f.related_model._meta.app_label not in APPS:
+                luar.add(lawan)
             relasi.append(f'  {lawan} ||--o{{ {tabel} : "{f.name} {on_delete}"')
             baris.append(f"    {tipe} {f.name} FK")
             continue
@@ -66,6 +76,10 @@ for model in apps.get_models():
             baris.append(f"    {tipe} {f.name} {kunci}".rstrip())
     baris.append("  }")
     entitas.append("\n".join(baris))
+
+# Deklarasikan entitas luar terakhir, ditandai supaya tak tertukar dengan tabel kita.
+for t in sorted(luar):
+    entitas.append(f"  {t} {{\n    _ bawaan_django\n  }}")
 
 print("```mermaid")
 print("erDiagram")
