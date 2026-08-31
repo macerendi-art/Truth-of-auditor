@@ -1,7 +1,15 @@
-# Rencana Migrasi: Railway → Contabo VPS (v2)
+# Rencana Migrasi: Railway → Contabo VPS (v2.1)
 
 **Disusun:** 31 Agustus 2026 · **Direvisi total:** 31 Agustus 2026 setelah 7 audit paralel
-**Target:** Contabo **Cloud VPS 16** · 16 vCPU · 64 GB RAM · 500 GB SSD · **Singapura** · Ubuntu 24.04
+**Ukuran mesin ditetapkan ulang:** 1 September 2026 setelah 8 riset paralel + 2 skeptik adversarial
+**Target:** Contabo **Cloud VPS 12** · 12 vCPU · 48 GB RAM · **400 GB + opsi 800 GB SSD** ·
+**Singapura** · Ubuntu 24.04 · **beli 1 bulan dulu**, prepay 12 bulan setelah gerbang node lulus
+
+> **Turun dari VPS 16 adalah hasil pengukuran, bukan penghematan.** Setelan Postgres FASE 1
+> SENGAJA tidak berubah satu pun — semuanya paritas produksi (`shared_buffers` 6GB,
+> `effective_cache_size` 16GB, `work_mem` 4MB), puncak RAM steady-state ±8 GB. Satu-satunya
+> angka berskala-RAM ada di **profil restore FASE 2**, dan itu justru cacat laten yang v2
+> bawa dari VPS 16 — lihat "Penetapan ukuran" di bawah.
 **Prinsip:** produksi tidak tersentuh sampai FASE 4. Migrasi ini memindahkan **MESIN** — bukan
 menyetel ulang database, bukan menukar versi pustaka, bukan mengubah perilaku aplikasi.
 
@@ -25,7 +33,7 @@ Setiap angka di bawah dibaca langsung dari produksi. **Beberapa mengoreksi CLAUD
 | Ekstensi | `plpgsql` + `pg_stat_statements` | v1 hanya menyebut plpgsql |
 | DB / user | `railway` / `postgres` | |
 | Tabel publik | 29 | |
-| Ukuran | 17 GB · 9,37 juta baris · +5 GB/bln · ±185 rb baris/hari | |
+| Ukuran | **18 GB · 8.839.002 baris · ±11 GB/bln** · ±185 rb baris/hari | diukur 01-09; angka lama "17 GB / 9,37 jt / +5 GB/bln" tidak tereproduksi — lihat "Penetapan ukuran" |
 | Zona waktu | jam OS **UTC**; Django memaksa `TZ=Asia/Jakarta` | lihat jebakan J11 |
 | DEBUG produksi | `False` (terkonfirmasi) | |
 | Index `transactions_transaction` | **20 index, semua `indisvalid=true`** | wajib dicek ulang sebelum dump — lihat J4 |
@@ -48,9 +56,128 @@ Setiap angka di bawah dibaca langsung dari produksi. **Beberapa mengoreksi CLAUD
 `/dev/shm`), bukan CLAUDE.md. **Sebelum FASE 1, baca ulang setelan produksi — jangan
 percaya tabel ini pun.**
 
+⚠️ **Dan satu lapis lebih dalam (diukur 01-09):** `work_mem=4MB` serta
+`maintenance_work_mem=64MB` di produksi keduanya `source=default` — **bukan hasil tuning**.
+Artinya `ALTER SYSTEM` v1.18.0 tidak seluruhnya selamat ke instance PG 18.6 yang berjalan
+sekarang. Konsekuensi untuk VPS: **tulis setiap parameter secara EKSPLISIT**; "paritas" yang
+mengandalkan default akan mereproduksi dua kecelakaan, bukan dua keputusan.
+
 ```bash
 railway ssh -s Postgres "psql -U postgres -d railway -Atc \"SELECT name||' = '||setting||coalesce(' '||unit,'') FROM pg_settings WHERE source NOT IN ('default','override') ORDER BY name;\""
 ```
+
+---
+
+## Penetapan ukuran mesin (v2.1 — diukur 01-09-2026)
+
+v2 menargetkan Cloud VPS 16. Itu pilihan aman **sebelum ada pengukuran**. Pengukurannya
+sekarang ada — 8 riset paralel + 2 skeptik adversarial — dan hasilnya membalik pilihan
+tiernya, bukan isi runbook-nya.
+
+### Vonis
+
+**Cloud VPS 12 + opsi disk 800 GB SSD.** VPS 16 tidak dibutuhkan, dan bila diambil justru
+merugikan.
+
+| Sumbu | Terukur di produksi | VPS 12 | Kesimpulan |
+|---|---|---|---|
+| CPU | **0,23 core** rata-rata sepanjang hari kerja penuh; throttle 2/24.367 (web) dan 0/101.788 (PG) pada kuota 24 vCPU | 12 vCPU | ±50× berlebih. Jumlah core **tidak boleh** masuk pertimbangan tier |
+| RAM rigid | **±8 GB** — PG anon 54 MB + `shared_buffers` 6,62 GB + puncak gunicorn 1,36 GB | 48 GB | 6× berlebih. 48 GB dipilih untuk *page cache*, bukan untuk proses |
+| Disk | DB **18 GB**, laju **±11 GB/bln** | 400 GB jebol ~bln 22 · **800 GB aman ~bln 29+** | **Satu-satunya sumbu yang mengikat** |
+| Jaringan | puncak nyata = unggah cadangan harian | 800 Mbit | berlebih (fair-use throttle 100 Mbit/s tetap jauh di atas kebutuhan) |
+
+**Laju +5 GB/bln yang dipakai v2 adalah fiksi.** Tiga turunan independen sepakat di ±9,5–11,7
+GB/bln: (a) 185 rb baris/hari × **1,90 KB/baris** terukur (16 GB `transactions_transaction` /
+8.839.002 baris) + MatchResult + M2M = 390 MB/hari; (b) 18 GB dibagi umur data 48–57 hari =
+316–377 MB/hari; (c) struktural — heap **saja** sudah ~985 B/baris sebelum 20 index, sedangkan
++5 GB/bln menuntut 0,81 KB/baris *all-in*. Semua tanggal jebol di dokumen ini diturunkan dari
+±11 GB/bln.
+
+### Kenapa BUKAN VPS 16 — dominasi, bukan penghematan
+
+| | VPS 12 + 800 GB | VPS 16 |
+|---|---|---|
+| Harga Singapura, 24 bln | **€40,05/bln** | €50,35/bln |
+| Disk | **800 GB** | 500 GB |
+| Daya tahan (laju terukur, ruang `pg_repack` utuh) | **~bln 29** | ~bln 17 |
+
+VPS 16 lebih mahal 25% untuk disk 37% lebih kecil pada satu-satunya sumbu yang mengikat.
+Ia juga **tidak** membeli keandalan: VPS 12 dan VPS 16 berada di kelas vCPU bersama dan
+tingkat penyimpanan yang **sama persis**, jadi ia tak memperbaiki dua risiko kinerja nyata
+migrasi ini — steal time dan IOPS acak.
+
+### Asimetri kontrak — ini yang menentukan arah kesalahan yang aman
+
+Terverifikasi di help.contabo.com (KB 103000269700) dan configurator hidup:
+
+- **Upgrade tier**: swalayan, **tanpa biaya upgrade**, selisih diprorata harian, Live Migration
+  tanpa kehilangan data, **IP tetap**.
+- **Downgrade**: **MUSTAHIL** — harus pesan server baru + migrasi manual + **IP berubah**
+  (artinya mengulang seluruh konfigurasi Cloudflare + geo-block KH).
+- **Core (SSD) → Plus (NVMe)**: bukan jalur upgrade — butuh tiket support dan **kehilangan
+  data total**; gratis hanya bila diminta ≤14 hari sejak order.
+- **Region**: sekali pakai — pindah region mengganti seluruh IPv4/IPv6 dan berbayar.
+  **Singapura harus benar sejak layar order.**
+
+→ **"Ambil yang lebih besar biar aman" adalah pintu satu arah yang mahal.** Arah kesalahan
+yang murah adalah membeli lebih kecil lalu naik.
+
+*Konflik dokumen yang belum terpecahkan:* blog resmi Contabo (3-Jun-2025) dan KB lama
+103000269722 menyatakan Live Migration **berbayar** dan New Deployment memberi **IP baru** —
+bertentangan dengan KB kanonik pada dua fakta yang justru menopang rencana ini. Minta
+konfirmasi tertulis support sebelum prepay.
+
+### Tangga harga Singapura (terverifikasi 3 jalur independen)
+
+`api/products.json` + `api/addons.json` + Order Summary hidup, nol penyimpangan:
+
+| Termin | Basis | Location fee SG | Disk 800 GB | **Total/bln** |
+|---|---|---|---|---|
+| 1 bulan | €25,00 | €14,05 | €6,00 | **€45,05** |
+| 12 bulan (−15%) | €21,25 | €14,05 | €6,00 | **€41,30** |
+| 24 bulan (−20%) | €20,00 | €14,05 | €6,00 | **€40,05** |
+
+**Location fee SG €14,05 flat dan TIDAK pernah ikut diskon** (dibuktikan: "You save" tidak
+berubah saat region dipilih). Setup fee **€0** di semua termin, termasuk bulanan. Framing
+"€20 untuk 24 bulan pertama, lalu €25" **BENAR** — teks legal checkout: *kontrak berlanjut
+bulanan pada harga standar sesudah termin awal*, jadi bulan ke-25 = €39,05/bln kecuali
+diperpanjang lebih awal.
+
+### Urutan pembelian — aturan keras
+
+1. **Order 1 bulan dulu**: VPS 12 · Asia (Singapore) · Ubuntu 24.04 · add-on 800 GB SSD →
+   **€45,05**, One-Time €0. Contabo adalah undian node; jangan prepay node yang belum terbukti.
+2. Jalankan **FASE 0–3 + gerbang node** di mesin itu: `fio`, steal p95 (`mpstat` jam sibuk),
+   durasi restore, dan **wall-clock `run_batch` toko tersibuk**. Gerbang yang sesungguhnya
+   adalah run_batch dan durasi restore — bukan `fio` mentah, karena pembacaan harian dilayani
+   RAM (DB muat penuh di page cache).
+3. Node lulus → **perpanjang lebih awal instance yang SAMA ke 12 bulan (€41,30/bln).**
+   **JANGAN order ulang demi −20%**: order baru = node baru + **IP baru** = seluruh validasi
+   hangus, demi selisih €1,25/bln.
+4. Node gagal → redeploy / instance baru (murah — data belum pindah). Bila I/O benar-benar
+   masalah, fallback berbayar = Cloud VPS **Plus** 12 SG €80,30/bln (NVMe ±3,5× IOPS) —
+   catat bahwa itu **deployment baru**, bukan upgrade.
+
+### Yang TIDAK lagi menjadi syarat beli
+
+Pengukuran Δ-30-hari pertumbuhan DB **diturunkan dari pra-syarat pembelian menjadi kewajiban
+monitoring**: opsi 800 GB sudah menutup kedua cabang laju (baik 5 maupun 11 GB/bln), jadi
+menunggu 30 hari hanya menunda migrasi tanpa mengubah keputusan.
+
+**Empat angka dipantau mingguan, dengan ambang tindakan:**
+
+| Angka | Ambang | Tindakan |
+|---|---|---|
+| `pg_database_size` | Δ30 hari > 12 GB | pesan Storage Extension sekarang, jangan tunggu penuh |
+| `df -h /` | > 70% / > 85% | tindakan / berhenti menerima unggahan |
+| steal `%st` jam 13:00–22:00 WIB | > 15% berkelanjutan | jadwalkan pindah ke Plus (ingat: deployment baru) |
+| wall-clock `run_batch` toko tersibuk | > 80 dtk | worker latar naik prioritas di atas semua fitur |
+
+### Spesifikasi minimum yang jujur
+
+**8 vCPU / 24–32 GB / disk ≥400 GB**, dengan syarat disiplin retensi (dump lokal 1 hari,
+Drive 14 hari). VPS 12 dipilih di atas itu bukan karena core melainkan karena 48 GB menampung
+seluruh DB di cache untuk tahun-tahun mendatang, **dan** karena ia punya jalur disk 800 GB.
 
 ---
 
@@ -383,9 +510,15 @@ sudo rm -f /var/lib/postgresql/ujidisk
 # random_page_cost lebih tinggi SEBAGAI PERUBAHAN TERPISAH pasca-cutover.
 
 # B. Profil RESTORE sementara (di VPS)
+# maintenance_work_mem 2GB (BUKAN 8GB) dan mpmw 2 (BUKAN 4) — ini CACAT LATEN v2:
+# `pg_restore --jobs=8` di bawah = 8 sesi terpisah, tiap CREATE INDEX berhak atas
+# maintenance_work_mem PENUH → plafon 8 x 8GB = 64 GB nominal, di atas shared_buffers
+# 6GB yang sudah residen. Itu melampaui RAM VPS 12 (48 GB) DAN menyamai seluruh RAM
+# VPS 16 — jadi angkanya sudah salah sebelum mesinnya diperkecil.
+# 8 x 2GB = 16 GB, dan restore justru LEBIH CEPAT: ~24 proses, bukan ~40 di 12 vCPU.
 sudo -u postgres psql <<'SQL'
-ALTER SYSTEM SET maintenance_work_mem='8GB';
-ALTER SYSTEM SET max_parallel_maintenance_workers='4';
+ALTER SYSTEM SET maintenance_work_mem='2GB';
+ALTER SYSTEM SET max_parallel_maintenance_workers='2';
 ALTER SYSTEM SET max_wal_size='16GB';
 ALTER SYSTEM SET checkpoint_timeout='30min';
 ALTER SYSTEM SET synchronous_commit='off';   -- aman: gagal = ulangi restore
@@ -643,6 +776,13 @@ memecahnya ke nginx menciptakan sumber kebenaran kedua untuk `STATIC_ROOT`.
 - [ ] URL ngawur → **404 polos**, bukan halaman kuning Django
 - [ ] `test ! -f /opt/toa/db.sqlite3`
 - [ ] Dashboard g25/k25/mxw — **catat waktunya** (patokan GATE B di FASE 4)
+- [ ] **Wall-clock `run_batch` toko tersibuk — ambang 80 detik.** Tak satu pun gerbang lain
+      mengukur ini: semuanya menghitung baris atau membaca EXPLAIN. Rekonsiliasi berjalan
+      SINKRON di dalam permintaan HTTP, sudah menyentuh ±100 dtk batas Cloudflare, dan
+      `gunicorn --timeout 120` hanya memberi margin 20%. Perlambatan single-core 25% (steal
+      di vCPU bersama) mengubah 100 dtk jadi 133 dtk → **HTTP 524 di edge**. Di atas 80 dtk:
+      worker latar naik prioritas di atas semua pekerjaan lain — dan tidak ada ukuran VPS
+      yang memperbaikinya (batasnya algoritma + GIL, bukan jumlah core)
 - [ ] Unggah **batch multi-berkas ±20 MB**, bukan satu berkas kecil
 - [ ] Satu rekonsiliasi tanggal lama → angka **sama persis** dengan produksi
 - [ ] **Reboot VPS** → situs kembali tanpa satu pun langkah manual
@@ -766,17 +906,32 @@ set -Eeuo pipefail                    # pipefail: tanpa ini pg_dump mati di teng
                                       # tetap menghasilkan berkas terpotong yang
                                       # TAMPAK seperti cadangan
 STAMP=$(date +%F-%H%M); TMP=/var/backups/toa/db-$STAMP.dump
-pg_dump -Fc -Z6 -d toa -f "$TMP"
+# Kompresi SAMA dengan FASE 2 — bukan `-Fc -Z6`. Dua alasan: (1) seluruh model disk
+# dikalibrasi pada rasio zstd, jadi gzip membuat estimasi ruang mewarisi angka yang
+# salah; (2) `-Z6` gzip satu-utas atas DB 137 GB = ~85-90 menit satu core tiap 03:00
+# sambil membaca seluruh heap dan MENGOSONGKAN page cache tepat sebelum jam kerja.
+pg_dump --format=directory --jobs=4 --compress=zstd:3 -d toa -f "$TMP"
 pg_restore -l "$TMP" >/dev/null       # TOC terbaca = arsip tidak rusak
-sha256sum "$TMP" > "$TMP.sha256"
+tar -cf - "$TMP" | sha256sum > "$TMP.sha256"
 rclone copy "$TMP" "$TMP.sha256" gcrypt:harian/
 rclone copy /var/lib/toa/media gcrypt:media/ --max-age 48h   # pg_dump tak mencakup berkas
-find /var/backups/toa -name 'db-*.dump*' -mtime +7 -delete
-rclone delete gcrypt:harian/ --min-age 90d
+# +1 hari, BUKAN +7. Verifikasi (pg_restore -l + sha256) sudah terjadi SEBELUM unggah,
+# jadi salinan lokal hanya perlu hidup sampai rclone terkonfirmasi. `-mtime +7` menahan
+# 8 salinan x 0,4xDB = 3,2xDB: dump lokal mengalahkan databasenya sendiri dan menjebol
+# disk di bulan ~6. Ini cacat kapasitas terbesar rencana, dan ia duduk di FASE 5
+# sehingga lolos SEMUA gerbang.
+find /var/backups/toa -name 'db-*.dump*' -mtime +1 -delete
+# 14 hari harian, BUKAN 90. Retensi 90 hari x dump penuh = 36xDB tersimpan: pada pool
+# 2 TB itu pecah di bulan ~4. Retensi panjang ditangani salinan mingguan/bulanan.
+rclone delete gcrypt:harian/ --min-age 14d
 EOF
 sudo chmod 700 /usr/local/bin/toa-backup
 # 03:00 WIB — aman terhadap jendela unggah 13:00–20:00
-echo '0 3 * * * root /usr/local/bin/toa-backup || logger -p user.err "toa-backup GAGAL"' \
+# Alarm WAJIB sampai ke manusia. `|| logger` menulis ke journald yang tidak pernah
+# dibaca siapa pun — cadangan yang gagal senyap sama dengan tidak ada cadangan.
+# Pakai heartbeat monitor uptime (URL ping saat SUKSES; alarm justru saat ping HILANG,
+# sehingga VPS mati total pun tetap membunyikan alarm) + email.
+echo '0 3 * * * root /usr/local/bin/toa-backup && curl -fsS -m 10 "$HEARTBEAT_URL" || logger -p user.err "toa-backup GAGAL"' \
   | sudo tee /etc/cron.d/toa-backup
 ```
 
@@ -787,7 +942,13 @@ echo '0 3 * * * root /usr/local/bin/toa-backup || logger -p user.err "toa-backup
 - [ ] Batasi journald: `SystemMaxUse=2G` di `/etc/systemd/journald.conf`
 - [ ] Monitor uptime: tambahkan IP-nya ke `GEO_BLOCK_ALLOWLIST` **dan** WAF Skip; assert **200 + isi halaman**, jangan "bukan 5xx" (403 dari origin rusak terlihat sama)
 - [ ] Cron bulanan menyegarkan rentang Cloudflare di ufw
-- [ ] Nyalakan Auto Backup Contabo (€8,35) sebagai lapis kedua
+- [ ] Tetapkan **kuota Google Drive** yang tersedia sebelum mengandalkan retensi apa pun
+- [ ] Nyalakan Auto Backup Contabo (**€6,70/bln di tier VPS 12** — €8,35 adalah harga VPS 16)
+      sebagai lapis kedua. **Snapshot Contabo BUKAN cadangan**: terhapus otomatis setelah 30
+      hari dan hangus total bila VPS dibatalkan — ia rollback pra-update, bukan DR
+- [ ] **Tenggat keputusan bulan ke-12: partisi bulanan / arsip `transactions_transaction`.**
+      Ini syarat kelangsungan, bukan optimasi — lewat ±150 GB, `pg_repack` menuntut 0,9×DB
+      ruang bebas DAN jendela 6–14 jam, dan keduanya berhenti tersedia pada saat yang sama
 
 ### ❌ Klaim v1 yang HARUS dihapus
 
