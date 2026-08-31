@@ -1,18 +1,52 @@
-Django>=5.2,<5.3
-pandas
-openpyxl
-msoffcrypto-tool
-pdfplumber
-rapidfuzz
-python-dateutil
+# Versi DIPATOK dari `pip freeze` PRODUKSI (railway ssh -s web), 31-08-2026.
+# Alasan: migrasi harus mengubah SATU hal — mesinnya. Bukan sekaligus setiap
+# versi pustaka. `pandas`/`openpyxl`/`pdfplumber`/`rapidfuzz`/`dateutil`
+# menyentuh ANGKA dan TANGGAL hasil parse; pergeseran versi di sana adalah
+# kegagalan senyap, bukan error.
+#
+# Melepas patokan ini = commit terpisah dengan suite tes penuh, BUKAN di
+# tengah migrasi.
 
-# geo-block (kunci wilayah) — DB negara terbundel di paket pip (pure-Python,
-# tanpa license key MaxMind, tanpa panggilan jaringan). Import LAZY di
-# web/middleware.py → app tetap boot & FAIL-OPEN bila paket ini belum terpasang.
-geoip2fast
+Django==5.2.17
+asgiref==3.12.1
+sqlparse==0.6.0
 
-# deployment (Railway/produksi)
-gunicorn
-whitenoise
-psycopg2-binary
-dj-database-url
+# --- baca xlsx (panel/bracket/bank/gateway/COR/bonus) ---
+openpyxl==3.1.5
+et_xmlfile==2.0.0
+
+# --- xlsx terenkripsi (e-statement Mandiri) ---
+msoffcrypto-tool==6.0.0
+cryptography==50.0.1
+cffi==2.1.1
+pycparser==3.0
+olefile==0.47
+
+# --- PDF e-statement bank (BCA/BNI) ---
+pdfplumber==0.11.10
+pdfminer.six==20260107
+pypdfium2==5.13.0
+pillow==12.3.0
+charset-normalizer==3.5.1
+
+# --- fuzzy nama (reconciliation/engine.py; ambang 85 & 60 keras di kode) ---
+RapidFuzz==3.14.6
+
+# --- parsing tanggal ---
+python-dateutil==2.9.0.post0
+six==1.17.0
+
+# --- geo-block (murni Python, tanpa dependensi OS) ---
+geoip2fast==1.2.2
+
+# --- deployment ---
+gunicorn==26.2.0
+whitenoise==6.12.0
+psycopg2-binary==2.9.12
+dj-database-url==3.1.2
+
+# --- MATI: nol impor di seluruh repo (diverifikasi), tapi TERPASANG di
+# produksi. Dipatok apa adanya supaya lingkungan VPS identik dengan yang
+# sekarang berjalan. Membuangnya = commit terpisah, sesudah migrasi stabil.
+pandas==3.0.5
+numpy==2.4.6
