@@ -371,6 +371,17 @@ railway ssh -s Postgres "psql -U postgres -d railway -Atc \"
 # SEMUA harus true. Ada false → REINDEX INDEX CONCURRENTLY di PRODUKSI dulu,
 # karena pg_dump membuangnya dan `migrate` tak akan pernah membangunnya ulang.
 
+# A2. Uji kecepatan disk — `random_page_cost=1.1` mengasumsikan penyimpanan
+#     mendekati-NVMe. Contabo Cloud VPS memakai tingkat SSD BERSAMA, bukan NVMe
+#     khusus. Asuransi murah; konsekuensinya tetap tertangkap GATE B + EXPLAIN.
+sudo apt install -y fio
+fio --name=acak --filename=/var/lib/postgresql/ujidisk --size=1G --bs=8k \
+    --rw=randread --iodepth=16 --ioengine=libaio --direct=1 --runtime=30 --time_based \
+    --group_reporting | grep -E 'IOPS|lat .*avg'
+sudo rm -f /var/lib/postgresql/ujidisk
+# IOPS acak jauh di bawah ±10rb atau latensi >1ms → catat, dan pertimbangkan
+# random_page_cost lebih tinggi SEBAGAI PERUBAHAN TERPISAH pasca-cutover.
+
 # B. Profil RESTORE sementara (di VPS)
 sudo -u postgres psql <<'SQL'
 ALTER SYSTEM SET maintenance_work_mem='8GB';
@@ -388,7 +399,13 @@ sudo systemctl restart postgresql@18-main
 #    8-bit clean (skrip pun harus di-base64), tidak bisa dilanjutkan bila putus, dan
 #    `-Fc` ke pipe = output tak seekable → offset TOC tak ditulis balik → `-j` sia-sia.
 tmux new -s migrasi
-export PROD_URL='postgresql://postgres:<PW>@<railway-tcp-proxy>:<port>/railway?sslmode=require'
+# Password TIDAK di argv/URL — `pg_dump -d "$PROD_URL"` membuatnya terlihat di
+# /proc/<pid>/cmdline, persis yang dilarang di FASE 1.4.
+umask 077; cat > ~/.pgpass <<'PGP'
+<railway-tcp-proxy>:<port>:railway:postgres:<PW>
+PGP
+chmod 600 ~/.pgpass
+export PROD_URL='postgresql://postgres@<railway-tcp-proxy>:<port>/railway?sslmode=require'
 sudo install -d -o toa -g toa /var/backups/toa
 STAMP=$(date +%F); DUMPDIR=/var/backups/toa/dump-$STAMP
 
@@ -514,14 +531,23 @@ sudo chown root:toa /etc/toa.env && sudo chmod 640 /etc/toa.env
 ```
 
 ```bash
-# Perintah manajemen — SELALU muat env dulu (J1)
-set -a; . /etc/toa.env; set +a
-sudo -u toa .venv/bin/python manage.py collectstatic --noinput
-sudo -u toa .venv/bin/python manage.py migrate --noinput
-sudo -u toa .venv/bin/python manage.py periksa_index
-test ! -f /opt/toa/db.sqlite3 || { echo "FATAL: SQLite terbuat — env tidak termuat"; exit 1; }
-sudo -u toa .venv/bin/python manage.py dbshell -c \
-  "select count(*) from transactions_transaction;"    # harus ±9,37 juta
+# Perintah manajemen — env WAJIB dimuat DI DALAM batas sudo.
+#
+# ⚠ `set -a; . /etc/toa.env; set +a` di shell pemanggil LALU `sudo -u toa …`
+#   TIDAK BEKERJA: sudoers Ubuntu memuat `Defaults env_reset`, sehingga
+#   DATABASE_URL dan DEBUG dibuang tepat sebelum Python berjalan — dan Django
+#   jatuh ke SQLite. Itu J1 yang lahir kembali di dalam perbaikan J1-nya sendiri.
+toa_manage() {
+  sudo -u toa bash -c 'set -a; . /etc/toa.env; set +a; cd /opt/toa && exec .venv/bin/python manage.py "$@"' _ "$@"
+}
+toa_manage collectstatic --noinput
+toa_manage migrate --noinput
+toa_manage periksa_index
+
+# Tripwire J1 — murah, dan satu-satunya bukti env benar-benar sampai.
+test ! -f /opt/toa/db.sqlite3 || { echo "FATAL: SQLite terbuat — env TIDAK termuat"; exit 1; }
+sudo -u toa bash -c 'set -a; . /etc/toa.env; set +a; psql "$DATABASE_URL" -Atc \
+  "select count(*) from transactions_transaction;"'    # harus ±9,37 juta
 ```
 
 ### `/etc/systemd/system/toa.service`
@@ -567,8 +593,9 @@ WantedBy=multi-user.target
 
 ```nginx
 server {
-    listen 443 ssl;
-    http2 on;
+    # Bentuk gabungan, BUKAN `http2 on;` — directive itu baru ada di nginx
+    # 1.25.1 sedangkan Ubuntu 24.04 mengirim 1.24, jadi `nginx -t` akan gagal.
+    listen 443 ssl http2;
     server_name auditor.wolfgang-77.com audit.wolfgang-77.com staging.wolfgang-77.com;
 
     # Cloudflare Origin CA — BUKAN Let's Encrypt (J10). Port 80 tak dipakai origin.
@@ -697,10 +724,14 @@ set -Eeuo pipefail
 cd /opt/toa
 sudo -u toa git fetch origin && sudo -u toa git merge --ff-only origin/main
 sudo -u toa .venv/bin/pip install -r requirements.txt
-set -a; . /etc/toa.env; set +a
-sudo -u toa .venv/bin/python manage.py migrate --noinput
-sudo -u toa .venv/bin/python manage.py collectstatic --noinput
-sudo -u toa .venv/bin/python manage.py periksa_index
+# env dimuat DI DALAM sudo — `Defaults env_reset` membuang variabel yang
+# diekspor di luar, dan `migrate` lalu diam-diam mengenai SQLite baru sementara
+# service tetap melayani Postgres: deploy separuh jadi, tanpa satu pun error.
+m() { sudo -u toa bash -c 'set -a; . /etc/toa.env; set +a; cd /opt/toa && exec .venv/bin/python manage.py "$@"' _ "$@"; }
+m migrate --noinput
+m collectstatic --noinput
+m periksa_index
+test ! -f /opt/toa/db.sqlite3 || { echo "FATAL: SQLite terbuat — deploy DIHENTIKAN"; exit 1; }
 systemctl restart toa
 EOF
 sudo chmod 755 /usr/local/bin/toa-deploy
