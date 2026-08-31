@@ -542,6 +542,103 @@ class MutasiBankSesamaCmTests(MutasiBankBase):
         self.assertNotContains(r_cm, "MUHAMMAD ILHAM")
         self.assertNotContains(r_cm, "MISBAHUDDM")
 
+    def test_oke_qris_elite_member_rapri_handri_bukan_sesama_cm(self):
+        """OKE 30-08: DP `QRIS ELITE RAPRI…` / WD `…HANDRI` jangan Sesama CM.
+
+        Akar: (1) guard gateway cuma prefix `QRISELITE` tanpa spasi; (2) token
+        pendek CM `APRI` ⊂ merchant `RAPRI`, `ANDRI` ⊂ cp `HANDRI`.
+        Pair bank benar ke APRI YANI / ANDRI FIRMANSYAH tetap CM.
+        """
+        from web.sesama_cm import (
+            _is_gateway_member_money,
+            _varian,
+            _varian_blob,
+            clear_cm_cache,
+            q_sesama_cm,
+            tandai_sesama_cm,
+        )
+        br = SourceType.objects.get_or_create(key="bracket", defaults={"name": "Bracket"})[0]
+        fr_up = Upload.objects.create(source_type=br, toko=self.lbs, original_name="fr.xlsx")
+        Transaction.objects.create(
+            upload=fr_up, source_type=br, toko=self.lbs, jenis="lainnya",
+            amount=Decimal("0"), money_delta=Decimal("0"),
+            occurred_at=datetime(2026, 8, 30, 10, 0),
+            raw={
+                "Kategori": "Sesama CM",
+                "Bank": "BANK BCA | APRI YANI | WITHDRAW",
+                "No. Rek Bank Member": "BCA 2941494112",
+            },
+            row_hash=f"fr-apri-{next(_seq)}",
+        )
+        Transaction.objects.create(
+            upload=fr_up, source_type=br, toko=self.lbs, jenis="lainnya",
+            amount=Decimal("0"), money_delta=Decimal("0"),
+            occurred_at=datetime(2026, 8, 30, 10, 1),
+            raw={
+                "Kategori": "Sesama CM",
+                "Bank": "BANK BNI | ANDRI FIRMANSYAH | WITHDRAW",
+                "No. Rek Bank Member": "BNI 2085997261",
+            },
+            row_hash=f"fr-andri-{next(_seq)}",
+        )
+        gw = SourceType.objects.get_or_create(key="gateway", defaults={"name": "Gateway"})[0]
+        up_dp = self._up(gw, "30-08-2026 K25 DP QRIS ELITE.csv", owner="ELITE")
+        up_wd = self._up(gw, "30-08-2026 K25 WD QRIS ELITE.csv", owner="ELITE")
+        t_rapri = self._tx(
+            up_dp, gw, jenis="depo", counterparty="",
+            description="QRIS ELITE RAPRI DIGITECH APD",
+            amount="200000", dt=datetime(2026, 8, 30, 13, 7),
+        )
+        t_handri = self._tx(
+            up_wd, gw, jenis="wd", counterparty="HANDRI",
+            description="WD QRIS ELITE SEABANK",
+            amount="-1000000", dt=datetime(2026, 8, 30, 9, 20),
+        )
+        # pair bank benar tetap Sesama CM
+        up_b = self._up(self.bank, "30-08-2026 K25 WD BCA LUSIYATI.CSV", owner="LUSIYATI")
+        t_apri_ok = self._tx(
+            up_b, self.bank, jenis="depo", counterparty="APRI YANI",
+            description="TRSF E-BANKING CR 3008/FTSCY/WS95271        2000000.00APRI YANI",
+            amount="2000000", dt=datetime(2026, 8, 30, 12, 0),
+        )
+        t_andri_ok = self._tx(
+            up_b, self.bank, jenis="wd", counterparty="ANDRI FIRMANSYAH",
+            description="BI-FAST DB TRANSFER   KE 008 ANDRI FIRMANSYAH  MyBCA",
+            amount="-1500000", dt=datetime(2026, 8, 30, 12, 1),
+        )
+        clear_cm_cache()
+        self.assertTrue(_is_gateway_member_money("QRIS ELITE RAPRI DIGITECH APD"))
+        self.assertTrue(_is_gateway_member_money("WD QRIS ELITE SEABANK"))
+        self.assertFalse(_is_gateway_member_money("QRISELITE TAMPUNG 119 ORANG"))
+        self.assertFalse(_is_gateway_member_money("QRIS ELITE TAMPUNG 119 ORANG"))
+        blob_apri = [v.upper() for v in _varian_blob("APRI YANI")]
+        self.assertNotIn("APRI", blob_apri)
+        self.assertIn("APRI YANI", blob_apri)
+        self.assertIn("APRI", [v.upper() for v in _varian("APRI YANI")])  # owner only
+        for t in (t_rapri, t_handri):
+            self.assertFalse(
+                Transaction.objects.filter(id=t.id).filter(q_sesama_cm(self.lbs.id)).exists(),
+                msg=t.description,
+            )
+        self.assertTrue(
+            Transaction.objects.filter(id=t_apri_ok.id).filter(q_sesama_cm(self.lbs.id)).exists()
+        )
+        self.assertTrue(
+            Transaction.objects.filter(id=t_andri_ok.id).filter(q_sesama_cm(self.lbs.id)).exists()
+        )
+        rows = [t_rapri, t_handri, t_apri_ok, t_andri_ok]
+        tandai_sesama_cm(rows, self.lbs.id)
+        self.assertFalse(t_rapri.is_sesama_cm)
+        self.assertFalse(t_handri.is_sesama_cm)
+        self.assertTrue(t_apri_ok.is_sesama_cm)
+        self.assertTrue(t_andri_ok.is_sesama_cm)
+        r_cm = self.client.get(reverse("bank_mutations"), {"flow": "cm", "source": "gateway"})
+        self.assertNotContains(r_cm, "RAPRI DIGITECH")
+        self.assertNotContains(r_cm, "HANDRI")
+        r_cm_b = self.client.get(reverse("bank_mutations"), {"flow": "cm", "source": "bank"})
+        self.assertContains(r_cm_b, "APRI YANI")
+        self.assertContains(r_cm_b, "ANDRI FIRMANSYAH")
+
 
 class MutasiBankPhoneLookupTests(MutasiBankBase):
     def test_baris_ewallet_tampilkan_hp_dan_nama_panel(self):

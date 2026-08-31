@@ -103,8 +103,14 @@ def _digit_rek(raw: str) -> str:
     return d
 
 
-def _varian(nama: str) -> list[str]:
-    """Varian string untuk icontains: ber-spasi + tanpa spasi (Kikisuasanto)."""
+def _varian_blob(nama: str) -> list[str]:
+    """Varian untuk match di counterparty/deskripsi — **tanpa** token pertama pendek.
+
+    Token pertama (`APRI`, `ANDRI`) dulu ikut `_varian` + `icontains` blob →
+    false Sesama CM: OKE 30-08 merchant `RAPRI` ⊂ token `APRI` (CM APRI YANI),
+    cp `HANDRI` ⊂ token `ANDRI` (CM ANDRI FIRMANSYAH). Nama lengkap /
+    compact (`APRIYANI`, `ANDRIFIRMANSYAH`) tetap cukup untuk pair bank benar.
+    """
     n = " ".join(str(nama or "").split()).strip()
     if not n:
         return []
@@ -119,8 +125,20 @@ def _varian(nama: str) -> list[str]:
             continue
         seen.add(key)
         out.append(v)
-    # token pertama ≥4 (owner file sering cuma "SERVA" / "NASRUL") —
-    # jangan nama depan umum (MUHAMMAD) agar WD member beda orang tidak tertelan.
+    return out
+
+
+def _varian(nama: str) -> list[str]:
+    """Varian icontains: blob-safe + token pertama untuk **owner** self-exclude.
+
+    Token pertama (≥4, bukan noise/nama-depan-umum) hanya aman di owner file
+    (`SERVA` / `NASRUL`), bukan di cp/desc member (lihat `_varian_blob`).
+    """
+    n = " ".join(str(nama or "").split()).strip()
+    if not n:
+        return []
+    out = list(_varian_blob(n))
+    seen = {v.lower() for v in out}
     first = n.split()[0] if n.split() else ""
     fu = first.upper()
     if (
@@ -282,9 +300,14 @@ def nama_cm_toko(toko_id: int) -> list[str]:
     return list(identitas_cm_toko(toko_id)[0])
 
 
+def _norm_elite_label(desc: str) -> str:
+    """Samakan `QRIS ELITE` (spasi, parser OKE) dengan `QRISELITE` (tanpa spasi)."""
+    return (desc or "").upper().replace("QRIS ELITE", "QRISELITE")
+
+
 def _is_tampung_qr_desc(desc: str) -> bool:
     """True bila deskripsi baris mutasi tampung Flyer/Elite."""
-    d = (desc or "").upper()
+    d = _norm_elite_label(desc)
     return "QRFLYER TAMPUNG" in d or "QRISELITE TAMPUNG" in d
 
 
@@ -294,12 +317,22 @@ def _is_gateway_member_money(desc: str) -> bool:
     Sesama CM untuk jalur gateway hanya mutasi **tampung** (payout float).
     DP QRIS HOKI owner=HOKI dulu tertelan karena `HOKI` ⊂ `TP QRISHOKI UNITED`
     (BTS 23-08-2026).
+
+    OKE 30-08: desc parser = `QRIS ELITE RAPRI…` / `WD QRIS ELITE SEABANK`
+    (ada spasi + prefix WD) — dulu cuma `QRISELITE` exact-prefix → lolos guard.
     """
-    d = (desc or "").strip().upper()
-    if not d:
+    raw = (desc or "").strip().upper()
+    if not raw:
         return False
-    if _is_tampung_qr_desc(d):
+    if _is_tampung_qr_desc(raw):
         return False
+    d = _norm_elite_label(raw)
+    # "WD QRIS ELITE …" / "DP QRISELITE …" → cek setelah buang arah
+    d_check = d
+    for lead in ("WD ", "DP ", "WITHDRAW ", "DEPOSIT "):
+        if d_check.startswith(lead):
+            d_check = d_check[len(lead):].lstrip()
+            break
     prefixes = (
         "QHOKI",
         "QRFLYER",
@@ -313,7 +346,7 @@ def _is_gateway_member_money(desc: str) -> bool:
         "QRIS HOKI",
         "QRISHOKI",
     )
-    return any(d.startswith(p) for p in prefixes)
+    return any(d_check.startswith(p) or d.startswith(p) for p in prefixes)
 
 
 def _is_bank_dp_upload(upload) -> bool:
@@ -354,6 +387,15 @@ def _q_bukan_bank_dp_upload(toko_id: int) -> Q:
 def _q_bukan_gateway_member() -> Q:
     """ORM: kecualikan DP/WD member gateway (tetap izinkan tampung)."""
     # Tampung lolos lewat cabang T terpisah; di sini blok member-only.
+    # Elite: `QRISELITE` dan `QRIS ELITE` (+ prefix WD/DP) — OKE parser pakai spasi.
+    elite_member = (
+        Q(description__istartswith="QRISELITE")
+        | Q(description__istartswith="QRIS ELITE")
+        | Q(description__istartswith="WD QRISELITE")
+        | Q(description__istartswith="WD QRIS ELITE")
+        | Q(description__istartswith="DP QRISELITE")
+        | Q(description__istartswith="DP QRIS ELITE")
+    ) & ~Q(description__icontains="TAMPUNG")
     blok = (
         Q(description__istartswith="QHOKI")
         | Q(description__istartswith="NXPAY")
@@ -366,10 +408,7 @@ def _q_bukan_gateway_member() -> Q:
             Q(description__istartswith="QRFLYER")
             & ~Q(description__icontains="TAMPUNG")
         )
-        | (
-            Q(description__istartswith="QRISELITE")
-            & ~Q(description__icontains="TAMPUNG")
-        )
+        | elite_member
     )
     return ~blok
 
@@ -392,6 +431,7 @@ def q_sesama_cm(toko_id: int) -> Q:
     total |= (
         Q(description__icontains="QRFLYER TAMPUNG")
         | Q(description__icontains="QRISELITE TAMPUNG")
+        | Q(description__icontains="QRIS ELITE TAMPUNG")
     )
     any_branch = True
 
@@ -402,19 +442,22 @@ def q_sesama_cm(toko_id: int) -> Q:
     bukan_bank_dp = _q_bukan_bank_dp_upload(toko_id)
 
     for nama in names:
-        vars_ = _varian(nama)
-        if not vars_:
+        blob_vars = _varian_blob(nama)
+        owner_vars = _varian(nama)
+        if not blob_vars and not owner_vars:
             continue
         hit = Q()
         self_owner = Q()
-        for v in vars_:
+        for v in blob_vars:
             hit |= Q(counterparty__icontains=v) | Q(description__icontains=v)
+        for v in owner_vars:
             self_owner |= Q(upload__owner_name__icontains=v)
         first = (nama.split() or [""])[0]
-        if len(first) >= 4 and first.upper() not in _NOISE:
+        if len(first) >= 4 and first.upper() not in _NOISE and first.upper() not in _NAMA_DEPAN_UMUM:
             self_owner |= Q(upload__owner_name__icontains=first)
-        total |= hit & ~self_owner & bukan_gw_member & bukan_bank_dp
-        any_branch = True
+        if hit:
+            total |= hit & ~self_owner & bukan_gw_member & bukan_bank_dp
+            any_branch = True
 
     for d in reks:
         total |= (
@@ -455,9 +498,10 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
 
     prepared = []
     for nama in names:
-        keys = {v.lower() for v in _varian(nama)}
+        keys_blob = {v.lower() for v in _varian_blob(nama)}
+        keys_owner = {v.lower() for v in _varian(nama)}
         compact = _NON_ALNUM.sub("", nama).upper()
-        prepared.append((nama, keys, compact))
+        prepared.append((nama, keys_blob, keys_owner, compact))
 
     for r in rows:
         # Tampung QR dulu — tidak butuh daftar CM FR
@@ -493,15 +537,16 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
         blob_digits = _DIGITS.sub("", blob)
 
         hit = False
-        for nama, keys, compact in prepared:
+        for nama, keys_blob, keys_owner, compact in prepared:
             # self: owner = CM ini (termasuk SERVA vs SERVA MUHAMAD…)
             if owner_raw and cm_names_match(owner_raw, nama):
                 continue
-            if owner_l and any(k in owner_l for k in keys):
+            if owner_l and any(k in owner_l for k in keys_owner):
                 continue
             if owner_c and compact and (compact in owner_c or owner_c in compact):
                 continue
-            if any(k in blob_l for k in keys) or (compact and compact in blob_c):
+            # blob: hanya nama lengkap/compact — jangan token pendek APRI⊂RAPRI
+            if any(k in blob_l for k in keys_blob) or (compact and compact in blob_c):
                 hit = True
                 break
             # fuzzy: counterparty ≈ nama CM lain
@@ -524,7 +569,7 @@ def tandai_sesama_cm(rows, toko_id: int) -> None:
             except Exception:
                 is_credit = False
             if is_credit and not str(r.counterparty or "").strip() and owner_raw:
-                for nama, _keys, _c in prepared:
+                for nama, _kb, _ko, _c in prepared:
                     if cm_names_match(owner_raw, nama):
                         hit = True
                         break
