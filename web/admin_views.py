@@ -7,17 +7,17 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 
 from core.audit import catat
 from core.models import AuditLog
 from reconciliation.engine import revert_late_settlements
-from reconciliation.models import MatchResult, ReconBatch
+from reconciliation.models import MatchResult, ReconBatch, ReviewAction
 from sources.models import Toko, Upload
 from transactions.models import Transaction
-from web.access import admin_required
+from web.access import admin_required, is_admin, role_required, tokos_for
 from web.models import AllowedIP
 from web.views import _active_toko, _parse_date
 
@@ -377,20 +377,84 @@ def bulk_delete_uploads(request):
     return redirect("upload")
 
 
-@admin_required
+def _hitung_review_batch(batch):
+    """Jumlah keputusan review manual yang bergantung pada batch ini (M3).
+
+    Dua jejak: (a) ReviewAction pada hasil di dalam batch, (b) MatchResult di
+    batch LAIN yang di-override manual dan `resolved_by_batch` menunjuk ke sini
+    (override mengunci baris kredit ke batch asalnya — lihat CLAUDE.md).
+    """
+    n_review = ReviewAction.objects.filter(result__run__batch=batch).count()
+    n_override = MatchResult.objects.filter(
+        resolved_by_batch=batch, reason_code="manual_override"
+    ).count()
+    return n_review, n_override
+
+
+def _batch_lebih_baru_ada(batch):
+    """True bila ada batch lain (toko sama) yang lebih baru dari batch ini (M4).
+
+    Menghapus batch non-terakhir membebaskan baris kredit sementara pasangan
+    uangnya sudah dikonsumsi batch berikutnya — rerun menghasilkan angka
+    berbeda tanpa error. Batch tanpa recon_date dibandingkan lewat id.
+    """
+    qs = ReconBatch.objects.filter(toko=batch.toko).exclude(pk=batch.pk)
+    if batch.recon_date:
+        return qs.filter(recon_date__gt=batch.recon_date).exists()
+    return qs.filter(id__gt=batch.id).exists()
+
+
+def _tolak_hapus_batch(request, batch, no):
+    """Pesan penolakan guard supervisor untuk satu batch — None bila lolos.
+
+    Admin bebas dari kedua guard (dia yang membereskan kondisi khusus);
+    supervisor hanya boleh menghapus batch TERAKHIR tanpa review manual.
+    """
+    if is_admin(request.user):
+        return None
+    n_review, n_override = _hitung_review_batch(batch)
+    if n_review or n_override:
+        return (
+            f"Batch #{no} tidak bisa dihapus — ada {n_review + n_override} "
+            "keputusan review manual di dalamnya. Minta admin untuk menghapusnya."
+        )
+    if _batch_lebih_baru_ada(batch):
+        return (
+            f"Batch #{no} bukan batch terakhir toko ini — menghapusnya membuat "
+            "hasil rekonsiliasi berikutnya tidak konsisten. Minta admin, atau "
+            "hapus mulai dari batch terbaru."
+        )
+    return None
+
+
+@role_required("admin", "supervisor")
 def delete_batch(request, pk):
-    batch = get_object_or_404(ReconBatch, pk=pk)
+    # Scope toko (M2): supervisor/admin memang melihat semua toko, tapi guard
+    # struktural ini melindungi bila kelak ada peran lain yang lolos decorator.
+    batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
     if request.method == "POST":
         no = _batch_no(batch)
+        tolak = _tolak_hapus_batch(request, batch, no)
+        if tolak:
+            messages.error(request, tolak)
+            return redirect("reconcile")
         n_runs = batch.runs.count()
         toko = batch.toko
+        recon_date = batch.recon_date.isoformat() if batch.recon_date else ""
+        buckets = (batch.summary or {}).get("buckets", {})
+        n_review, n_override = _hitung_review_batch(batch)
         with transaction.atomic():
             # Batalkan dulu settle terlambat yang dilakukan batch ini di batch lain,
             # baru hapus — baris kredit terkait kembali "menunggu settlement".
             n_reverted = revert_late_settlements(batch)
             batch.delete()
+        # M5: snapshot dicatat SEBELUM data hilang dari memori — jejak audit
+        # harus bisa menjawab "batch tanggal berapa, isinya apa" tanpa batch-nya.
         catat(request.user, "hapus_batch", f"Batch #{no}", toko=toko,
-              batch_pk=pk, n_runs=n_runs)
+              batch_pk=pk, n_runs=n_runs, recon_date=recon_date,
+              cocok=buckets.get("cocok"), tinjau=buckets.get("perlu_tinjau"),
+              tidak_cocok=buckets.get("tidak_cocok"),
+              n_review=n_review + n_override)
         msg = f"Batch #{no} dihapus — {n_runs} run ikut terhapus. Transaksi tetap utuh."
         if n_reverted:
             msg += f" {n_reverted} settle terlambat dikembalikan ke tidak cocok."
@@ -398,31 +462,45 @@ def delete_batch(request, pk):
     return redirect("reconcile")
 
 
-@admin_required
+@role_required("admin", "supervisor")
 def bulk_delete_batches(request):
     """Hapus banyak batch sekaligus dari Riwayat Batch (checkbox).
 
-    Pola sama bulk_delete_uploads: admin only, dibatasi toko aktif, transaksi
-    tetap utuh, settle terlambat di-revert per batch.
+    Pola sama bulk_delete_uploads: admin + supervisor (guard tambahan utk
+    supervisor), dibatasi toko aktif, transaksi tetap utuh, settle terlambat
+    di-revert per batch.
     """
     if request.method == "POST":
         active = _active_toko(request)
+        if active is None:
+            # FAIL-CLOSED (M1): tanpa toko aktif filter toko tidak bisa
+            # dipasang — melanjutkan berarti penghapusan lintas-toko.
+            messages.error(request, "Toko aktif tidak ditemukan — tidak ada batch yang dihapus.")
+            return redirect("reconcile")
         ids = [i for i in request.POST.getlist("batch_ids") if str(i).isdecimal()]
-        qs = ReconBatch.objects.filter(pk__in=ids).select_related("toko")
-        if active is not None:
-            qs = qs.filter(toko=active)
-        batches = list(qs.order_by("id"))
+        qs = ReconBatch.objects.filter(pk__in=ids, toko=active).select_related("toko")
+        # Urut TERBARU dulu: guard "hanya batch terakhir" (M4) dievaluasi di
+        # dalam transaksi yang sama, jadi ekor berurutan (23 lalu 22) bisa
+        # terhapus bersih — urutan lama-dulu menolak 22 karena 23 masih ada.
+        batches = list(qs.order_by(F("recon_date").desc(nulls_last=True), "-id"))
         n_batch = n_runs = n_reverted = 0
         labels = []
+        dilewati = []
         with transaction.atomic():
             for batch in batches:
                 no = _batch_no(batch)
+                tolak = _tolak_hapus_batch(request, batch, no)
+                if tolak:
+                    dilewati.append(tolak)
+                    continue
                 n_runs += batch.runs.count()
                 n_reverted += revert_late_settlements(batch)
                 tgl = batch.recon_date.strftime("%d/%m/%Y") if batch.recon_date else "—"
                 labels.append(f"#{no} ({tgl})")
                 batch.delete()
                 n_batch += 1
+        if dilewati:
+            messages.error(request, " ".join(dilewati))
         if n_batch:
             catat(
                 request.user, "hapus_batch_massal", f"{n_batch} batch",

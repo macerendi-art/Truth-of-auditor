@@ -45,7 +45,7 @@ from sources.models import SourceType, Upload
 from sources.parsers.banks import NBMB_RE
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
-from web.access import SEMUA_TOKO, admin_required, is_admin, mode_semua, tokos_for
+from web.access import SEMUA_TOKO, admin_required, is_admin, mode_semua, role_required, tokos_for
 from web.biaya import rincian_biaya as hitung_rincian_biaya
 from web.bonus import rekonsiliasi_bonus as hitung_rekonsiliasi_bonus
 from web.breakdown import (
@@ -2481,15 +2481,21 @@ def _hutang_parse_nilai(mentah):
     return nilai
 
 
-@admin_required
+@role_required("admin", "supervisor")
 @require_POST
 def hutang_manual_simpan(request):
-    """Simpan/hapus override total Hutang/Piutang bulanan (admin only).
+    """Simpan/hapus override total Hutang/Piutang bulanan.
 
-    Satu POST bisa mengisi hutang dan/atau piutang. `hapus=1` menghapus kedua
-    field bulan itu. Redirect kembali ke halaman dengan rentang bulan penuh
-    supaya overlay langsung terlihat.
+    Simpan = admin only; HAPUS (`hapus=1`) boleh juga supervisor (keputusan
+    pemilik 2026-09: supervisor memegang hak hapus). Satu POST bisa mengisi
+    hutang dan/atau piutang. `hapus=1` menghapus kedua field bulan itu.
+    Redirect kembali ke halaman dengan rentang bulan penuh supaya overlay
+    langsung terlihat.
     """
+    if not request.POST.get("hapus") and not is_admin(request.user):
+        # Supervisor hanya mendapat cabang hapus — menulis override tetap admin.
+        messages.error(request, "Menyimpan override manual khusus admin.")
+        return redirect("hutang_piutang")
     active = _active_toko(request)
     if active is None:
         messages.error(request, "Pilih satu toko dulu (bukan mode Semua Toko).")

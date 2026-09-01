@@ -119,6 +119,33 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.22.0",
+        tanggal=_dt.date(2026, 9, 1),
+        nama="Supervisor Bisa Menghapus Batch — dengan Pagar Pengaman",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**Supervisor kini boleh menghapus batch rekonsiliasi** (tombol "
+            "Hapus di Riwayat Batch, hapus massal, dan halaman detail batch) "
+            "— tanpa harus menunggu admin. Menu kelola toko, pengguna, dan "
+            "allowlist IP tetap khusus admin, begitu pula menghapus berkas "
+            "unggahan.",
+            "**Dua pagar pengaman menjaga angka tetap konsisten.** Supervisor "
+            "hanya bisa menghapus batch TERAKHIR sebuah toko (menghapus batch "
+            "di tengah membuat hasil hari berikutnya tak bisa direproduksi), "
+            "dan batch yang memuat keputusan review manual ditolak dengan "
+            "pesan jelas — hanya admin yang boleh membatalkan jejak review.",
+            "**Jejak audit penghapusan batch kini lebih kaya.** Sebelum batch "
+            "hilang, log mencatat tanggal rekonsiliasinya, ringkasan hasil "
+            "(cocok/tinjau/tidak cocok), dan jumlah review manual di "
+            "dalamnya — sehingga pertanyaan \"batch apa yang dihapus dan apa "
+            "isinya\" selalu bisa dijawab.",
+            "**Hapus massal batch dibuat gagal-aman**: bila toko aktif tidak "
+            "bisa dipastikan, tidak ada satu batch pun yang dihapus — "
+            "sebelumnya kondisi langka ini bisa menghapus lintas toko.",
+        ),
+    ),
+    Rilis(
         versi="1.21.0",
         tanggal=_dt.date(2026, 8, 29),
         nama="Withdraw QRIS ELITE Bisa Diunggah",

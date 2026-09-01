@@ -3,11 +3,19 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.21.0** · 38 rilis (1 besar, 21 fitur, 12 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.22.0** · 39 rilis (1 besar, 22 fitur, 12 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.22.0 — Supervisor Bisa Menghapus Batch — dengan Pagar Pengaman
+*Rilis fitur · 1 September 2026*
+
+- **Supervisor kini boleh menghapus batch rekonsiliasi** (tombol Hapus di Riwayat Batch, hapus massal, dan halaman detail batch) — tanpa harus menunggu admin. Menu kelola toko, pengguna, dan allowlist IP tetap khusus admin, begitu pula menghapus berkas unggahan.
+- **Dua pagar pengaman menjaga angka tetap konsisten.** Supervisor hanya bisa menghapus batch TERAKHIR sebuah toko (menghapus batch di tengah membuat hasil hari berikutnya tak bisa direproduksi), dan batch yang memuat keputusan review manual ditolak dengan pesan jelas — hanya admin yang boleh membatalkan jejak review.
+- **Jejak audit penghapusan batch kini lebih kaya.** Sebelum batch hilang, log mencatat tanggal rekonsiliasinya, ringkasan hasil (cocok/tinjau/tidak cocok), dan jumlah review manual di dalamnya — sehingga pertanyaan "batch apa yang dihapus dan apa isinya" selalu bisa dijawab.
+- **Hapus massal batch dibuat gagal-aman**: bila toko aktif tidak bisa dipastikan, tidak ada satu batch pun yang dihapus — sebelumnya kondisi langka ini bisa menghapus lintas toko.
 
 ## v1.21.0 — Withdraw QRIS ELITE Bisa Diunggah
 *Rilis fitur · 29 Agustus 2026*

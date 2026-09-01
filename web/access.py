@@ -64,3 +64,39 @@ def admin_required(view):
         return view(request, *args, **kwargs)
 
     return wrapper
+
+
+def boleh_hapus_batch(user) -> bool:
+    """True bila user boleh menghapus batch rekonsiliasi (admin + supervisor).
+
+    Keputusan pemilik 2026-09: supervisor ikut memegang hak hapus batch —
+    dengan guard tambahan di view (hanya batch terakhir, tidak ada review
+    manual). JANGAN dipakai untuk menu /kelola/ — itu tetap `is_admin`.
+    """
+    return bool(
+        user.is_authenticated
+        and (is_admin(user) or getattr(user, "role", "") == "supervisor")
+    )
+
+
+def role_required(*roles):
+    """Decorator gerbang peran, pola sama `admin_required`.
+
+    `role_required("admin", "supervisor")` meloloskan superuser dan user yang
+    `role`-nya ada di daftar; selain itu ditolak dengan pesan + redirect
+    dashboard. Dipakai view hapus batch yang kini dibuka untuk supervisor.
+    """
+
+    def decorator(view):
+        @wraps(view)
+        @login_required
+        def wrapper(request, *args, **kwargs):
+            u = request.user
+            if not (u.is_superuser or getattr(u, "role", "") in roles):
+                messages.error(request, "Akses ditolak — peran Anda tidak berwenang.")
+                return redirect("dashboard")
+            return view(request, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
