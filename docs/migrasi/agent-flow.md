@@ -29,8 +29,8 @@ stateDiagram-v2
         Tahan: lgk 6-8 · 06:40 pastikan tak ada ReconBatch berjalan · 06:45 aktifkan WAF pemeliharaan lalu verifikasi dari luar dan dari IP operator · 06:50 hentikan service web Railway
         Beku: lgk 9 · 06:55 R1 ALTER DATABASE railway SET default_transaction_read_only=on plus pg_terminate_backend · catat pg_stat_user_tables dan max id SISI SUMBER
         Dump: lgk 10 · 07:00 cek indisvalid produksi J4, lalu pg_dump --format=directory --jobs=4 --snapshot --statistics --compress=zstd:3 DITARIK OLEH VPS di dalam tmux · est 30-90m
-        Restore: lgk 11 · 08:15 systemctl stop toa, DROP dan CREATE toa_new, pg_restore --jobs=8 --no-owner --no-privileges --no-comments --exit-on-error · est 60-120m
-        Vacuum: lgk 12 · 09:45 vacuumdb --analyze-in-stages --jobs=8 lalu vacuumdb --analyze · langkah SENDIRI, rencana melarang menggabungnya dengan restore · est 10-25m
+        Restore: lgk 11 · 08:15 systemctl stop toa, DROP dan CREATE toa_new, pg_restore --jobs=4 --no-owner --no-privileges --no-comments --exit-on-error · est 60-120m
+        Vacuum: lgk 12 · 09:45 vacuumdb --analyze-in-stages --jobs=4 lalu vacuumdb --analyze · langkah SENDIRI, rencana melarang menggabungnya dengan restore · est 10-25m
         GATE_A: lgk 13 · 10:10 DB_VPS=toa_new scripts/gerbang.sh banding IP-VPS final plus periksa_index · checksum wajib sama sampai sen · est 15m
         Tukar: lgk 14 · 10:25 ALTER DATABASE toa RENAME TO toa_fase3 lalu toa_new RENAME TO toa · set read-only · start toa · migrate · periksa_index · est 10m
         GATE_B: lgk 15 · 10:35 smoke test lokal lewat curl --resolve, lalu waktu dashboard dibanding patokan FASE 3 · est 10m
@@ -164,8 +164,8 @@ flowchart TD
 | 06:50 | 8 | Hentikan service web Railway | — | — |
 | 06:55 | 9 | **R1** beku level DB + `pg_terminate_backend`; catat watermark sumber | R1 | — |
 | 07:00 | 10 | Cek `indisvalid` (J4); dump ber-snapshot ditarik VPS · **30–90m** | — | **08:45 — dump belum selesai → ABORT** |
-| ~08:15 | 11 | `stop toa`; DROP/CREATE `toa_new`; restore `-j 8 --exit-on-error` · **60–120m** | — | — |
-| ~09:45 | 12 | `vacuumdb --analyze-in-stages -j 8` · **10–25m** | — | — |
+| ~08:15 | 11 | `stop toa`; DROP/CREATE `toa_new`; restore `-j 4 --exit-on-error` · **60–120m** | — | — |
+| ~09:45 | 12 | `vacuumdb --analyze-in-stages -j 4` · **10–25m** | — | — |
 | ~10:10 | 13 | `gerbang.sh banding <ip> final` + `periksa_index` · 15m | **GATE A** — checksum sama sampai sen | **11:00 — GATE A belum lulus → ABORT** |
 | ~10:25 | 14 | Rename `toa`→`toa_fase3`, `toa_new`→`toa`; set read-only; start; `migrate`; `periksa_index` · 10m | — | — |
 | ~10:35 | 15 | Smoke test lokal `curl --resolve`, waktu dashboard vs FASE 3 · 10m | **GATE B** | — |

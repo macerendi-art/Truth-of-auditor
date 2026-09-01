@@ -2,8 +2,10 @@
 
 **Disusun:** 31 Agustus 2026 · **Direvisi total:** 31 Agustus 2026 setelah 7 audit paralel
 **Ukuran mesin ditetapkan ulang:** 1 September 2026 setelah 8 riset paralel + 2 skeptik adversarial
-**Target:** Contabo **Cloud VPS 12** · 12 vCPU · 48 GB RAM · **400 GB + opsi 800 GB SSD** ·
-**Singapura** · Ubuntu 24.04 · **beli 1 bulan dulu**, prepay 12 bulan setelah gerbang node lulus
+**Target semula (rekomendasi):** Cloud VPS 12 · 12 vCPU · 48 GB · 400+800 GB SSD
+**MESIN YANG BENAR-BENAR DIBELI (01-09-2026):** Contabo **Cloud VPS 8 (2026)** · **8 vCPU ·
+24 GB RAM · 300 GB SSD** · Singapura (host 29421) · Ubuntu 24.04 · termin **1 bulan**
+· €24,25/bln · IP `217.216.39.105` · VNC `194.233.66.221:63089` · Auto Backup **belum aktif**
 
 > **Turun dari VPS 16 adalah hasil pengukuran, bukan penghematan.** Setelan Postgres FASE 1
 > SENGAJA tidak berubah satu pun — semuanya paritas produksi (`shared_buffers` 6GB,
@@ -73,6 +75,47 @@ railway ssh -s Postgres "psql -U postgres -d railway -Atc \"SELECT name||' = '||
 v2 menargetkan Cloud VPS 16. Itu pilihan aman **sebelum ada pengukuran**. Pengukurannya
 sekarang ada — 8 riset paralel + 2 skeptik adversarial — dan hasilnya membalik pilihan
 tiernya, bukan isi runbook-nya.
+
+### ⚠️ Mesin nyata ≠ mesin yang direkomendasikan — konsekuensinya dihitung, bukan ditaksir
+
+Yang dibeli adalah **Cloud VPS 8**, bukan VPS 12 + 800 GB. Dua sumbu meleset, dan keduanya
+punya akibat yang berbeda derajatnya.
+
+**CPU dan RAM: layak, tanpa drama.** Beban terukur produksi 0,23 core dan RAM rigid ±8 GB,
+jadi 8 vCPU tetap ±35× berlebih dan 24 GB tetap 3× di atas kebutuhan proses. 24 GB juga
+persis **batas bawah** yang ditetapkan analisis ("di bawah 24 GB tidak layak, karena
+`shared_buffers` 6 GB paritas harus diturunkan — dan itu berarti menyetel ulang database di
+tengah pemindahan mesin"). Paritas tetap utuh. Yang hilang bukan kapasitas melainkan
+**cadangan**: page cache tersedia ±16 GB atas DB 18 GB (cakupan ~89%, produksi hari ini 94%),
+jadi kinerja awal sebanding tetapi tidak ada ruang tumbuh.
+
+**Disk: inilah yang benar-benar meleset.** Pada laju terukur 11 GB/bln:
+
+| Disk | Maintenance berhenti mungkin | Disk mentok |
+|---|---|---|
+| **300 GB (terbeli)** | **bulan ~9** | bulan ~16 |
+| 500 GB (+ Storage Extension 200 GB) | bulan ~17 | bulan ~29 |
+| 800 GB (rekomendasi semula) | bulan ~29 | bulan ~48 |
+
+"Maintenance berhenti" bukan ketidaknyamanan: begitu `pg_repack`/`VACUUM FULL` dan uji-restore
+berdampingan tidak lagi muat, dua prosedur yang diwajibkan FASE 5 berhenti bisa dijalankan
+**sementara disknya sendiri masih terlihat lapang**. Itu kegagalan yang datang tanpa alarm.
+
+**Yang wajib dilakukan sebelum FASE 4 (cutover), bukan sesudahnya:** tambah **Storage
+Extension +200 GB** (±€2,45/bln, bisa dari Customer Panel di tengah kontrak, **tanpa reinstall
+dan tanpa ganti IP**) sehingga disk menjadi 500 GB. Biayanya menjadikan mesin ini ±€26,70/bln —
+masih jauh di bawah VPS 12 + 800 GB (€45,05), dan untuk beban yang sudah diukur itu
+proporsional. **FASE 0–3 boleh berjalan penuh di 300 GB**: puncak sementara saat restore
+percobaan hanya ±90 GB (`toa_fase3` 18 + `toa_new` 18 + direktori dump ±7 + WAL profil restore
++ OS/venv 15), jadi tidak ada alasan menunda pekerjaan sambil menunggu keputusan disk.
+
+**Penyesuaian teknis yang mengikat karena RAM 24 GB, bukan 48 GB:** profil restore FASE 2/4
+memakai **`pg_restore --jobs=4`**, bukan 8. Aritmetikanya: tiap job adalah sesi terpisah yang
+berhak atas `maintenance_work_mem` penuh, jadi 8 × 2 GB = 16 GB di atas `shared_buffers` 6 GB
+dan OS ±2 GB = **24 GB dari 24 GB** — nol margin, dan OOM killer menghentikan restore di
+tengah. Dengan `-j 4`: 8 GB, total 16 GB, sisa 8 GB untuk page cache. `vacuumdb` ikut turun ke
+`-j 4` (8 core). Konsekuensinya restore lebih lama — **ukur di FASE 2 dan pakai angka itu**,
+jangan angka dokumen.
 
 ### Vonis
 
@@ -510,12 +553,15 @@ sudo rm -f /var/lib/postgresql/ujidisk
 # random_page_cost lebih tinggi SEBAGAI PERUBAHAN TERPISAH pasca-cutover.
 
 # B. Profil RESTORE sementara (di VPS)
-# maintenance_work_mem 2GB (BUKAN 8GB) dan mpmw 2 (BUKAN 4) — ini CACAT LATEN v2:
-# `pg_restore --jobs=8` di bawah = 8 sesi terpisah, tiap CREATE INDEX berhak atas
-# maintenance_work_mem PENUH → plafon 8 x 8GB = 64 GB nominal, di atas shared_buffers
-# 6GB yang sudah residen. Itu melampaui RAM VPS 12 (48 GB) DAN menyamai seluruh RAM
-# VPS 16 — jadi angkanya sudah salah sebelum mesinnya diperkecil.
-# 8 x 2GB = 16 GB, dan restore justru LEBIH CEPAT: ~24 proses, bukan ~40 di 12 vCPU.
+# maintenance_work_mem 2GB (BUKAN 8GB) dan mpmw 2 (BUKAN 4) — ini CACAT LATEN v2.
+# `pg_restore --jobs=N` = N sesi terpisah, dan tiap CREATE INDEX berhak atas
+# maintenance_work_mem PENUH. Plafonnya N x mwm, DI ATAS shared_buffers 6GB yang sudah
+# residen. Nilai v2 (8 job x 8GB = 64 GB) sudah melampaui RAM VPS 16 sebelum mesinnya
+# diperkecil sama sekali.
+# Anggaran mesin nyata (VPS 8, RAM 24 GB): 6GB shared_buffers + ~2GB OS = 8GB terpakai
+# sebelum restore dimulai. --jobs=4 x 2GB = 8GB → total 16 dari 24, sisa 8GB page cache.
+# --jobs=8 x 2GB = 16GB → total 24 dari 24: nol margin, OOM killer menghentikan restore
+# di tengah jalan. Karena itu --jobs=4 — lihat "Mesin nyata != yang direkomendasikan".
 sudo -u postgres psql <<'SQL'
 ALTER SYSTEM SET maintenance_work_mem='2GB';
 ALTER SYSTEM SET max_parallel_maintenance_workers='2';
@@ -570,7 +616,7 @@ pg_restore --file=/dev/null "$DUMPDIR" && echo "PEMBACAAN PENUH OK — tidak ter
 # E. RESTORE — sebagai OS user `toa` (peer auth → role toa). Kalau dijalankan sebagai
 #    `postgres`, SEMUA tabel dimiliki postgres tanpa GRANT → aplikasi mati dengan
 #    "permission denied for table transactions_transaction" di query pertama.
-sudo -u toa pg_restore --dbname=toa --jobs=8 --no-owner --no-privileges \
+sudo -u toa pg_restore --dbname=toa --jobs=4 --no-owner --no-privileges \
      --no-comments --exit-on-error --verbose "$DUMPDIR" 2>/var/backups/toa/restore-$STAMP.err
 #  --no-comments: COMMENT ON EXTENSION plpgsql ditolak utk non-superuser dan akan
 #    menggugurkan --exit-on-error. Jangan diselesaikan dgn superuser sementara —
@@ -579,8 +625,8 @@ sudo -u toa pg_restore --dbname=toa --jobs=8 --no-owner --no-privileges \
 #    database keuangan separuh terisi yang tampak berhasil.
 
 # F. STATISTIK & VISIBILITY MAP — TIDAK OPSIONAL
-sudo -u toa vacuumdb -d toa --analyze-in-stages --jobs=8
-sudo -u toa vacuumdb -d toa --analyze --jobs=8
+sudo -u toa vacuumdb -d toa --analyze-in-stages --jobs=4
+sudo -u toa vacuumdb -d toa --analyze --jobs=4
 
 # G. KEMBALIKAN profil paritas SEBELUM verifikasi apa pun
 sudo -u postgres psql <<'SQL'
@@ -814,8 +860,8 @@ Sebelum itu, rollback gratis di titik mana pun.
 | 8 | 06:50 | Hentikan service web Railway | 5m |
 | 9 | 06:55 | **R1 — bekukan di level DB:** `ALTER DATABASE railway SET default_transaction_read_only=on;` + `pg_terminate_backend`. Catat `pg_stat_user_tables` + `max(id)` sumber | 5m |
 | 10 | 07:00 | Cek `indisvalid` produksi (J4). Dump ber-snapshot **ditarik VPS** | **30–90m** |
-| 11 | ~08:15 | `systemctl stop toa`; `DROP/CREATE toa_new`; restore `-j 8 --exit-on-error` | **60–120m** |
-| 12 | ~09:45 | `vacuumdb --analyze-in-stages -j 8` — langkah sendiri, jangan digabung | **10–25m** |
+| 11 | ~08:15 | `systemctl stop toa`; `DROP/CREATE toa_new`; restore `-j 4 --exit-on-error` | **60–120m** |
+| 12 | ~09:45 | `vacuumdb --analyze-in-stages -j 4` — langkah sendiri, jangan digabung | **10–25m** |
 | 13 | ~10:10 | **GATE A** — `gerbang.sh banding <ip> final` + `periksa_index`. Checksum wajib sama **sampai sen** | 15m |
 | 14 | ~10:25 | `ALTER DATABASE toa RENAME TO toa_fase3; ALTER DATABASE toa_new RENAME TO toa;` set read-only. Start toa; `migrate`; `periksa_index` | 10m |
 | 15 | ~10:35 | **GATE B** — smoke test lokal via `curl --resolve`, lalu waktu dashboard vs FASE 3 | 10m |

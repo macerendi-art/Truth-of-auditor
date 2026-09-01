@@ -96,7 +96,16 @@ paralel + 2 skeptik adversarial). Jangan menyalin ulang tabelnya; baca di sana.
 
 Yang mengikat di sini:
 
-- **Cloud VPS 12 + add-on 800 GB SSD, region Singapura, Ubuntu 24.04.**
+- **Direkomendasikan:** Cloud VPS 12 + add-on 800 GB SSD, Singapura, Ubuntu 24.04.
+- **YANG BENAR-BENAR DIBELI (01-09-2026):** **Cloud VPS 8 — 8 vCPU / 24 GB / 300 GB SSD**,
+  Singapura, Ubuntu 24.04, termin 1 bulan, IP `217.216.39.105`. CPU dan RAM tetap layak
+  (beban terukur 0,23 core dan ±8 GB rigid; 24 GB adalah batas bawah yang menjaga paritas
+  `shared_buffers` 6GB tetap utuh). **Disk-lah yang meleset:** 300 GB membuat maintenance
+  (`pg_repack`, uji-restore berdampingan) berhenti mungkin di **bulan ~9** dan disk mentok
+  **bulan ~16** pada laju terukur 11 GB/bln. **Storage Extension +200 GB wajib ditambah
+  SEBELUM FASE 4** (tanpa reinstall, tanpa ganti IP) → 500 GB → bulan ~17/~29.
+- **Akibat teknis RAM 24 GB:** profil restore memakai `--jobs=4`, bukan 8 — 8 job × 2 GB
+  di atas `shared_buffers` 6 GB dan OS ±2 GB menghabiskan seluruh 24 GB tanpa margin.
 - **Beli 1 bulan dulu.** Contabo adalah undian node; jangan prepay node yang belum terbukti.
 - Node lulus gerbang → **perpanjang lebih awal instance yang SAMA ke 12 bulan.**
   **JANGAN order ulang** demi diskon 24-bulan: order baru = node baru + **IP baru** = seluruh
