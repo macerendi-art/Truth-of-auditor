@@ -224,6 +224,104 @@ class LabelMemoTests(_MoneyData):
         self.assertEqual(m.call_count, 3)
 
 
+class RekeningAgregatSQLTests(_MoneyData):
+    """Perilaku yang WAJIB bertahan setelah agregasi pindah ke SQL (GROUP BY).
+
+    Semua tes di berkas ini menjaga angkanya; kelas ini menjaga sudut-sudut
+    yang justru gampang salah saat menyusun filter Q di SQL — baris yang oleh
+    loop Python lama jatuh ke cabang "lain-lain" secara implisit.
+    """
+
+    def test_baris_delta_nol_hanya_ikut_mutasi_dan_count(self):
+        # Baris non-admin berdelta 0: bukan deposit, bukan withdraw, bukan trx —
+        # loop lama: `delta > 0` gagal, `delta < 0` gagal → hanya mutasi += 0.
+        self.mv(self.bank, "BCA", "HENDI", "500000", "1500000", jam=9)
+        self.mv(self.bank, "BCA", "HENDI", "0", "1500000", jam=10, jenis="lainnya")
+        data = rekening_breakdown(self.toko, TGL)
+        self.assertEqual(data["count"], 2)
+        (acc,) = data["accounts"]
+        self.assertEqual(acc["deposit"], Decimal("500000"))
+        self.assertEqual(acc["withdraw"], Decimal("0"))
+        self.assertEqual(acc["trx"], 1)
+        self.assertEqual(acc["mutasi"], Decimal("500000"))
+
+    def test_admin_delta_positif_tetap_admin_bukan_deposit(self):
+        # `jenis=admin` MENANG atas arah delta (refund biaya = admin positif):
+        # loop lama memeriksa admin duluan, jadi tak pernah masuk deposit/trx.
+        self.mv(self.bank, "BCA", "HENDI", "-100000", "900000", jam=9, jenis="wd")
+        self.mv(self.bank, "BCA", "HENDI", "2500", "902500", jam=10, jenis="admin")
+        (acc,) = rekening_breakdown(self.toko, TGL)["accounts"]
+        self.assertEqual(acc["admin"], Decimal("2500"))
+        self.assertEqual(acc["deposit"], Decimal("0"))
+        self.assertEqual(acc["trx"], 1)
+        self.assertEqual(acc["mutasi"], Decimal("-97500"))
+        self.assertEqual(acc["selisih"], Decimal("0"))
+
+    def test_skala_decimal_nol_tidak_bergeser(self):
+        """Grup all-nol menghasilkan Decimal('0') skala-0, persis loop lama.
+
+        Loop lama memakai `t.money_delta or NOL`, jadi grup yang SEMUA barisnya
+        berdelta 0 menghasilkan mutasi Decimal('0') → str '0'. `Sum` polos akan
+        mengembalikan '0.00' untuk grup itu — nilainya sama (Decimal('0') ==
+        Decimal('0.00')) jadi assertEqual angka tak melihatnya; karena itu
+        `mutasi`/`admin` di SQL difilter `~Q(money_delta=0)` sehingga grup
+        all-nol → NULL → NOL. Kasus kebalikannya (delta saling meniadakan →
+        '0.00' skala-2, ditemukan di data nyata k25 Juli 2026) tak bisa dipin
+        di sqlite — agregat sqlite pulang lewat float dan kehilangan skala —
+        tapi terbukti identik baris-per-baris di Postgres produksi (VPS).
+        Untuk tampilan keduanya netral: template memakai floatformat|intcomma.
+        """
+        self.mv(self.bank, "BCA", "HENDI", "500000", "1500000", jam=9)
+        self.mv(self.bank, "BCA", "HENDI", "-500000", "1000000", jam=10, jenis="wd")
+        # rekening 2: semua baris berdelta 0 → skala-0 '0'
+        self.mv(self.bank, "BRI", "PANCA", "0", "700000", jam=9, jenis="lainnya")
+        hasil = {a["label"]: a for a in rekening_breakdown(self.toko, TGL)["accounts"]}
+        self.assertEqual(hasil["BCA a/n HENDI"]["mutasi"], Decimal("0"))
+        self.assertEqual(str(hasil["BRI a/n PANCA"]["mutasi"]), "0")
+        self.assertEqual(str(hasil["BRI a/n PANCA"]["admin"]), "0")
+
+    def test_label_sama_lintas_upload_melebur_dan_rantai_nyambung(self):
+        """Dua Upload berbeda, label sama → SATU baris rekening, rantai saldo utuh.
+
+        Kasus normal produksi pada rentang multi-hari: file bank harian rekening
+        yang sama = kombinasi (source_type, account, upload) BERBEDA per hari
+        tapi `source_label_full`-nya identik. Agregat per kombinasi wajib
+        dilebur per label, dan item rantai saldonya ter-interleave menurut
+        (occurred_at, id) global — bukan per-kombinasi berurutan — supaya
+        `_saldo_batas` melihat rantai yang sama dengan loop per-baris lama.
+        """
+        up1 = Upload.objects.create(
+            source_type=self.bank, toko=self.toko, provider="BCA", owner_name="HENDI")
+        up2 = Upload.objects.create(
+            source_type=self.bank, toko=self.toko, provider="BCA", owner_name="HENDI")
+        d27, d28 = date(2026, 6, 27), date(2026, 6, 28)
+
+        def baris(up, money, saldo, jam, tanggal, jenis="depo"):
+            self._n += 1
+            Transaction.objects.create(
+                upload=up, source_type=self.bank, toko=self.toko, jenis=jenis,
+                amount=abs(Decimal(money)), money_delta=Decimal(money),
+                balance_after=Decimal(saldo),
+                occurred_at=datetime(tanggal.year, tanggal.month, tanggal.day, jam),
+                row_hash=f"mv{self._n}",
+            )
+
+        # awal 1.000.000 → +500rb (file hari-1) → −200rb (file hari-2) → +100rb
+        baris(up1, "500000", "1500000", 9, d27)
+        baris(up2, "-200000", "1300000", 10, d28, jenis="wd")
+        baris(up2, "100000", "1400000", 11, d28)
+        data = rekening_breakdown(self.toko, d27, d28)
+        self.assertEqual(data["count"], 3)
+        (acc,) = data["accounts"]  # satu baris rekening, bukan dua
+        self.assertEqual(acc["label"], "BCA a/n HENDI")
+        self.assertEqual(acc["deposit"], Decimal("600000"))
+        self.assertEqual(acc["withdraw"], Decimal("200000"))
+        self.assertEqual(acc["trx"], 3)
+        self.assertEqual(acc["saldo_awal"], Decimal("1000000"))
+        self.assertEqual(acc["saldo_akhir"], Decimal("1400000"))
+        self.assertEqual(acc["selisih"], Decimal("0"))
+
+
 class RekeningViewTests(_MoneyData):
     def setUp(self):
         super().setUp()
