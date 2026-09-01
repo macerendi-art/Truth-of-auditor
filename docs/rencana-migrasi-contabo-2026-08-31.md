@@ -663,6 +663,68 @@ SQL
 
 ---
 
+## ✅ Catatan pelaksanaan — FASE 0-2 SUDAH DIJALANKAN (01-09-2026)
+
+Bagian ini ditulis SESUDAH eksekusi, jadi ia fakta, bukan rencana. Mesin nyata:
+Cloud VPS 8, IP `217.216.39.105`, Ubuntu 24.04.4, PostgreSQL 18.6.
+
+### Yang lulus
+
+| Fase | Hasil |
+|---|---|
+| GERBANG 0 & 1 | lulus — `toa`+sudo tanpa password, root DITOLAK, `passwordauthentication no` |
+| Gerbang node (di luar rencana, ditambahkan) | **19.715 IOPS baca acak, latensi 0,795 ms, steal 0%** — node ini sehat, tak perlu redeploy |
+| Pra-terbang J4 | 20/20 index produksi `indisvalid=true` |
+| FASE 1 | PG18 + paritas 15 setelan, nol `PENDING`, DB `toa` UTF8/en_US.utf8 |
+| Dump ber-snapshot | 1,4 GB (jauh di bawah perkiraan 5-8 GB), TOC 438 entri, `--file=/dev/null` lolos |
+| Restore + vacuum | 10 mnt + 1,5 mnt, 8.850.457 baris, 29/29 tabel milik `toa`, 0 index invalid |
+| Suite tes penuh di VPS | **0 gagal** |
+| **GERBANG FASE 2** | **LULUS** — diff kosong pada seluruh baris yang digerbang |
+
+Bukti terkuat: **12 dari 12 blok sidik jari md5 IDENTIK**, mencakup 8,85 juta baris
+beserta `md5(raw::text)` dan `md5(description)` — kelas kerusakan yang tak terlihat oleh
+`SUM` (encoding, jsonb, pergeseran nilai antar baris) terbukti tidak ada.
+
+### Lima cacat GERBANG yang hanya muncul saat dijalankan sungguhan
+
+Tiga di antaranya menghasilkan **tuduhan palsu** terhadap restore yang sehat — kelas
+paling mahal, karena reaksi wajarnya mengulang dump berjam-jam atau meragukan data
+yang baik-baik saja.
+
+| # | Cacat | Akibat | Perbaikan |
+|---|---|---|---|
+| 1 | `GROUP BY 1` atas ekspresi yang memuat `count(*)` | gerbang mati di sisi produksi | subquery |
+| 2 | `text \|\| "char"` pada `con.contype` ambigu | gerbang mati di blok constraint | cast `::text` |
+| 3 | Zona waktu sesi tidak dipaku | **tuduhan palsu** | `SET TimeZone='Etc/UTC'` |
+| 4 | `sidik-mr` memuat `right_id`/`score` yang MUTABEL | **tuduhan palsu** | hanya saat `full` |
+| 5 | `sequence` dibandingkan saat produksi menulis | **tuduhan palsu** | `~` di mode live |
+
+Cacat 3 & 4 layak dibaca ulang sebelum FASE 4. `occurred_at` bertipe **timestamptz**,
+jadi `::text` dan `to_char()` dirender mengikuti TimeZone SESI: produksi Railway di
+`Etc/UTC`, VPS di `Asia/Jakarta`. Terbukti pada blok id 0 (136.680 baris) —
+md5 `e2e23f02…` di WIB vs `7ae004c3…` di UTC, dan **identik persis** setelah dipaku.
+Cacat 4: late settlement memasangkan baris kredit LAMA dengan uang yang baru datang,
+jadi `right_id` berubah dari NULL ke id baru pada baris ber-id jauh di bawah ceiling —
+terukur 4.093 baris MatchResult lama berubah dalam 3 jam.
+
+### Satu perbedaan yang DISENGAJA dan harus dibereskan sebelum GATE A
+
+`pg_stat_statements` sudah dibuat sebagai extension di DB `toa` (untuk membedah keluhan
+lag operator) sedangkan produksi baru memuatnya di `shared_preload_libraries`. Itu
+satu-satunya baris yang tersisa di diff. Sebelum GATE A: samakan, atau nyatakan sebagai
+perbedaan yang diakui secara tertulis.
+
+### Penyesuaian yang lahir dari mesin nyata
+
+- `pg_restore --jobs=4` (bukan 8) — RAM 24 GB tidak memuat 8 job × 2 GB di atas
+  `shared_buffers` 6 GB; sudah tertulis di FASE 2.
+- `MaxStartups 60:30:200` di sshd: paralelisme agen membuka banyak koneksi
+  belum-terautentikasi sekaligus, dan default 10 mulai men-drop acak.
+- `ufw allow` untuk IP operator ditaruh SEBELUM `ufw limit 22/tcp`, dan `fail2ban`
+  diberi `ignoreip` — pelajaran dari mengunci diri sendiri di jam pertama.
+
+---
+
 ## FASE 3 — Aplikasi, nginx, systemd, uji
 
 ```bash
