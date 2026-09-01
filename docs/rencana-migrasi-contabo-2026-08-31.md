@@ -853,6 +853,40 @@ sisi juga melanjutkan `nextval` dari titik yang sama → PK kembar untuk baris b
 
 ---
 
+## ⛔ Lubang yang diketahui dan BELUM ditutup — wajib dibereskan sebelum hari-H
+
+Dokumen ini menawarkan dua pilihan bila watermark VPS sudah bergerak (R4): **perbaiki maju**
+atau **migrasi balik penuh**. Pilihan kedua **tidak punya prosedur di mana pun** — ia disebut
+sebagai opsi, lalu tidak pernah dijelaskan. Sebuah jalan keluar yang hanya ada namanya lebih
+berbahaya daripada tidak ada, karena ia terbaca seperti jaring pengaman saat keputusan diambil
+di bawah tekanan.
+
+**Bentuk kasarnya memang bisa diturunkan** dari FASE 2 dengan arah dibalik (dump VPS →
+restore ke Railway → kembalikan DNS), tetapi tiga hal membuatnya **bukan sekadar FASE 2
+terbalik**, dan ketiganya belum pernah diuji:
+
+1. **Railway sisi tujuan tidak kosong.** DB `railway` masih memegang data pra-cutover dan
+   berstatus `default_transaction_read_only=on` (R2/R5). Restore ke sana menuntut mematikan
+   read-only **dan** memutuskan nasib baris lama — persis kelas operasi yang J3 hindari di
+   arah sebaliknya dengan pola `toa_new` + tukar nama. Pola yang sama harus dirancang untuk
+   arah ini, bukan diimprovisasi.
+2. **Sequence sudah bercabang.** Kedua sisi melanjutkan `nextval` dari titik yang sama sejak
+   langkah 18, jadi id yang sama sudah menunjuk baris berbeda. Ini juga alasan merge parsial
+   dilarang; migrasi balik penuh menghindarinya hanya bila Railway benar-benar **ditimpa
+   seluruhnya**, bukan digabung.
+3. **Ini satu-satunya prosedur dalam rencana yang menulis ke produksi lama.** Setiap langkah
+   lain memperlakukan Railway sebagai sumber baca. Karena itu ia butuh gerbangnya sendiri —
+   minimal: dump VPS lolos `pg_restore --file=/dev/null`, hitungan dan checksum dibandingkan
+   sebelum read-only Railway dibuka, dan salinan DB Railway pra-timpa disimpan lebih dulu.
+
+**Sampai prosedur itu ditulis dan diuji, perlakukan "perbaiki maju di VPS" sebagai
+satu-satunya jalan keluar pasca-langkah 18** — dan tetapkan itu di kepala sebelum cutover
+dimulai, bukan saat memilih di bawah tekanan. Konsekuensi praktisnya: GATE A/B/C harus
+dianggap sebagai gerbang yang sungguh-sungguh mengikat, karena setelah langkah 18 tidak ada
+tombol mundur yang murah.
+
+---
+
 ## FASE 5 — Setelah pindah
 
 ### Jalur deploy (menggantikan `railway up`, yang mati bersama Railway)
