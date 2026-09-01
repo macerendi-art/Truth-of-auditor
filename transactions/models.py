@@ -210,9 +210,48 @@ class Transaction(TimeStampedModel):
             ),
             # Pemakai: web/rekening.py, web/penjaga.py,
             # reconciliation/engine.py::_date_filter.
+            #
+            # CATATAN AKURASI (diukur 01-09-2026): `_date_filter` menyaring
+            # `occurred_at__date__gte/lte`, dan Django membungkus kolomnya jadi
+            # `(occurred_at)::date` sehingga bagian TANGGAL index ini mati untuk
+            # pemakai tersebut — hanya prefix (toko, source_type) yang terpakai.
+            # Perbaikannya ada di sisi kode (rentang setengah-terbuka, seperti
+            # yang sudah dilakukan web/rekening.py), bukan di sini.
             models.Index(
                 fields=["toko", "source_type", "occurred_at"],
                 name="tx_toko_src_occurred_idx",
+            ),
+            # --- Tiga index di bawah lahir dari profil halaman lambat pada data
+            # produksi nyata (01-09-2026). Angka SEBELUM/SESUDAH ada di
+            # docstring migrasi 0009; ketiganya diukur, bukan diperkirakan.
+            #
+            # Pemakai: web/views.py::bank_mutations (halaman Mutasi Bank).
+            # Slice-nya `ORDER BY upload_id DESC, id ASC LIMIT 50`, dan tanpa
+            # `toko` di depan, Postgres memindai index upload_id GLOBAL dari
+            # puncak lalu membuang baris toko lain satu per satu. Toko yang
+            # unggahan terakhirnya lama (upload_id kecil) membayar paling mahal:
+            # k25 membuang 4,87 juta baris untuk mengambil 50.
+            models.Index(
+                fields=["toko", "upload", "id"],
+                name="tx_toko_upload_id_idx",
+            ),
+            # Pemakai: reconciliation/engine.py::check_completeness (5x EXISTS
+            # per render dashboard) dan web/kelengkapan.py.
+            # PARSIAL: hanya baris yang masih aktif — itulah yang selalu
+            # ditanyakan, dan menyempitkan index ke pecahan kecil tabel.
+            # Backlog CLAUDE.md "partial index untuk 5x EXISTS" — kini terukur.
+            models.Index(
+                fields=["toko", "source_type", "jenis"],
+                name="tx_aktif_toko_src_jenis_idx",
+                condition=models.Q(consumed_by_batch__isnull=True, is_duplicate=False),
+            ),
+            # Pemakai: web/views.py::transactions (_apply_sort default
+            # `ORDER BY occurred_at DESC, id`). Index occurred_at yang ada
+            # menaruh source_type di TENGAH, dan urutan itu memblokirnya untuk
+            # query yang tidak menyaring source_type.
+            models.Index(
+                fields=["toko", "occurred_at"],
+                name="tx_toko_occurred_idx",
             ),
         ]
         constraints = [
