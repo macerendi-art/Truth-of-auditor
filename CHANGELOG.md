@@ -3,11 +3,19 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.22.0** · 39 rilis (1 besar, 22 fitur, 12 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.23.0** · 40 rilis (1 besar, 23 fitur, 12 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.23.0 — Halaman Berat Berhenti Menghitung Ulang Seluruh Riwayat
+*Rilis fitur · 1 September 2026*
+
+- **Rincian Rekening satu bulan: 25 detik jadi 1,2 detik.** Halaman ini dulu membangun seluruh baris transaksi satu per satu di memori sebelum menjumlahkannya — untuk sebulan g25 itu 267 rb baris, dan 20 detik dari waktunya habis hanya untuk membangun objeknya. Sekarang penjumlahan dikerjakan langsung oleh basis data. Angka di layar tidak berubah sedikit pun: dibuktikan membandingkan keluaran lama dan baru pada data produksi — 2.468 sel, nol beda.
+- **Breakdown Bracket berhenti melambat seiring umur data.** Saldo awal sebuah rekening dulu dihitung dengan menyapu seluruh riwayat sejak hari pertama, sehingga setiap hari yang lewat menambah beban permanen — 30 hari data 0,6 detik, 82 hari 1,6 detik, dan terus naik walau tidak ada berkas baru diunggah. Sekarang saldo penutup dicari langsung lewat indeks: 0,36–0,40 detik, dan angkanya tidak lagi bergantung pada seberapa tua data. Halaman satu hari turun dari 1,8 detik ke 0,6 detik, satu bulan dari 6,2 ke 2,4 detik.
+- **Rincian Biaya dan Rekonsiliasi Bonus turun ke bawah setengah detik.** Keduanya dulu ikut memuat kolom data mentah setiap baris padahal cuma butuh beberapa kolom. Rincian Biaya 2,4 → 0,3 detik, Rekonsiliasi Bonus 2,5 → 0,5 detik. Hasil pemasangan bonus diperiksa identik byte-per-byte pada data produksi, termasuk brand yang memakai mode agregat.
+- **Perintah baru `periksa_kesehatan`** merangkum kondisi sistem dalam satu laporan: indeks yang hilang atau rusak, sisa ruang disk, laju pertumbuhan data, dan batch terakhir tiap toko — supaya masalah kapasitas terlihat sebelum jadi gangguan, bukan sesudah.
 
 ## v1.22.0 — Supervisor Bisa Menghapus Batch — dengan Pagar Pengaman
 *Rilis fitur · 1 September 2026*
