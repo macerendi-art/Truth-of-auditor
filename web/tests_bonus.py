@@ -129,3 +129,41 @@ class BonusViewTests(_BonusData):
     def test_menu_link_muncul(self):
         r = self.client.get(reverse("dashboard"))
         self.assertContains(r, reverse("bonus_recon"))
+
+
+class TanpaMuatRawUtuhTests(_BonusData):
+    """`raw` hanya boleh disentuh lewat ekstraksi kunci, tak pernah utuh.
+
+    /bonus/ membaca DUA kunci saja (`Kategori`, `Sumber`) dari JSONB yang
+    besar. Menarik dokumennya utuh memaksa detoast + `json.loads` per baris di
+    Python — sumber utama 2,3 dtk halaman ini. Tes ini membaca SQL yang benar-
+    benar dikirim: kolom `raw` boleh muncul HANYA di dalam ekstraksi kunci.
+    """
+
+    def test_kolom_raw_tak_pernah_dideserialisasi(self):
+        """Diukur pada konverternya sendiri, bukan pada teks SQL.
+
+        `from_db_value` kolom `raw` dipanggil SEKALI PER BARIS yang memuatnya —
+        nol panggilan = dokumen JSON-nya tak pernah ditarik & di-`json.loads`,
+        hanya dua kuncinya yang diekstrak di server. Bebas backend.
+        """
+        from unittest.mock import patch
+
+        kolom_raw = Transaction._meta.get_field("raw")
+        self.panel_row("budi", "50000")
+        self.bracket_row("budi", "50000")
+        with patch.object(kolom_raw, "from_db_value",
+                          wraps=kolom_raw.from_db_value) as m:
+            data = rekonsiliasi_bonus(self.toko, dari=TGL, sampai=TGL)
+        self.assertEqual(len(data["cocok"]), 1)
+        self.assertEqual(m.call_count, 0)
+
+    def test_nilai_kategori_dan_penanda_identik_dengan_baca_raw(self):
+        """Ekstraksi SQL == pembacaan `raw` di Python, untuk kunci ada & absen."""
+        self.panel_row("budi", "50000", kategori="Lucky Draw")
+        t = self.panel_row("sendy", "60000")
+        t.raw = {}                       # kunci `Kategori` ABSEN
+        t.save(update_fields=["raw"])
+        data = rekonsiliasi_bonus(self.toko, dari=TGL, sampai=TGL)
+        kat = sorted(r["kategori"] for r in data["panel_only"])
+        self.assertEqual(kat, ["Bonus", "Lucky Draw"])

@@ -39,6 +39,10 @@ from collections import defaultdict, deque
 from datetime import date
 from decimal import Decimal
 
+from django.db.models import TextField
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Cast
+
 from sources.parsers.bonus import MARKER_AGREGAT
 from transactions.models import Transaction
 
@@ -65,23 +69,25 @@ def kategori_detail(kategori, deskripsi):
 
 
 def _baris(t, panel=False):
-    kategori = (t.raw or {}).get("Kategori", "") or "Bonus"
+    kategori = t["kat_raw"] or "Bonus"
     return {
-        "id": t.id,
-        "tanggal": t.posted_date,
-        "username": t.username,
+        "id": t["id"],
+        "tanggal": t["posted_date"],
+        "username": t["username"],
         "kategori": kategori,
         # Kategori tampilan: panel diekstrak dari Description, bracket sudah
         # detail dari kolom Category-nya sendiri (jangan regex desc bracket —
         # desc Credit Bonus berisi salinan desc panel).
-        "kategori_detail": kategori_detail(kategori, t.description) if panel else kategori,
-        "nominal": t.amount,
-        "deskripsi": t.description,
+        "kategori_detail": (kategori_detail(kategori, t["description"])
+                            if panel else kategori),
+        "nominal": t["amount"],
+        "deskripsi": t["description"],
     }
 
 
 def _kunci(t):
-    return ((t.username or "").strip().lower(), int(abs(t.amount or 0)), t.posted_date)
+    return ((t["username"] or "").strip().lower(),
+            int(abs(t["amount"] or 0)), t["posted_date"])
 
 
 # --- Modus agregat -------------------------------------------------------
@@ -140,7 +146,7 @@ def _norm_kat(nama):
 
 def _kategori_bonus(t):
     """Kategori mentah sebuah baris — fallback sama dengan `_baris`."""
-    return (t.raw or {}).get("Kategori", "") or "Bonus"
+    return t["kat_raw"] or "Bonus"
 
 
 def _tanggal_tgl(deskripsi):
@@ -197,12 +203,12 @@ def _pisah_agregat(panel, bracket):
     """
     layak = defaultdict(list)   # tanggal -> baris panel berpenanda
     for p in panel:
-        if (p.raw or {}).get("Sumber") == MARKER_AGREGAT and p.posted_date:
-            layak[p.posted_date].append(p)
+        if p["sumber_raw"] == MARKER_AGREGAT and p["posted_date"]:
+            layak[p["posted_date"]].append(p)
 
     sel = defaultdict(list)
     for b in bracket:
-        efektif = _tanggal_tgl(b.description) or b.posted_date
+        efektif = _tanggal_tgl(b["description"]) or b["posted_date"]
         sel[(efektif, _norm_kat(_kategori_bonus(b)))].append(b)
 
     entri, diklaim, dipakai = [], set(), set()
@@ -211,21 +217,21 @@ def _pisah_agregat(panel, bracket):
         baris = sel[kunci]
         if efektif is None:
             continue
-        if any((b.username or "").strip() for b in baris):
+        if any((b["username"] or "").strip() for b in baris):
             continue
         pas = [p for p in layak.get(efektif, ())
-               if p.id not in diklaim
+               if p["id"] not in diklaim
                and _kategori_cocok(kat_norm, _norm_kat(_kategori_bonus(p)))]
         if not pas:
             continue
 
         kat_panel = sorted({_kategori_bonus(p) for p in pas})
-        panel_total = sum((p.amount or NOL for p in pas), NOL)
-        bracket_total = sum((b.amount or NOL for b in baris), NOL)
+        panel_total = sum((p["amount"] or NOL for p in pas), NOL)
+        bracket_total = sum((b["amount"] or NOL for b in baris), NOL)
         selisih = panel_total - bracket_total
         # Tanggal pembukuan diambil dari baris bracket pertama sel — hanya
         # ditampilkan ("dibukukan dd/mm"), dan hanya bila `TGL` menggesernya.
-        dibukukan = baris[0].posted_date
+        dibukukan = baris[0]["posted_date"]
         entri.append({
             "tanggal": efektif,
             "tanggal_bracket": dibukukan if dibukukan != efektif else None,
@@ -242,13 +248,13 @@ def _pisah_agregat(panel, bracket):
             "selisih": selisih,
             "status": ("cocok" if abs(selisih) < toleransi_agregat(len(pas))
                        else "selisih"),
-            "deskripsi": baris[0].description,
+            "deskripsi": baris[0]["description"],
         })
-        diklaim.update(p.id for p in pas)
-        dipakai.update(b.id for b in baris)
+        diklaim.update(p["id"] for p in pas)
+        dipakai.update(b["id"] for b in baris)
 
-    return ([p for p in panel if p.id not in diklaim],
-            [b for b in bracket if b.id not in dipakai],
+    return ([p for p in panel if p["id"] not in diklaim],
+            [b for b in bracket if b["id"] not in dipakai],
             entri)
 
 
@@ -260,14 +266,34 @@ def rekonsiliasi_bonus(toko, dari=None, sampai=None, kategori=None):
             qs = qs.filter(posted_date__gte=dari)
         if sampai:
             qs = qs.filter(posted_date__lte=sampai)
-        return list(qs.order_by("posted_date", "id"))
+        # `.values()` DAN DUA KUNCI `raw` SAJA — bukan gaya, ini biaya halaman.
+        # `raw` adalah JSONB besar yang di-detoast lalu di-`json.loads` per
+        # baris; menariknya utuh untuk membaca dua kunci membuat /bonus/
+        # menghabiskan waktunya di Python, bukan di SQL. `KeyTextTransform`
+        # mengekstraknya di server (Cast → TextField supaya bentuknya `str`
+        # yang sama di Postgres maupun SQLite). NULL/kunci absen sama-sama
+        # menjadi None, persis seperti `(raw or {}).get(k, "")` yang digantinya
+        # — pemakainya selalu `... or "Bonus"` / perbandingan kesetaraan.
+        #
+        # `order_by` DIPERTAHANKAN: pemasangan 1:1 memakai deque per kunci,
+        # jadi urutan baris menentukan pasangan mana yang terbentuk. Ini
+        # kebenaran, bukan kerapian (lihat catatan determinisme di CLAUDE.md).
+        return list(
+            qs.annotate(
+                kat_raw=Cast(KeyTextTransform("Kategori", "raw"), TextField()),
+                sumber_raw=Cast(KeyTextTransform("Sumber", "raw"), TextField()),
+            )
+            .order_by("posted_date", "id")
+            .values("id", "posted_date", "username", "amount", "description",
+                    "kat_raw", "sumber_raw")
+        )
 
     panel, bracket = ambil("panel_bonus"), ambil("bracket_bonus")
 
     # GERBANG modus agregat. `agregat is None` = badan lama apa adanya, dan
     # dict yang dikembalikan berkunci sama persis seperti sebelum rilis ini.
     agregat = None
-    if any((p.raw or {}).get("Sumber") == MARKER_AGREGAT for p in panel):
+    if any(p["sumber_raw"] == MARKER_AGREGAT for p in panel):
         panel, bracket, agregat = _pisah_agregat(panel, bracket)
 
     sisa = defaultdict(deque)

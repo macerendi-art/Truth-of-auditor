@@ -10,6 +10,7 @@ from django.urls import reverse
 import transactions.models as tx_models
 import web.biaya as biaya_mod
 from sources.models import Account, SourceType, Toko, Upload
+from sources.parsers.fee_rules import is_admin_fee
 from transactions.models import Transaction
 from web.biaya import rincian_biaya
 
@@ -156,3 +157,91 @@ class BiayaViewTests(_BiayaData):
         r = self.client.get(reverse("rincian_biaya"))
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, "Belum ada")
+
+
+class PrafilterSupersetTests(_BiayaData):
+    """`PRAFILTER_FEE` WAJIB superset `is_admin_fee` — kalau tidak, biaya hilang.
+
+    Prafilter SQL itu satu-satunya bagian `web/biaya.py` yang menduplikasi
+    pengetahuan `sources/parsers/fee_rules.is_admin_fee`, dan kegagalannya
+    SENYAP: baris fee yang tersaring di SQL tak pernah sampai ke Python, tak
+    memicu error apa pun, hanya lenyap dari laporan. Tes ini menutup celah itu
+    dengan cara yang tak bisa basi diam-diam — ia menjalankan kedua sisi pada
+    korpus yang sama dan menuntut inklusi, bukan kesamaan (prafilter BOLEH
+    meloloskan lebih banyak; Python yang memutuskan).
+    """
+
+    # Tiap cabang `is_admin_fee`, plus bentuk yang dulu memecahkan pendekatan
+    # `Trim` + `istartswith`: whitespace non-spasi di depan (Python `strip()`
+    # membuangnya, `TRIM()` SQL tidak) dan huruf kecil.
+    KORPUS = [
+        ("mandiri", "Biaya Adm", "6500"),
+        ("mandiri", "BIAYA TRANSFER ONLINE", "6500"),
+        ("mandiri", "\tBIAYA ADM", "2500"),
+        ("mandiri", "\n  biaya adm", "1000"),
+        ("bca", "TRSF E-BANKING BIAYA TXN", "2500"),
+        ("bca", "  biaya txn debit", "6500"),
+        ("bri", "ATMSTRPRM 0888", "6500"),
+        ("bri", "\tatmstrprm 0888", "6500"),
+        ("bri", "BFST123 NBMB:X", "2500"),
+        ("bri", "BRIVA30135082 NBMB", "1000"),
+        # Bukan fee — hadir supaya korpus tak diam-diam menjadi semuanya fee.
+        ("bri", "NBMB ANDI TO BUDI ESB", "500000"),
+        ("bri", "ATMSTRPRM 0888", "2500"),      # nominal salah
+        ("bca", "TRSF E-BANKING CR", "150000"),
+        ("mandiri", "TRANSFER MASUK", "250000"),
+    ]
+
+    def test_setiap_baris_fee_lolos_prafilter(self):
+        from web.biaya import PRAFILTER_FEE
+
+        harus_lolos, dibuat = set(), []
+        for bank, desc, amount in self.KORPUS:
+            t = self.tx(self.up_bri, desc, amount, jenis="wd")
+            dibuat.append(t.id)
+            if is_admin_fee(bank, desc, Decimal(amount)):
+                harus_lolos.add(t.id)
+        # Korpus harus benar-benar memuat kedua sisi, kalau tidak tesnya hampa.
+        self.assertTrue(harus_lolos)
+        self.assertLess(len(harus_lolos), len(dibuat))
+
+        lolos = set(Transaction.objects.filter(PRAFILTER_FEE)
+                    .filter(id__in=dibuat).values_list("id", flat=True))
+        hilang = harus_lolos - lolos
+        self.assertEqual(hilang, set(), "baris fee tersaring habis oleh prafilter")
+
+    def test_baris_bertanda_admin_lolos_walau_deskripsi_kosong(self):
+        """`jenis="admin"` menang tanpa melihat deskripsi — seperti kode lama."""
+        from web.biaya import PRAFILTER_FEE
+
+        t = self.tx(self.up_bri, "", "2500", jenis="admin")
+        self.assertIn(t.id, set(Transaction.objects.filter(PRAFILTER_FEE)
+                                .values_list("id", flat=True)))
+        data = rincian_biaya(self.toko, dari=TGL, sampai=TGL)
+        self.assertEqual(data["ringkas"]["n"], 1)
+
+
+class TanpaKolomRawTests(_BiayaData):
+    """Kolom `raw` (JSONB besar) tak boleh ikut terbaca — itu biaya terbesarnya.
+
+    Bukan mikro-optimasi: memuatnya berarti detoast + `json.loads` per baris
+    untuk kolom yang modul ini tak pernah sentuh, dan itulah yang membuat
+    halaman ini 2,4 dtk. Regresi ke `select_related`/instance penuh akan
+    membawanya kembali tanpa satu tes pun berubah warna — kecuali tes ini.
+    """
+
+    def test_kolom_raw_tak_pernah_dideserialisasi(self):
+        """Diukur pada konverternya sendiri, bukan pada teks SQL.
+
+        `from_db_value` kolom `raw` dipanggil SEKALI PER BARIS yang memuatnya —
+        jadi nol panggilan = dokumen JSON-nya memang tak pernah ditarik. Bebas
+        backend, dan tak bisa dikelabui `select_related` maupun `only()`.
+        """
+        kolom_raw = Transaction._meta.get_field("raw")
+        self.tx(self.up_bri, "BFST1", "2500", jenis="admin")
+        self.tx(self.up_bri, "ATMSTRPRM 1", "6500", jenis="wd")
+        with patch.object(kolom_raw, "from_db_value",
+                          wraps=kolom_raw.from_db_value) as m:
+            data = rincian_biaya(self.toko, dari=TGL, sampai=TGL)
+        self.assertEqual(data["ringkas"]["n"], 2)
+        self.assertEqual(m.call_count, 0)
