@@ -201,9 +201,18 @@ SELECT 'sidik-mr ' || blok || ' ' || n || ' ' || cap FROM (
       -- Sengaja TANPA bucket/reason_code/reason_detail/resolved_by_batch_id:
       -- late settlement & override manual mengubahnya pada baris LAMA, jadi
       -- kolom itu digerbang terpisah di blok 08b (mode final saja).
+      -- right_id & score TERNYATA sekelas dengan mereka, dan itu baru terlihat
+      -- saat gerbang dijalankan sungguhan (01-09-2026): late settlement
+      -- memasangkan baris kredit LAMA dengan baris uang yang baru datang,
+      -- sehingga right_id berubah dari NULL ke id baru dan score ikut terisi —
+      -- pada baris ber-id jauh di bawah ceiling. Terukur di produksi: 4.093
+      -- baris MatchResult lama berubah dalam 3 jam, dan itu cukup membuat satu
+      -- blok md5 tidak cocok padahal restore-nya sehat.
       SELECT id, concat_ws('|', id::text, run_id::text,
-               coalesce(left_id::text,'~'), coalesce(right_id::text,'~'),
-               coalesce(score::text,'~')
+               coalesce(left_id::text,'~'),
+               CASE WHEN :full
+                    THEN coalesce(right_id::text,'~')||'|'||coalesce(score::text,'~')
+                    ELSE '' END
              ) AS sig
         FROM reconciliation_matchresult WHERE id <= :ceilmr
     ) x GROUP BY 1
@@ -249,7 +258,13 @@ WITH s AS (
      AND c.column_name = 'id'
    WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
 )
-SELECT 'sequence ' || s.table_name || ' max=' || coalesce(s.maxid::text,'~')
+-- Awalan '~' di mode live: sequence tabel yang tumbuh SELALU berbeda selama
+-- produksi masih menulis (terukur 01-09-2026: selisih 31.966 pada
+-- transactions_transaction dalam ~1 jam). Asersi mandiri BAHAYA-TABRAKAN-PK di
+-- bawah tetap berjalan penuh di kedua mode — yang dilonggarkan hanya
+-- pembandingan dua sisi, bukan pemeriksaannya.
+SELECT CASE WHEN :full THEN 'sequence ' ELSE '~sequence ' END
+       || s.table_name || ' max=' || coalesce(s.maxid::text,'~')
        || ' last=' || coalesce(pgs.last_value::text,'~')
        || ' ' || CASE
             WHEN s.seq IS NULL              THEN 'TANPA-SEQUENCE'
