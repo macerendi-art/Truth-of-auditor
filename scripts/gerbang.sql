@@ -19,6 +19,18 @@
 \pset null '~NULL'
 \timing off
 
+-- ZONA WAKTU SESI DIPAKU — WAJIB, dan ini bukan kosmetik.
+-- `occurred_at` bertipe timestamptz, jadi `occurred_at::text` dan
+-- `to_char(occurred_at,...)` dirender MENGIKUTI TimeZone sesi. Produksi Railway
+-- berjalan di Etc/UTC sedangkan VPS di Asia/Jakarta (+7), sehingga laporan yang
+-- SAMA atas data yang IDENTIK menghasilkan md5 berbeda dan sebaran bulanan
+-- bergeser — gerbang menuduh restore yang sebenarnya sehat.
+-- Terbukti 01-09-2026: blok id 0 memberi md5 e2e23f02... di WIB dan
+-- 7ae004c3... di UTC; setelah dipaku UTC, kedua sisi identik persis.
+-- Pakai UTC (bukan WIB) karena itu yang dipakai produksi hari ini; yang penting
+-- KEDUA sisi dipaku ke nilai yang sama.
+SET TimeZone = 'Etc/UTC';
+
 \echo '=== 01 IDENTITAS SERVER (informasi) ==='
 SELECT '~server_version_num=' || current_setting('server_version_num');
 SELECT '~encoding=' || pg_encoding_to_char(encoding)
