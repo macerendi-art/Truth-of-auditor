@@ -107,6 +107,25 @@ class MatchResult(TimeStampedModel):
         help_text="Batch yang men-settle hasil tidak_cocok/no_money ini terlambat",
     )
 
+    class Meta:
+        indexes = [
+            # Badge "Perlu Ditinjau" di sidebar dihitung ulang pada SETIAP
+            # render halaman, untuk setiap pengguna (web/context_processors.py).
+            # Tanpa index ini planner memindai ratusan ribu baris lewat tiga
+            # join hanya untuk menghitung antrean yang isinya ratusan: terukur
+            # 360 ms per render pada 5,5 juta baris MatchResult, dan itu
+            # dibayar oleh halaman TERCEPAT sekalipun.
+            #
+            # PARSIAL pada satu nilai bucket: `perlu_tinjau` hanya ±0,02% dari
+            # tabel, jadi index-nya berukuran puluhan kilobyte dan hitungannya
+            # menjadi Index Only Scan. Terukur 360 ms -> 1,76 ms.
+            models.Index(
+                fields=["run"],
+                name="mr_tinjau_run_idx",
+                condition=models.Q(bucket="perlu_tinjau"),
+            ),
+        ]
+
     def __str__(self):
         return f"{self.bucket} ({self.reason_code})"
 
