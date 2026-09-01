@@ -1,6 +1,7 @@
 import re
 
 from django.db import models
+from django.db.models.fields.json import KeyTextTransform
 
 from core.models import TimeStampedModel
 
@@ -252,6 +253,21 @@ class Transaction(TimeStampedModel):
             models.Index(
                 fields=["toko", "occurred_at"],
                 name="tx_toko_occurred_idx",
+            ),
+            # Pemakai: web/breakdown.py::_saldo_carry (loose index scan rekursif
+            # — enumerasi akun FR distinct + MAX(posted_date) per akun, tiap
+            # langkah CTE = satu index seek). Index EKSPRESI atas kolom JSON:
+            # tanpa ini tiap langkah rekursi jadi scan sejarah penuh — jauh
+            # lebih buruk dari agregat tunggal yang digantikannya. Ekspresi
+            # `raw ->> 'Bank'` di SQL mentah _saldo_carry WAJIB sama dengan
+            # kompilasi KeyTextTransform di sini agar planner Postgres mau
+            # memakainya. Angka SEBELUM/SESUDAH: docstring migrasi 0010.
+            models.Index(
+                models.F("toko"),
+                models.F("source_type"),
+                KeyTextTransform("Bank", "raw"),
+                models.F("posted_date"),
+                name="tx_fr_bank_posted_idx",
             ),
         ]
         constraints = [

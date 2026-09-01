@@ -12,7 +12,9 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from unittest import skipUnless
 from django.urls import reverse
 
 from sources.models import SourceType, Toko, Upload
@@ -152,7 +154,8 @@ class RentangAgregasiTests(_CarryData):
 class CarryEfisiensiTests(_CarryData):
     def test_saldo_carry_query_terbatas_bukan_scan_sejarah(self):
         # 5 akun berbeda dengan histori D0 → _saldo_carry harus tetap 2 query
-        # (agregat Max per akun + fetch hari-penutup), bukan N+1 per akun.
+        # (loose scan rekursif akun+tanggal-penutup + fetch hari-penutup),
+        # bukan N+1 per akun — sub-select id SourceType wajib tetap inline.
         for i in range(5):
             self.fr(f"BANK BRI | ORANG{i} | DEPOSIT", "Deposit",
                     "10000", "10000", jam="08:00", tanggal=D0)
@@ -241,3 +244,102 @@ class BreakdownRentangViewTests(_CarryData):
         self.assertEqual(ctx["prev_sampai"], date(2026, 7, 1))
         self.assertEqual(ctx["next_dari"], date(2026, 7, 5))
         self.assertEqual(ctx["next_sampai"], date(2026, 7, 7))
+
+
+class RantaiPutusFallbackTests(_CarryData):
+    """Jalur cepat hitungan-bertanda vs fallback `_saldo_batas` asli.
+
+    Rantai putus (pre-balance tidak nyambung) wajib jatuh ke fallback dan
+    menghasilkan PERSIS apa yang `_saldo_batas` lama hasilkan atas baris
+    terurut (Jam, id) — Selisih Kontrol ≠ 0 muncul sebagai sinyal, bukan
+    tersembunyi oleh jalur SQL baru.
+    """
+
+    def test_rantai_putus_sama_dengan_saldo_batas_asli(self):
+        from web.breakdown import _saldo_batas
+
+        # dua baris yang TIDAK nyambung: 100rb→150rb (delta 50rb, konsisten),
+        # lalu balance melompat ke 999rb dengan delta 10rb (pre 989rb ≠ 150rb).
+        self.fr(ACC, "Deposit", "50000", "150000", jam="09:00", tanggal=D1)
+        self.fr(ACC, "Deposit", "10000", "999000", jam="10:00", tanggal=D1)
+        data = bracket_breakdown(self.toko, D1, D1)
+        (acc,) = data["accounts"]
+        items = [
+            (f"{D1}T09:00", 1, Decimal("50000"), Decimal("150000"), "deposit"),
+            (f"{D1}T10:00", 2, Decimal("10000"), Decimal("999000"), "deposit"),
+        ]
+        awal, akhir = _saldo_batas(items)
+        self.assertEqual(acc["saldo_awal"], awal)    # 100000 (fallback baris pertama)
+        self.assertEqual(acc["saldo_akhir"], akhir)  # 999000 (fallback baris terakhir)
+        self.assertEqual(acc["selisih"], akhir - (awal + Decimal("60000")))
+        self.assertNotEqual(acc["selisih"], Decimal("0"))
+
+    def test_rantai_melingkar_fallback_jam_id(self):
+        # pembukaan == penutupan (multiset saling-hapus total) → hitungan
+        # bertanda kosong → fallback (Jam, id): (pre baris pertama, balance
+        # baris terakhir). Perilaku lama dipertahankan byte-demi-byte.
+        self.fr(ACC, "Deposit", "50000", "150000", jam="09:00", tanggal=D1)
+        self.fr(ACC, "Withdrawal", "-50000", "100000", jam="10:00", tanggal=D1)
+        data = bracket_breakdown(self.toko, D1, D1)
+        (acc,) = data["accounts"]
+        self.assertEqual(acc["saldo_awal"], Decimal("100000"))
+        self.assertEqual(acc["saldo_akhir"], Decimal("100000"))
+        self.assertEqual(acc["selisih"], Decimal("0"))
+
+
+class VarianEjaanCarryTests(_CarryData):
+    def test_varian_spasi_tepi_pakai_tanggal_terbaru(self):
+        # dua ejaan mentah yang menormal ke akun sama, hari penutup berbeda:
+        # carry wajib deterministik memakai tanggal TERBESAR (versi lama
+        # menimpa dict tanpa urutan tentu).
+        self.fr(f"  {ACC}  ", "Deposit", "111000", "111000", jam="08:00", tanggal=D0)
+        self.fr(ACC, "Deposit", "89000", "200000", jam="08:00", tanggal=D1)
+        data = bracket_breakdown(self.toko, D2, D2)
+        accs = [a for a in data["accounts"] if a["account"] == ACC]
+        self.assertEqual(len(accs), 1)
+        self.assertEqual(accs[0]["saldo_awal"], Decimal("200000"))  # penutup D1, bukan D0
+
+    def test_rantai_putus_lintas_hari_dengan_baris_tanpa_balance(self):
+        # putus ANTAR hari (penutup D1 ≠ pembukaan D2) + baris tanpa balance
+        # di ujung-ujung → fallback tetap: pre baris ber-balance PERTAMA
+        # (hari paling awal) dan balance baris ber-balance TERAKHIR (hari
+        # paling akhir); baris balance-None dilewati, tidak menggeser ujung.
+        self.fr(ACC, "Adjustment", "1000", None, jam="07:00", tanggal=D1)   # tanpa balance
+        self.fr(ACC, "Deposit", "50000", "150000", jam="09:00", tanggal=D1)
+        self.fr(ACC, "Deposit", "10000", "999000", jam="08:00", tanggal=D2)  # lompat
+        self.fr(ACC, "Adjustment", "2000", None, jam="23:00", tanggal=D2)   # tanpa balance
+        data = bracket_breakdown(self.toko, D1, D2)
+        (acc,) = data["accounts"]
+        self.assertEqual(acc["saldo_awal"], Decimal("100000"))  # 150000-50000
+        self.assertEqual(acc["saldo_akhir"], Decimal("999000"))
+        mutasi = Decimal("63000")
+        self.assertEqual(acc["selisih"], Decimal("999000") - (Decimal("100000") + mutasi))
+
+
+class SkalaNolTests(_CarryData):
+    """Sel yang deltanya saling meniadakan harus tetap berskala sen.
+
+    Agregasi SQL Postgres mengembalikan `Decimal("0.00")` untuk sel bernilai
+    nol. Idiom `x or NOL` menelan nilai itu (0.00 falsy) dan menukarnya dengan
+    `Decimal("0")` berskala 0 — nilainya sama dan tak terlihat di render
+    maupun ekspor, tapi berbeda dari perilaku lama yang menjumlah baris satu
+    per satu di Python, tanpa alasan.
+
+    Hanya Postgres yang bisa menghakimi ini: `Sum()` di SQLite memang
+    mengembalikan skala 0 apa pun kodenya, jadi di sana tes ini akan lolos
+    secara semu dan lebih jujur dilewati.
+    """
+
+    @skipUnless(connection.vendor == "postgresql", "skala agregat = properti Postgres")
+    def test_sel_nol_sama_dengan_jumlah_python(self):
+        self.fr(ACC, "Adjustment", "250000", "1250000", jam="09:00", tanggal=D1)
+        self.fr(ACC, "Adjustment", "-250000", "1000000", jam="09:30", tanggal=D1)
+
+        baris = Transaction.objects.filter(toko=self.toko).values_list(
+            "money_delta", flat=True
+        )
+        harap = sum(baris, Decimal("0"))  # persis cara kode lama menjumlah
+
+        sel = bracket_breakdown(self.toko, D1)["accounts"][0]["kategori"]["adjustment"]
+        self.assertEqual(sel, harap)
+        self.assertEqual(str(sel), str(harap))
