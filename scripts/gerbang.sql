@@ -140,10 +140,17 @@ SELECT 'jumlah amount ' || coalesce(sum(amount)::text,'0')
   FROM transactions_transaction WHERE id <= :ceil;
 
 \echo '=== 10 SEBARAN BULANAN posted_date DAN occurred_at (digerbang) ==='
-SELECT 'bulan-posted ' || coalesce(to_char(posted_date,'YYYY-MM'),'~NULL') || ' ' || count(*)
-  FROM transactions_transaction WHERE id <= :ceil GROUP BY 1 ORDER BY 1;
-SELECT 'bulan-occurred ' || coalesce(to_char(occurred_at,'YYYY-MM'),'~NULL') || ' ' || count(*)
-  FROM transactions_transaction WHERE id <= :ceil GROUP BY 1 ORDER BY 1;
+-- Lewat subquery: GROUP BY 1 pada ekspresi gabungan yang MEMUAT count(*) adalah
+-- galat sintaks ("aggregate functions are not allowed in GROUP BY") — tertangkap
+-- saat gladi FASE 2 pertama, 01-09-2026.
+SELECT 'bulan-posted ' || bulan || ' ' || n FROM (
+  SELECT coalesce(to_char(posted_date,'YYYY-MM'),'~NULL') AS bulan, count(*) AS n
+    FROM transactions_transaction WHERE id <= :ceil GROUP BY 1
+) x ORDER BY 1;
+SELECT 'bulan-occurred ' || bulan || ' ' || n FROM (
+  SELECT coalesce(to_char(occurred_at,'YYYY-MM'),'~NULL') AS bulan, count(*) AS n
+    FROM transactions_transaction WHERE id <= :ceil GROUP BY 1
+) x ORDER BY 1;
 
 \echo '=== 11 SEBARAN PER TOKO x SUMBER (digerbang) ==='
 -- Menangkap restore yang benar totalnya tapi timpang isinya.
@@ -205,7 +212,7 @@ SELECT 'index ' || c.relname || ' valid=' || i.indisvalid || ' ' || pg_get_index
 \echo '=== 15 CONSTRAINT SELURUH SKEMA (digerbang) ==='
 -- unique/FK/check. Hilangnya uniq_reconbatch_toko_recon_date atau
 -- uniq_tx_source_toko_rowhash tidak terlihat sampai data ganda tercipta.
-SELECT 'constraint ' || t.relname || ' ' || con.conname || ' ' || con.contype
+SELECT 'constraint ' || t.relname || ' ' || con.conname || ' ' || con.contype::text
        || ' ' || pg_get_constraintdef(con.oid)
   FROM pg_constraint con
   JOIN pg_class t ON t.oid = con.conrelid
