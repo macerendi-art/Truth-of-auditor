@@ -261,8 +261,10 @@ def build_batch_workbook(batch, batch_no, rel_labels):
     for cell in ws["A"]:
         cell.font = Font(bold=True)
 
+    from reconciliation.engine import filter_visible_runs
+
     titles = {"Ringkasan"}
-    for run in batch.runs.all().select_related("tolerance"):
+    for run in filter_visible_runs(batch.runs.all().select_related("tolerance")):
         results_sheet(wb, run, _sheet_title(f"Hasil {run.get_relation_display()}", titles), rel_labels)
 
     # Sheet tambahan (query-time, retroaktif): Breakdown Bracket + Rincian

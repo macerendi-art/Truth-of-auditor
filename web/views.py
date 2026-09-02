@@ -563,8 +563,10 @@ def dashboard(request):
     if active is None:
         return render(request, "web/no_toko.html")
 
+    from reconciliation.engine import filter_visible_runs
+
     uploads = Upload.objects.filter(toko=active)
-    runs = MatchRun.objects.filter(batch__toko=active)
+    runs = filter_visible_runs(MatchRun.objects.filter(batch__toko=active))
 
     # Kartu "Transaksi per Sumber": SATU agregat. Grouping sengaja di
     # `source_type_id` dan BUKAN `source_type__name` — yang terakhir memaksa
@@ -1517,8 +1519,11 @@ def batch_detail(request, pk):
         AuditLog.objects.filter(detail__batch_pk=batch.pk).select_related("user")[:20]
     )
 
+    from reconciliation.engine import filter_visible_runs
+
     return render(request, "web/batch_detail.html", {
-        "batch": batch, "batch_no": batch_no, "s": batch.summary or {}, "runs": batch.runs.all(),
+        "batch": batch, "batch_no": batch_no, "s": batch.summary or {},
+        "runs": filter_visible_runs(batch.runs.all()),
         "resolved_here": resolved_here, "settled_elsewhere": settled_elsewhere,
         "per_bank": per_bank, "is_hollow": is_hollow, "riwayat": riwayat,
     })

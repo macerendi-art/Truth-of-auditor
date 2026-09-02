@@ -97,8 +97,10 @@ class IncludeToggleTests(_Base):
         self._tx(self.bracket, "depo", "50000", "50000", "D1", "b1", username="budi")
         self._tx(self.bank, "depo", "50000", "50000", "", "k1", username="budi")
         batch = run_batch(self.lbs, self.tol)
-        self.assertEqual(batch.runs.count(), 4)  # panel_bracket + panel_bank + fr_bank + bracket_bank
+        # fr_bank sementara OFF → 3 relasi (panel_bracket + panel_bank + bracket_bank)
+        self.assertEqual(batch.runs.count(), 3)  # tanpa fr_bank
         self.assertEqual(batch.summary["skipped"], [])
+        self.assertNotIn("fr_bank", set(batch.runs.values_list("relation", flat=True)))
 
     def test_unchecked_source_not_matched_and_not_consumed(self):
         # Bank hadir tapi TIDAK dicentang → tidak dicocokkan & tidak dikonsumsi.

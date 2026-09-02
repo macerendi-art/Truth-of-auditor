@@ -1215,6 +1215,23 @@ MATCHERS = {
     MatchRun.Relation.BRACKET_BANK: BracketBankMatcher,
 }
 
+# Sementara OFF semua toko (RND Audit 2026-09-02).
+# Bracket ↔ Mutasi Bank (fr_bank) tidak dijalankan di batch baru dan
+# disembunyikan di UI. Sesama CM (bracket_bank) tidak terpengaruh.
+# Nyalakan lagi: set True (+ deploy). Matcher/CLI run_match tetap ada.
+FR_BANK_ENABLED = False
+
+
+def fr_bank_enabled() -> bool:
+    return bool(FR_BANK_ENABLED)
+
+
+def filter_visible_runs(qs):
+    """Sembunyikan MatchRun fr_bank dari daftar UI saat flag off (batch lama pun)."""
+    if not FR_BANK_ENABLED:
+        return qs.exclude(relation=MatchRun.Relation.FR_BANK)
+    return qs
+
 
 def run_match(relation, tolerance=None, date_from=None, date_to=None, user=None, toko=None, batch=None, include=None,
               carried=None, retro=None):
@@ -1796,8 +1813,11 @@ def run_batch(toko, tolerance=None, date_from=None, date_to=None, user=None, inc
     else:
         skipped.append(MatchRun.Relation.PANEL_BANK.value)
     # FR_BANK = Bracket/FR DP·WD member ↔ mutasi (selaras panel_bank; bukan Sesama CM).
+    # Flag FR_BANK_ENABLED=False → hilang total dari relations + skipped (hide).
     bracket_on = bool(comp.get("bracket") and _inc(include, "bracket"))
-    if bracket_on and money_present:
+    if not FR_BANK_ENABLED:
+        pass  # sementara dimatikan semua toko — tidak dijalankan, tidak di-list skipped
+    elif bracket_on and money_present:
         relations.append(MatchRun.Relation.FR_BANK)
     else:
         skipped.append(MatchRun.Relation.FR_BANK.value)

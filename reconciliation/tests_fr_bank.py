@@ -87,7 +87,8 @@ class FrBankMatcherTests(TestCase):
         left, right = FrBankMatcher().sides(None, None, toko=self.toko)
         self.assertEqual(len(left), 0)
 
-    def test_run_batch_menyertakan_fr_bank(self):
+    def test_run_batch_tanpa_fr_bank_saat_disabled(self):
+        """Default FR_BANK_ENABLED=False: batch baru tanpa fr_bank; Sesama CM tetap."""
         self._tx(
             self.up_panel, self.panel, jenis="depo", amount="10000",
             ticket="D9", username="u1", rh="p1",
@@ -103,10 +104,37 @@ class FrBankMatcherTests(TestCase):
         )
         batch = run_batch(self.toko, self.tol)
         rels = set(batch.runs.values_list("relation", flat=True))
+        self.assertNotIn("fr_bank", rels)
+        self.assertIn("bracket_bank", rels)
+        self.assertIn("panel_bank", rels)
+        self.assertIn("panel_bracket", rels)
+        self.assertEqual(batch.runs.count(), 3)
+        self.assertNotIn("fr_bank", batch.summary.get("skipped") or [])
+
+    def test_run_batch_menyertakan_fr_bank_saat_enabled(self):
+        """Flag on (bukan default prod) → fr_bank ikut 4 relasi."""
+        from unittest.mock import patch
+
+        self._tx(
+            self.up_panel, self.panel, jenis="depo", amount="10000",
+            ticket="D9", username="u1", rh="p1e",
+        )
+        self._tx(
+            self.up_fr, self.bracket, jenis="depo", amount="10000",
+            ticket="D9", username="u1",
+            raw={"Kategori": "Deposit"}, rh="b1e",
+        )
+        self._tx(
+            self.up_bank, self.bank, jenis="depo", amount="10000",
+            username="u1", rh="k1e",
+        )
+        with patch("reconciliation.engine.FR_BANK_ENABLED", True):
+            batch = run_batch(self.toko, self.tol)
+        rels = set(batch.runs.values_list("relation", flat=True))
         self.assertIn("fr_bank", rels)
         self.assertIn("panel_bank", rels)
         self.assertIn("panel_bracket", rels)
-        self.assertIn("bracket_bank", rels)  # Sesama CM (boleh 0 cocok)
+        self.assertIn("bracket_bank", rels)
         self.assertEqual(batch.runs.count(), 4)
         fr = batch.runs.get(relation="fr_bank")
         self.assertEqual(fr.get_relation_display(), "Bracket ↔ Mutasi Bank")
