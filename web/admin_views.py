@@ -60,6 +60,7 @@ def _locking_batches(upload):
 
 VALID_ROLES = ("admin", "supervisor", "auditor")
 PANEL_LABELS = dict(Toko.PANEL_CHOICES)
+KEPEMILIKAN_LABELS = dict(Toko.KEPEMILIKAN_CHOICES)
 
 
 def _toko_id_sah(tid):
@@ -88,15 +89,25 @@ def kelola_toko(request):
     if request.method == "POST" and request.POST.get("action") == "create":
         kode = request.POST.get("kode", "").strip()
         panel = request.POST.get("panel", "")
+        kepemilikan = request.POST.get("kepemilikan", "")
         if not kode or not kode.isalnum():
             messages.error(request, "Kode toko wajib huruf/angka tanpa spasi.")
         elif Toko.objects.filter(key=kode.lower()).exists():
             messages.error(request, f"Toko {kode.upper()} sudah ada.")
         elif panel not in PANEL_LABELS:
             messages.error(request, "Pilih panel toko (Nexus/Vigor/TM Gaming).")
+        elif kepemilikan not in KEPEMILIKAN_LABELS:
+            messages.error(request, "Pilih kepemilikan toko (Pusat/Partner).")
         else:
-            t = Toko.objects.create(key=kode.lower(), name=kode.upper(), panel=panel)
-            catat(request.user, "buat_toko", t.name, toko=t, panel=PANEL_LABELS[panel])
+            t = Toko.objects.create(
+                key=kode.lower(), name=kode.upper(),
+                panel=panel, kepemilikan=kepemilikan,
+            )
+            catat(
+                request.user, "buat_toko", t.name, toko=t,
+                panel=PANEL_LABELS[panel],
+                kepemilikan=KEPEMILIKAN_LABELS[kepemilikan],
+            )
             messages.success(request, f"Toko {kode.upper()} ditambahkan.")
         return redirect("kelola_toko")
     if request.method == "POST" and request.POST.get("action") == "toggle":
@@ -148,6 +159,30 @@ def kelola_toko(request):
             messages.success(
                 request, f"Panel toko {t.name} diganti menjadi {PANEL_LABELS[panel_baru]}.")
         return redirect("kelola_toko")
+    if request.method == "POST" and request.POST.get("action") == "kepemilikan":
+        tid = request.POST.get("toko_id", "")
+        kep_baru = request.POST.get("kepemilikan", "")
+        if not _toko_id_sah(tid):
+            messages.error(request, "ID toko tidak valid.")
+            return redirect("kelola_toko")
+        if kep_baru not in KEPEMILIKAN_LABELS:
+            messages.error(request, "Pilih kepemilikan toko (Pusat/Partner).")
+            return redirect("kelola_toko")
+        t = get_object_or_404(Toko, pk=tid)
+        kep_lama = t.kepemilikan
+        if kep_baru != kep_lama:
+            t.kepemilikan = kep_baru
+            t.save(update_fields=["kepemilikan"])
+            catat(
+                request.user, "ubah_kepemilikan_toko",
+                f"{t.name}: {KEPEMILIKAN_LABELS[kep_lama]} → {KEPEMILIKAN_LABELS[kep_baru]}",
+                toko=t,
+            )
+            messages.success(
+                request,
+                f"Kepemilikan toko {t.name} diganti menjadi {KEPEMILIKAN_LABELS[kep_baru]}.",
+            )
+        return redirect("kelola_toko")
     # Jumlah per toko WAJIB dua query agregat terpisah — annotate ganda
     # Count(distinct) atas dua relasi meledakkan join Toko×Transaction×Upload
     # (497rb tx × ratusan upload): terukur 29,8 dtk di prod = halaman putih.
@@ -159,6 +194,7 @@ def kelola_toko(request):
         t.n_up = up_counts.get(t.id, 0)
     return render(request, "web/kelola/toko.html",
                   {"tokos": tokos, "panel_choices": Toko.PANEL_CHOICES,
+                   "kepemilikan_choices": Toko.KEPEMILIKAN_CHOICES,
                    **BEBAS_TOKO})
 
 

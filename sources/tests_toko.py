@@ -97,9 +97,11 @@ class TokoPanelKelolaViewTests(TestCase):
     def test_create_dengan_panel_valid_tersimpan_dan_terlog(self):
         self.client.post(reverse("kelola_toko"), {
             "action": "create", "kode": "zzp", "panel": Toko.PANEL_VIGOR,
+            "kepemilikan": Toko.KEPEMILIKAN_PARTNER,
         })
         t = Toko.objects.get(key="zzp")
         self.assertEqual(t.panel, Toko.PANEL_VIGOR)
+        self.assertEqual(t.kepemilikan, Toko.KEPEMILIKAN_PARTNER)
         log = AuditLog.objects.filter(aksi="buat_toko", objek="ZZP").latest("id")
         self.assertEqual(log.toko_id, t.id)
 
@@ -107,6 +109,7 @@ class TokoPanelKelolaViewTests(TestCase):
         n = Toko.objects.count()
         r = self.client.post(reverse("kelola_toko"), {
             "action": "create", "kode": "zzb",
+            "kepemilikan": Toko.KEPEMILIKAN_PUSAT,
         }, follow=True)
         self.assertEqual(Toko.objects.count(), n)
         self.assertFalse(Toko.objects.filter(key="zzb").exists())
@@ -116,9 +119,18 @@ class TokoPanelKelolaViewTests(TestCase):
         n = Toko.objects.count()
         self.client.post(reverse("kelola_toko"), {
             "action": "create", "kode": "zzc", "panel": "galaksi",
+            "kepemilikan": Toko.KEPEMILIKAN_PUSAT,
         })
         self.assertEqual(Toko.objects.count(), n)
         self.assertFalse(Toko.objects.filter(key="zzc").exists())
+
+    def test_create_tanpa_kepemilikan_ditolak(self):
+        n = Toko.objects.count()
+        r = self.client.post(reverse("kelola_toko"), {
+            "action": "create", "kode": "zzk", "panel": Toko.PANEL_NEXUS,
+        }, follow=True)
+        self.assertEqual(Toko.objects.count(), n)
+        self.assertContains(r, "Pilih kepemilikan toko")
 
     def test_action_panel_mengubah_dan_terlog(self):
         t = Toko.objects.get(key="lbs")
@@ -131,6 +143,30 @@ class TokoPanelKelolaViewTests(TestCase):
         log = AuditLog.objects.filter(aksi="ubah_panel_toko").latest("id")
         self.assertIn("LBS", log.objek)
         self.assertEqual(log.toko_id, t.id)
+
+    def test_action_kepemilikan_mengubah_dan_terlog(self):
+        t = Toko.objects.get(key="lbs")
+        self.assertEqual(t.kepemilikan, Toko.KEPEMILIKAN_PUSAT)
+        self.client.post(reverse("kelola_toko"), {
+            "action": "kepemilikan", "toko_id": t.id,
+            "kepemilikan": Toko.KEPEMILIKAN_PARTNER,
+        })
+        t.refresh_from_db()
+        self.assertEqual(t.kepemilikan, Toko.KEPEMILIKAN_PARTNER)
+        log = AuditLog.objects.filter(aksi="ubah_kepemilikan_toko").latest("id")
+        self.assertIn("LBS", log.objek)
+        self.assertIn("Partner", log.objek)
+        self.assertEqual(log.toko_id, t.id)
+
+    def test_action_kepemilikan_tanpa_perubahan_tak_audit(self):
+        t = Toko.objects.get(key="lbs")
+        n_sebelum = AuditLog.objects.filter(aksi="ubah_kepemilikan_toko").count()
+        self.client.post(reverse("kelola_toko"), {
+            "action": "kepemilikan", "toko_id": t.id,
+            "kepemilikan": Toko.KEPEMILIKAN_PUSAT,
+        })
+        self.assertEqual(
+            AuditLog.objects.filter(aksi="ubah_kepemilikan_toko").count(), n_sebelum)
 
     def test_action_panel_tanpa_perubahan_tak_menulis_audit(self):
         t = Toko.objects.get(key="lbs")  # sudah nexus (default)
@@ -147,14 +183,17 @@ class TokoPanelKelolaViewTests(TestCase):
         """`isdecimal()` saja meloloskan "9"*11 ke query pk — di Postgres itu
         NumericValueOutOfRange/DataError (500), bukan 404 rapi. Batas panjang
         sama dengan `set_toko` (≤10 digit) menolaknya SEBELUM menyentuh DB:
-        0 query ke tabel Toko. Berlaku utk ketiga aksi ber-toko_id di sini —
-        panel, toggle, dan rename — karena celahnya identik."""
+        0 query ke tabel Toko. Berlaku utk aksi ber-toko_id di sini.
+        """
         from django.db import connection
         from django.test.utils import CaptureQueriesContext
 
-        for action, extra in (("panel", {"panel": Toko.PANEL_VIGOR}),
-                              ("toggle", {}),
-                              ("rename", {"nama_baru": "Ngawur"})):
+        for action, extra in (
+            ("panel", {"panel": Toko.PANEL_VIGOR}),
+            ("kepemilikan", {"kepemilikan": Toko.KEPEMILIKAN_PARTNER}),
+            ("toggle", {}),
+            ("rename", {"nama_baru": "Ngawur"}),
+        ):
             with self.subTest(action=action):
                 with CaptureQueriesContext(connection) as ctx:
                     r = self.client.post(reverse("kelola_toko"), {
@@ -164,3 +203,9 @@ class TokoPanelKelolaViewTests(TestCase):
                     any('"sources_toko"' in q["sql"] for q in ctx),
                     f"id kepanjangan masih mencapai query Toko: "
                     f"{[q['sql'] for q in ctx]}")
+
+
+class TokoKepemilikanModelTests(TestCase):
+    def test_default_kepemilikan_pusat(self):
+        t = Toko.objects.create(key="zzd", name="ZZD")
+        self.assertEqual(t.kepemilikan, Toko.KEPEMILIKAN_PUSAT)

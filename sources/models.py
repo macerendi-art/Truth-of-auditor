@@ -36,6 +36,13 @@ class Toko(TimeStampedModel):
         (PANEL_VIGOR, "Vigor"),
         (PANEL_TMG, "TM Gaming"),
     ]
+    # Status mitra operasional — METADATA MURNI (filter/badge/admin saja).
+    # Tidak dibaca engine rekonsiliasi.
+    KEPEMILIKAN_PUSAT, KEPEMILIKAN_PARTNER = "pusat", "partner"
+    KEPEMILIKAN_CHOICES = [
+        (KEPEMILIKAN_PUSAT, "Pusat"),
+        (KEPEMILIKAN_PARTNER, "Partner"),
+    ]
 
     key = models.SlugField(max_length=30, unique=True)
     name = models.CharField(max_length=100)
@@ -46,6 +53,12 @@ class Toko(TimeStampedModel):
     # reconciliation/engine.py — salah label di sini tak pernah mengubah
     # hasil pencocokan (matching tetap data-driven).
     panel = models.CharField(max_length=20, choices=PANEL_CHOICES, default=PANEL_NEXUS)
+    kepemilikan = models.CharField(
+        max_length=20,
+        choices=KEPEMILIKAN_CHOICES,
+        default=KEPEMILIKAN_PUSAT,
+        help_text="Pusat atau Partner — metadata admin, bukan input engine.",
+    )
 
     def __str__(self):
         return self.name

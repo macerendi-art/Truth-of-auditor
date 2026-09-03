@@ -70,6 +70,11 @@ class KelolaTokoPanelBadgeTests(TestCase):
     def test_kolom_panel_tampil_dengan_badge(self):
         r = self.client.get(reverse("kelola_toko"))
         self.assertContains(r, "<th>Panel</th>")
+        self.assertContains(r, "<th>Pusat / Partner</th>")
         # AHK = nexus (default), SLO = vigor (migrasi 0012).
         self.assertContains(r, 'badge muted plain">Nexus</span>')
         self.assertContains(r, 'badge warn plain">Vigor</span>')
+        # default kepemilikan = Pusat
+        self.assertContains(r, 'badge ok plain">Pusat</span>')
+        self.assertContains(r, 'name="kepemilikan"')
+        self.assertContains(r, ">Partner</option>")
