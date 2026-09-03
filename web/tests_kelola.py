@@ -36,11 +36,14 @@ class KelolaTokoCrudTests(TestCase):
 
     def test_create_toko(self):
         self.client.post(reverse("kelola_toko"), {
-            "action": "create", "kode": "zz9", "panel": Toko.PANEL_NEXUS})
+            "action": "create", "kode": "zz9", "panel": Toko.PANEL_NEXUS,
+            "kepemilikan": Toko.KEPEMILIKAN_PUSAT,
+        })
         t = Toko.objects.get(key="zz9")
         self.assertEqual(t.name, "ZZ9")
         self.assertTrue(t.is_active)
         self.assertEqual(t.panel, Toko.PANEL_NEXUS)
+        self.assertEqual(t.kepemilikan, Toko.KEPEMILIKAN_PUSAT)
 
     def test_create_toko_tanpa_panel_ditolak(self):
         self.client.post(reverse("kelola_toko"), {"action": "create", "kode": "zz8"})

@@ -76,9 +76,12 @@ class PencatatanAksiKelolaTests(TestCase):
 
     def test_buat_toko(self):
         self.client.post(reverse("kelola_toko"), {
-            "action": "create", "kode": "ZZQ", "panel": Toko.PANEL_NEXUS})
+            "action": "create", "kode": "ZZQ", "panel": Toko.PANEL_NEXUS,
+            "kepemilikan": Toko.KEPEMILIKAN_PARTNER,
+        })
         self.assertEqual(self._log("buat_toko").objek, "ZZQ")
-
+        t = Toko.objects.get(key="zzq")
+        self.assertEqual(t.kepemilikan, Toko.KEPEMILIKAN_PARTNER)
     def test_toggle_toko(self):
         t = Toko.objects.create(key="zzt", name="ZZT")
         self.client.post(reverse("kelola_toko"), {"action": "toggle", "toko_id": str(t.id)})
