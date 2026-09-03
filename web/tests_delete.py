@@ -54,8 +54,8 @@ class DeleteUploadTests(TestCase):
         self.client.get(reverse("delete_upload", args=[up.pk]))
         self.assertTrue(Upload.objects.filter(pk=up.pk).exists())
 
-    def test_tombol_hanya_untuk_admin(self):
-        # Hapus (massal, checkbox pilih-semua) hanya untuk admin.
+    def test_tombol_hapus_massal_admin_dan_supervisor_bukan_auditor(self):
+        """Tombol hapus massal upload: admin + supervisor YA, auditor TIDAK."""
         _mk_upload(self.lbs)
         aud = User.objects.create_user("aud2", password="pw123456", role="auditor")
         aud.allowed_tokos.add(self.lbs)
@@ -64,11 +64,51 @@ class DeleteUploadTests(TestCase):
         r = self.client.get(reverse("upload"))
         self.assertNotContains(r, "Hapus terpilih")
         self.assertNotContains(r, 'id="chkAll"')
-        self.client.login(username="adm", password="pw123456")
+        for nama in ("adm", "sup_up_btn"):
+            if nama != "adm":
+                User.objects.create_user(nama, password="pw123456", role="supervisor")
+            self.client.login(username=nama, password="pw123456")
+            self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
+            r = self.client.get(reverse("upload"))
+            self.assertContains(r, "Hapus terpilih", msg_prefix=nama)
+            self.assertContains(r, 'id="chkAll"', msg_prefix=nama)
+
+    def test_supervisor_hapus_upload_satuan(self):
+        up, _ = _mk_upload(self.lbs)
+        User.objects.create_user("sup_up", password="pw123456", role="supervisor")
+        self.client.login(username="sup_up", password="pw123456")
+        self.client.post(reverse("delete_upload", args=[up.pk]))
+        self.assertFalse(Upload.objects.filter(pk=up.pk).exists())
+
+    def test_supervisor_hapus_upload_massal(self):
+        up, _ = _mk_upload(self.lbs)
+        User.objects.create_user("sup_upm", password="pw123456", role="supervisor")
+        self.client.login(username="sup_upm", password="pw123456")
         self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
-        r = self.client.get(reverse("upload"))
-        self.assertContains(r, "Hapus terpilih")
-        self.assertContains(r, 'id="chkAll"')
+        self.client.post(reverse("bulk_delete_uploads"), {"upload_ids": [str(up.pk)]})
+        self.assertFalse(Upload.objects.filter(pk=up.pk).exists())
+
+    def test_guard_integritas_tetap_menolak_supervisor(self):
+        """`_locking_batches` BUKAN guard peran — ia berlaku juga utk supervisor.
+
+        Hak hapus supervisor disetarakan dengan admin (v1.24.0), tapi admin pun
+        tak pernah kebal guard ini: upload yang buktinya dipakai hasil
+        rekonsiliasi tetap tak boleh hilang.
+        """
+        from datetime import date
+        from reconciliation.models import ReconBatch, ToleranceProfile
+        up, st = _mk_upload(self.lbs)
+        tol = ToleranceProfile.objects.get(name="Default")
+        b = ReconBatch.objects.create(
+            toko=self.lbs, tolerance=tol, recon_date=date(2026, 8, 20), summary={})
+        Transaction.objects.create(
+            upload=up, source_type=st, toko=self.lbs, jenis="depo",
+            amount=1000, row_hash="lock1", consumed_by_batch=b)
+        User.objects.create_user("sup_lock", password="pw123456", role="supervisor")
+        self.client.login(username="sup_lock", password="pw123456")
+        r = self.client.post(reverse("delete_upload", args=[up.pk]), follow=True)
+        self.assertTrue(Upload.objects.filter(pk=up.pk).exists())
+        self.assertContains(r, "tidak bisa dihapus")
 
 
 class DeleteBatchTests(TestCase):
@@ -122,16 +162,20 @@ class DeleteBatchTests(TestCase):
         self.assertEqual(log.detail.get("recon_date"), "2026-08-21")
         self.assertEqual(log.detail.get("n_review"), 0)
 
-    def test_supervisor_ditolak_batch_punya_review(self):
+    def test_supervisor_boleh_hapus_batch_punya_review(self):
+        """Guard v1.22.0 DICABUT (v1.24.0) — tapi jejak audit wajib mencatat
+        berapa keputusan review manual ikut hilang, karena ReviewAction mati
+        lewat cascade dan angka ini satu-satunya sisa buktinya."""
         from reconciliation.models import ReconBatch, ReviewAction
         res = self._mk_result(self.batch)
         ReviewAction.objects.create(result=res, action="override")
         User.objects.create_user("sup_rv", password="pw123456", role="supervisor")
         self.client.login(username="sup_rv", password="pw123456")
-        r = self.client.post(
-            reverse("delete_batch", args=[self.batch.pk]), follow=True)
-        self.assertTrue(ReconBatch.objects.filter(pk=self.batch.pk).exists())
-        self.assertContains(r, "keputusan review manual")
+        self.client.post(reverse("delete_batch", args=[self.batch.pk]))
+        self.assertFalse(ReconBatch.objects.filter(pk=self.batch.pk).exists())
+        from core.models import AuditLog
+        log = AuditLog.objects.filter(aksi="hapus_batch").latest("id")
+        self.assertEqual(log.detail.get("n_review"), 1)
 
     def test_admin_tetap_boleh_hapus_batch_punya_review(self):
         from reconciliation.models import ReconBatch, ReviewAction
@@ -144,7 +188,7 @@ class DeleteBatchTests(TestCase):
         log = AuditLog.objects.filter(aksi="hapus_batch").latest("id")
         self.assertEqual(log.detail.get("n_review"), 1)
 
-    def test_supervisor_ditolak_bukan_batch_terakhir(self):
+    def test_supervisor_boleh_hapus_batch_bukan_terakhir(self):
         from datetime import date
         from reconciliation.models import ReconBatch, ToleranceProfile
         tol = ToleranceProfile.objects.get(name="Default")
@@ -154,10 +198,8 @@ class DeleteBatchTests(TestCase):
             toko=self.lbs, tolerance=tol, recon_date=date(2026, 8, 21), summary={})
         User.objects.create_user("sup_nl", password="pw123456", role="supervisor")
         self.client.login(username="sup_nl", password="pw123456")
-        r = self.client.post(
-            reverse("delete_batch", args=[self.batch.pk]), follow=True)
-        self.assertTrue(ReconBatch.objects.filter(pk=self.batch.pk).exists())
-        self.assertContains(r, "bukan batch terakhir")
+        self.client.post(reverse("delete_batch", args=[self.batch.pk]))
+        self.assertFalse(ReconBatch.objects.filter(pk=self.batch.pk).exists())
 
     def test_auditor_tetap_ditolak_hapus_batch(self):
         from reconciliation.models import ReconBatch
@@ -233,8 +275,12 @@ class DeleteBatchTests(TestCase):
         self.assertFalse(ReconBatch.objects.filter(pk__in=[b2.pk, b3.pk]).exists())
         self.assertTrue(ReconBatch.objects.filter(pk=self.batch.pk).exists())
 
-    def test_bulk_delete_batches_supervisor_lewati_batch_lama(self):
-        """Batch non-terakhir dilewati (dilaporkan), yang terbaru tetap terhapus."""
+    def test_bulk_delete_batches_supervisor_boleh_batch_lama(self):
+        """Guard "hanya batch terakhir" DICABUT (v1.24.0): batch lama ikut terhapus.
+
+        Sebelumnya batch non-terakhir dilewati & dilaporkan; kini supervisor
+        setara admin, jadi keduanya benar-benar hilang.
+        """
         from datetime import date
         from reconciliation.models import ReconBatch, ToleranceProfile
         tol = ToleranceProfile.objects.get(name="Default")
@@ -245,16 +291,20 @@ class DeleteBatchTests(TestCase):
         User.objects.create_user("sup3", password="pw123456", role="supervisor")
         self.client.login(username="sup3", password="pw123456")
         self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
-        # Pilih batch paling lama + paling baru: yang lama dilewati (b2 masih ada).
-        r = self.client.post(reverse("bulk_delete_batches"),
-                             {"batch_ids": [str(self.batch.pk), str(b3.pk)]}, follow=True)
+        # Pilih batch paling lama + paling baru: KEDUANYA terhapus sekarang.
+        self.client.post(reverse("bulk_delete_batches"),
+                         {"batch_ids": [str(self.batch.pk), str(b3.pk)]})
         self.assertFalse(ReconBatch.objects.filter(pk=b3.pk).exists())
-        self.assertTrue(ReconBatch.objects.filter(pk=self.batch.pk).exists())
+        self.assertFalse(ReconBatch.objects.filter(pk=self.batch.pk).exists())
+        # Yang TIDAK dipilih tetap utuh — penghapusan hanya menyentuh pilihan.
         self.assertTrue(ReconBatch.objects.filter(pk=b2.pk).exists())
-        self.assertContains(r, "bukan batch terakhir")
 
-    def test_bulk_delete_batches_supervisor_lewati_batch_ber_review(self):
-        """Guard review manual juga berlaku di jalur massal (bukan bypass satu klik)."""
+    def test_bulk_delete_batches_supervisor_boleh_batch_ber_review(self):
+        """Jalur massal ikut mencabut guard review — dan mencatat jumlahnya.
+
+        `n_review` di jejak audit adalah satu-satunya sisa bukti bahwa
+        keputusan review manual pernah ada di batch yang dihapus.
+        """
         from reconciliation.models import MatchResult, MatchRun, ReconBatch, ReviewAction, ToleranceProfile
         tol = ToleranceProfile.objects.get(name="Default")
         run = MatchRun.objects.create(
@@ -264,10 +314,12 @@ class DeleteBatchTests(TestCase):
         User.objects.create_user("sup4", password="pw123456", role="supervisor")
         self.client.login(username="sup4", password="pw123456")
         self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
-        r = self.client.post(reverse("bulk_delete_batches"),
-                             {"batch_ids": [str(self.batch.pk)]}, follow=True)
-        self.assertTrue(ReconBatch.objects.filter(pk=self.batch.pk).exists())
-        self.assertContains(r, "keputusan review manual")
+        self.client.post(reverse("bulk_delete_batches"),
+                         {"batch_ids": [str(self.batch.pk)]})
+        self.assertFalse(ReconBatch.objects.filter(pk=self.batch.pk).exists())
+        from core.models import AuditLog
+        log = AuditLog.objects.filter(aksi="hapus_batch_massal").latest("id")
+        self.assertEqual(log.detail.get("n_review"), 1)
 
     def test_bulk_delete_batches_auditor_ditolak(self):
         from reconciliation.models import ReconBatch

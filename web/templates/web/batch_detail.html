@@ -11,7 +11,7 @@
   </div>
   <div class="actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <a class="btn ghost" href="{% url 'reconcile' %}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>Kembali ke Rekonsiliasi</a>
-    {% if boleh_hapus_batch %}
+    {% if boleh_hapus_data %}
     <form method="post" action="{% url 'delete_batch' batch.pk %}" style="margin:0"
           onsubmit="return confirm('Hapus Batch #{{ batch_no }}? Semua hasil rekonsiliasinya terhapus (transaksi tetap utuh).')">
       {% csrf_token %}

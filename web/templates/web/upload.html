@@ -223,12 +223,16 @@
     <h3>Riwayat Upload — {{ active_toko.name }}</h3>
     <div class="toolbar">
       <span class="chip-n">{{ uploads.paginator.count|intcomma }} file</span>
+      {% comment %}Cari nama file tetap admin-only (view menyaring `q` dgn
+      is_admin). Tombol hapus massal terpisah: admin + supervisor.{% endcomment %}
       {% if is_admin_user %}
       <form method="get" class="searchbox" role="search">
         <input class="ctl-sm" name="q" value="{{ q|default:'' }}" placeholder="Cari nama file…" aria-label="Cari nama file">
         <button class="btn sm" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.3" y2="16.3"/></svg>Cari</button>
       </form>
       {% if q %}<a class="btn sm ghost" href="{% url 'upload' %}">Reset</a>{% endif %}
+      {% endif %}
+      {% if boleh_hapus_data %}
       <span class="vr" aria-hidden="true"></span>
       <button type="submit" form="bulkform" class="btn sm danger" id="bulkDelBtn" disabled>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -242,11 +246,11 @@
   <input type="hidden" name="page" value="{{ uploads.number }}">
   <div class="twrap" style="border:none">
   <table>
-    <thead><tr>{% if is_admin_user %}<th style="width:32px"><input type="checkbox" id="chkAll" title="Pilih semua"></th>{% endif %}<th>File</th><th>Jenis</th><th>Provider</th><th>DP/WD</th><th class="r">Baris</th><th class="r">Dup</th><th>Status</th><th>Oleh</th><th>Waktu</th>{% if is_admin_user %}<th></th>{% endif %}</tr></thead>
+    <thead><tr>{% if boleh_hapus_data %}<th style="width:32px"><input type="checkbox" id="chkAll" title="Pilih semua"></th>{% endif %}<th>File</th><th>Jenis</th><th>Provider</th><th>DP/WD</th><th class="r">Baris</th><th class="r">Dup</th><th>Status</th><th>Oleh</th><th>Waktu</th>{% if boleh_hapus_data %}<th></th>{% endif %}</tr></thead>
     <tbody>
     {% for u in uploads %}
       <tr>
-        {% if is_admin_user %}<td>{% if not u.locked %}<input type="checkbox" class="rowchk" name="upload_ids" value="{{ u.pk }}" aria-label="Pilih {{ u.original_name|default:u.pk }}">{% endif %}</td>{% endif %}
+        {% if boleh_hapus_data %}<td>{% if not u.locked %}<input type="checkbox" class="rowchk" name="upload_ids" value="{{ u.pk }}" aria-label="Pilih {{ u.original_name|default:u.pk }}">{% endif %}</td>{% endif %}
         <td>{{ u.original_name|default:u.pk }}</td>
         <td>{{ u.source_type.name }}</td>
         <td>{{ u.provider|default:"—" }}</td>
@@ -256,12 +260,12 @@
         <td>{% if u.status == 'parsed' %}<span class="badge ok">parsed</span>{% elif u.status == 'error' %}<span class="badge bad">error</span>{% else %}<span class="badge warn">{{ u.status }}</span>{% endif %}{% if u.superseded_by %} <span class="badge muted" title='Ketiban — seluruh isinya sudah tercakup file "{{ u.superseded_by.original_name }}" ({{ u.superseded_by.created_at|date:"d/m H:i" }})'>Ketiban</span>{% endif %}</td>
         <td>{{ u.uploaded_by.username|default:"—" }}</td>
         <td class="faint">{{ u.created_at|date:"d/m H:i" }}</td>
-        {% if is_admin_user %}
+        {% if boleh_hapus_data %}
         <td class="r">{% if u.locked %}<span class="badge muted" title="Buktinya dipakai hasil rekonsiliasi — hapus batch terkait dulu">🔒 Dipakai hasil rekonsiliasi</span>{% endif %}</td>
         {% endif %}
       </tr>
     {% empty %}
-      <tr><td colspan="{% if is_admin_user %}11{% else %}9{% endif %}" class="cell-empty">Belum ada upload untuk toko ini.</td></tr>
+      <tr><td colspan="{% if boleh_hapus_data %}11{% else %}9{% endif %}" class="cell-empty">Belum ada upload untuk toko ini.</td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -269,7 +273,7 @@
   {% pager uploads %}
   </form>
 </div>
-{% if is_admin_user %}
+{% if boleh_hapus_data %}
 <script>
 (function(){
   var all=document.getElementById('chkAll'),

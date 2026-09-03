@@ -3,11 +3,19 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.23.0** · 40 rilis (1 besar, 23 fitur, 12 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.24.0** · 41 rilis (1 besar, 24 fitur, 12 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.24.0 — Supervisor Setara Admin untuk Menghapus Data Kerja
+*Rilis fitur · 2 September 2026*
+
+- **Supervisor kini bisa menghapus berkas unggahan** — satuan maupun massal lewat centang, sama seperti admin. Sebelumnya hanya admin, sehingga supervisor harus menunggu untuk membereskan berkas yang salah unggah.
+- **Dua pagar pada penghapusan batch dicabut atas permintaan pemilik.** Sejak v1.22.0 supervisor hanya boleh menghapus batch TERAKHIR sebuah toko, dan batch yang memuat keputusan review manual ditolak. Keduanya kini tidak berlaku lagi: supervisor boleh menghapus batch mana pun, termasuk yang berisi review manual. Yang perlu diketahui: menghapus batch di tengah riwayat membuat hasil hari-hari berikutnya tidak bisa direproduksi persis bila dijalankan ulang — tanpa pesan kesalahan apa pun.
+- **Jejak audit menutupi sebagian risikonya.** Setiap penghapusan batch, satuan maupun massal, mencatat berapa keputusan review manual ikut hilang bersamanya — karena catatan review itu sendiri terhapus mengikuti batch, angka tersebut satu-satunya bukti yang tersisa bahwa keputusan itu pernah dibuat.
+- **Yang tetap khusus admin:** menu Kelola (toko, pengguna, daftar IP) dan pencarian nama berkas di halaman Upload. Dan satu penjagaan tetap berlaku untuk semua peran termasuk admin — berkas yang buktinya sedang dipakai hasil rekonsiliasi tidak bisa dihapus sebelum batch-nya dihapus lebih dulu.
 
 ## v1.23.0 — Halaman Berat Berhenti Menghitung Ulang Seluruh Riwayat
 *Rilis fitur · 1 September 2026*

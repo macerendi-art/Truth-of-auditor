@@ -17,7 +17,7 @@ from reconciliation.engine import revert_late_settlements
 from reconciliation.models import MatchResult, ReconBatch, ReviewAction
 from sources.models import Toko, Upload
 from transactions.models import Transaction
-from web.access import admin_required, is_admin, role_required, tokos_for
+from web.access import admin_required, role_required, tokos_for
 from web.models import AllowedIP
 from web.views import _active_toko, _parse_date
 
@@ -308,9 +308,12 @@ def kelola_log(request):
     })
 
 
-@admin_required
+@role_required("admin", "supervisor")
 def delete_upload(request, pk):
-    up = get_object_or_404(Upload, pk=pk)
+    # Scope toko: guard struktural yang sama dengan delete_batch — hari ini
+    # supervisor memang melihat semua toko, tapi peran ber-scope di masa depan
+    # tidak boleh bisa menyentuh upload yang tak terlihat olehnya.
+    up = get_object_or_404(Upload, pk=pk, toko__in=tokos_for(request.user))
     if request.method == "POST":
         name = up.original_name or f"Upload #{up.pk}"
         # Guard integritas (F1): upload yang buktinya dipakai hasil rekon tak boleh
@@ -335,7 +338,7 @@ def delete_upload(request, pk):
     return redirect("upload")
 
 
-@admin_required
+@role_required("admin", "supervisor")
 def bulk_delete_uploads(request):
     """Hapus banyak upload sekaligus dari Riwayat Upload — dibatasi ke TOKO AKTIF
     (persis daftar yang dirender). Yang terkunci guard integritas dilewati &
@@ -391,42 +394,6 @@ def _hitung_review_batch(batch):
     return n_review, n_override
 
 
-def _batch_lebih_baru_ada(batch):
-    """True bila ada batch lain (toko sama) yang lebih baru dari batch ini (M4).
-
-    Menghapus batch non-terakhir membebaskan baris kredit sementara pasangan
-    uangnya sudah dikonsumsi batch berikutnya — rerun menghasilkan angka
-    berbeda tanpa error. Batch tanpa recon_date dibandingkan lewat id.
-    """
-    qs = ReconBatch.objects.filter(toko=batch.toko).exclude(pk=batch.pk)
-    if batch.recon_date:
-        return qs.filter(recon_date__gt=batch.recon_date).exists()
-    return qs.filter(id__gt=batch.id).exists()
-
-
-def _tolak_hapus_batch(request, batch, no):
-    """Pesan penolakan guard supervisor untuk satu batch — None bila lolos.
-
-    Admin bebas dari kedua guard (dia yang membereskan kondisi khusus);
-    supervisor hanya boleh menghapus batch TERAKHIR tanpa review manual.
-    """
-    if is_admin(request.user):
-        return None
-    n_review, n_override = _hitung_review_batch(batch)
-    if n_review or n_override:
-        return (
-            f"Batch #{no} tidak bisa dihapus — ada {n_review + n_override} "
-            "keputusan review manual di dalamnya. Minta admin untuk menghapusnya."
-        )
-    if _batch_lebih_baru_ada(batch):
-        return (
-            f"Batch #{no} bukan batch terakhir toko ini — menghapusnya membuat "
-            "hasil rekonsiliasi berikutnya tidak konsisten. Minta admin, atau "
-            "hapus mulai dari batch terbaru."
-        )
-    return None
-
-
 @role_required("admin", "supervisor")
 def delete_batch(request, pk):
     # Scope toko (M2): supervisor/admin memang melihat semua toko, tapi guard
@@ -434,10 +401,6 @@ def delete_batch(request, pk):
     batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
     if request.method == "POST":
         no = _batch_no(batch)
-        tolak = _tolak_hapus_batch(request, batch, no)
-        if tolak:
-            messages.error(request, tolak)
-            return redirect("reconcile")
         n_runs = batch.runs.count()
         toko = batch.toko
         recon_date = batch.recon_date.isoformat() if batch.recon_date else ""
@@ -466,9 +429,9 @@ def delete_batch(request, pk):
 def bulk_delete_batches(request):
     """Hapus banyak batch sekaligus dari Riwayat Batch (checkbox).
 
-    Pola sama bulk_delete_uploads: admin + supervisor (guard tambahan utk
-    supervisor), dibatasi toko aktif, transaksi tetap utuh, settle terlambat
-    di-revert per batch.
+    Pola sama bulk_delete_uploads: admin + supervisor SETARA (dua guard khusus
+    supervisor dari v1.22.0 dicabut atas keputusan pemilik), dibatasi toko
+    aktif, transaksi tetap utuh, settle terlambat di-revert per batch.
     """
     if request.method == "POST":
         active = _active_toko(request)
@@ -483,28 +446,28 @@ def bulk_delete_batches(request):
         # dalam transaksi yang sama, jadi ekor berurutan (23 lalu 22) bisa
         # terhapus bersih — urutan lama-dulu menolak 22 karena 23 masih ada.
         batches = list(qs.order_by(F("recon_date").desc(nulls_last=True), "-id"))
-        n_batch = n_runs = n_reverted = 0
+        n_batch = n_runs = n_reverted = n_review_hilang = 0
         labels = []
-        dilewati = []
         with transaction.atomic():
             for batch in batches:
                 no = _batch_no(batch)
-                tolak = _tolak_hapus_batch(request, batch, no)
-                if tolak:
-                    dilewati.append(tolak)
-                    continue
+                n_review, n_override = _hitung_review_batch(batch)
+                n_review_hilang += n_review + n_override
                 n_runs += batch.runs.count()
                 n_reverted += revert_late_settlements(batch)
                 tgl = batch.recon_date.strftime("%d/%m/%Y") if batch.recon_date else "—"
                 labels.append(f"#{no} ({tgl})")
                 batch.delete()
                 n_batch += 1
-        if dilewati:
-            messages.error(request, " ".join(dilewati))
         if n_batch:
+            # `n_review` dicatat karena sejak guard v1.22.0 dicabut, batch
+            # ber-review manual BOLEH dihapus — angka ini satu-satunya jejak
+            # yang tersisa bahwa keputusan itu pernah ada (ReviewAction ikut
+            # mati lewat cascade run → result → action).
             catat(
                 request.user, "hapus_batch_massal", f"{n_batch} batch",
                 toko=active, n_batch=n_batch, n_runs=n_runs,
+                n_review=n_review_hilang,
                 batches=", ".join(labels)[:1000],
             )
             msg = (

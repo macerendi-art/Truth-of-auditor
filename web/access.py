@@ -66,12 +66,20 @@ def admin_required(view):
     return wrapper
 
 
-def boleh_hapus_batch(user) -> bool:
-    """True bila user boleh menghapus batch rekonsiliasi (admin + supervisor).
+def boleh_hapus_data(user) -> bool:
+    """True bila user boleh menghapus DATA KERJA (admin + supervisor).
 
-    Keputusan pemilik 2026-09: supervisor ikut memegang hak hapus batch —
-    dengan guard tambahan di view (hanya batch terakhir, tidak ada review
-    manual). JANGAN dipakai untuk menu /kelola/ — itu tetap `is_admin`.
+    Cakupannya: batch rekonsiliasi dan berkas unggahan. Keputusan pemilik
+    2026-09: supervisor setara admin untuk penghapusan data kerja — dua guard
+    khusus supervisor yang sempat ada di v1.22.0 (hanya batch terakhir, tolak
+    bila ada review manual) DICABUT atas permintaan pemilik.
+
+    Yang TIDAK ikut, dan sengaja: menu `/kelola/` (toko, pengguna, allowlist
+    IP) tetap `is_admin` — itu manajemen organisasi, bukan data kerja.
+
+    Guard INTEGRITAS tetap berlaku untuk semua peran termasuk admin:
+    `_locking_batches` tetap menolak menghapus upload yang buktinya dipakai
+    hasil rekonsiliasi. Itu bukan guard peran, jadi tak ikut dicabut.
     """
     return bool(
         user.is_authenticated

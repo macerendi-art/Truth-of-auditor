@@ -1,4 +1,4 @@
-from web.access import boleh_hapus_batch, is_admin, mode_semua, tokos_for
+from web.access import boleh_hapus_data, is_admin, mode_semua, tokos_for
 
 
 def toko(request):
@@ -9,7 +9,7 @@ def toko(request):
             "tokos_grouped": [],
             "active_toko": None,
             "is_admin_user": False,
-            "boleh_hapus_batch": False,
+            "boleh_hapus_data": False,
             "show_toko_reminder": False,
             "semua_toko": False,
         }
@@ -47,9 +47,10 @@ def toko(request):
         "tokos_grouped": tokos_grouped,
         "active_toko": active,
         "is_admin_user": admin,
-        # Tombol hapus batch: admin + supervisor. JANGAN dipakai menu /kelola/
-        # (itu tetap is_admin_user).
-        "boleh_hapus_batch": boleh_hapus_batch(user),
+        # Tombol hapus DATA KERJA (batch + unggahan): admin + supervisor.
+        # JANGAN dipakai menu /kelola/ maupun kotak cari nama file di halaman
+        # Upload — keduanya tetap is_admin_user.
+        "boleh_hapus_data": boleh_hapus_data(user),
         "show_toko_reminder": request.session.pop("show_toko_reminder", False),
         "pending_review_count": pending_review,
         "semua_toko": semua,

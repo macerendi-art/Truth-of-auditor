@@ -119,6 +119,37 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.24.0",
+        tanggal=_dt.date(2026, 9, 2),
+        nama="Supervisor Setara Admin untuk Menghapus Data Kerja",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**Supervisor kini bisa menghapus berkas unggahan** — satuan "
+            "maupun massal lewat centang, sama seperti admin. Sebelumnya "
+            "hanya admin, sehingga supervisor harus menunggu untuk "
+            "membereskan berkas yang salah unggah.",
+            "**Dua pagar pada penghapusan batch dicabut atas permintaan "
+            "pemilik.** Sejak v1.22.0 supervisor hanya boleh menghapus batch "
+            "TERAKHIR sebuah toko, dan batch yang memuat keputusan review "
+            "manual ditolak. Keduanya kini tidak berlaku lagi: supervisor "
+            "boleh menghapus batch mana pun, termasuk yang berisi review "
+            "manual. Yang perlu diketahui: menghapus batch di tengah riwayat "
+            "membuat hasil hari-hari berikutnya tidak bisa direproduksi persis "
+            "bila dijalankan ulang — tanpa pesan kesalahan apa pun.",
+            "**Jejak audit menutupi sebagian risikonya.** Setiap penghapusan "
+            "batch, satuan maupun massal, mencatat berapa keputusan review "
+            "manual ikut hilang bersamanya — karena catatan review itu sendiri "
+            "terhapus mengikuti batch, angka tersebut satu-satunya bukti yang "
+            "tersisa bahwa keputusan itu pernah dibuat.",
+            "**Yang tetap khusus admin:** menu Kelola (toko, pengguna, daftar "
+            "IP) dan pencarian nama berkas di halaman Upload. Dan satu "
+            "penjagaan tetap berlaku untuk semua peran termasuk admin — berkas "
+            "yang buktinya sedang dipakai hasil rekonsiliasi tidak bisa "
+            "dihapus sebelum batch-nya dihapus lebih dulu.",
+        ),
+    ),
+    Rilis(
         versi="1.23.0",
         tanggal=_dt.date(2026, 9, 1),
         nama="Halaman Berat Berhenti Menghitung Ulang Seluruh Riwayat",
