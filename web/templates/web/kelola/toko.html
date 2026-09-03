@@ -37,8 +37,46 @@
   </form>
 </div>
 
+{# Ringkasan hitungan Pusat/Partner + Panel — chip juga jadi filter daftar. #}
+<div class="card reveal toko-sum" style="margin-top:16px">
+  <div class="toko-sum-head">
+    <h3 style="margin:0">Ringkasan Toko</h3>
+    <span class="faint" style="font-size:12.5px">{{ ringkasan.total }} total · {{ ringkasan.aktif }} aktif{% if ringkasan.nonaktif %} · {{ ringkasan.nonaktif }} nonaktif{% endif %}</span>
+  </div>
+  <div class="toko-sum-row">
+    <span class="toko-sum-lbl">Pusat / Partner</span>
+    <div class="toko-sum-chips">
+      {% for key, label, n in ringkasan.kepemilikan %}
+      <a class="toko-chip {% if f_kep == key %}on{% endif %}"
+         href="?kep={{ key }}{% if f_panel %}&panel={{ f_panel }}{% endif %}"
+         title="Saring daftar: {{ label }}">{{ label }} <b>{{ n }}</b></a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="toko-sum-row">
+    <span class="toko-sum-lbl">Panel</span>
+    <div class="toko-sum-chips">
+      {% for key, label, n in ringkasan.panel %}
+      <a class="toko-chip {% if f_panel == key %}on{% endif %}"
+         href="?panel={{ key }}{% if f_kep %}&kep={{ f_kep }}{% endif %}"
+         title="Saring daftar: {{ label }}">{{ label }} <b>{{ n }}</b></a>
+      {% endfor %}
+    </div>
+  </div>
+  {% if f_kep or f_panel %}
+  <p class="faint" style="margin:10px 0 0;font-size:12.5px">
+    Filter aktif:
+    {% if f_kep %}<b>{% for k,l in kepemilikan_choices %}{% if k == f_kep %}{{ l }}{% endif %}{% endfor %}</b>{% endif %}
+    {% if f_kep and f_panel %} · {% endif %}
+    {% if f_panel %}<b>{% for k,l in panel_choices %}{% if k == f_panel %}{{ l }}{% endif %}{% endfor %}</b>{% endif %}
+    — menampilkan {{ tokos|length }} dari {{ n_semua }} toko.
+    <a href="{% url 'kelola_toko' %}" style="font-weight:600">Hapus filter</a>
+  </p>
+  {% endif %}
+</div>
+
 <div class="card reveal pad0" style="margin-top:16px">
-  <div class="card-head"><h3>Daftar Toko <span class="faint" style="font-weight:500">({{ tokos|length }})</span></h3></div>
+  <div class="card-head"><h3>Daftar Toko <span class="faint" style="font-weight:500">({{ tokos|length }}{% if f_kep or f_panel %}/{{ n_semua }}{% endif %})</span></h3></div>
   <div class="twrap" style="border:none">
   <table>
     <thead><tr><th>Kode</th><th>Panel</th><th>Pusat / Partner</th><th class="num">Transaksi</th><th class="num">Upload</th><th>Status</th><th class="r">Aksi</th></tr></thead>
@@ -99,9 +137,24 @@
           </form>
         </td>
       </tr>
-    {% empty %}<tr><td colspan="7" class="cell-empty">Belum ada toko.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="7" class="cell-empty">{% if f_kep or f_panel %}Tidak ada toko untuk filter ini.{% else %}Belum ada toko.{% endif %}</td></tr>{% endfor %}
     </tbody>
   </table>
   </div>
 </div>
+
+<style>
+.toko-sum{padding:18px 20px}
+.toko-sum-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.toko-sum-row{display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap}
+.toko-sum-lbl{font-size:12.5px;font-weight:600;color:var(--muted);min-width:110px}
+.toko-sum-chips{display:flex;flex-wrap:wrap;gap:8px}
+.toko-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;
+  background:var(--surface-2,rgba(0,0,0,.04));border:1px solid var(--line,rgba(0,0,0,.08));
+  color:var(--ink);font-size:12.5px;text-decoration:none;line-height:1.2}
+.toko-chip b{font-variant-numeric:tabular-nums}
+.toko-chip:hover{border-color:var(--brand-2, #3b82f6);color:var(--brand-2,#3b82f6)}
+.toko-chip.on{background:var(--info-bg,rgba(59,130,246,.12));border-color:var(--info,#3b82f6);
+  color:var(--info,#1d4ed8);font-weight:600}
+</style>
 {% endblock %}

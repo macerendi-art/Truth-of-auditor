@@ -188,14 +188,58 @@ def kelola_toko(request):
     # (497rb tx × ratusan upload): terukur 29,8 dtk di prod = halaman putih.
     tx_counts = dict(Transaction.objects.values_list("toko").annotate(n=Count("id")))
     up_counts = dict(Upload.objects.values_list("toko").annotate(n=Count("id")))
-    tokos = list(Toko.objects.order_by("name"))
-    for t in tokos:
+    semua = list(Toko.objects.order_by("name"))
+    for t in semua:
         t.n_tx = tx_counts.get(t.id, 0)
         t.n_up = up_counts.get(t.id, 0)
-    return render(request, "web/kelola/toko.html",
-                  {"tokos": tokos, "panel_choices": Toko.PANEL_CHOICES,
-                   "kepemilikan_choices": Toko.KEPEMILIKAN_CHOICES,
-                   **BEBAS_TOKO})
+
+    # Ringkasan hitungan (semua baris daftar, termasuk nonaktif) — 0 query ekstra.
+    n_aktif = sum(1 for t in semua if t.is_active)
+    kep_counts = {
+        key: sum(1 for t in semua if t.kepemilikan == key)
+        for key, _ in Toko.KEPEMILIKAN_CHOICES
+    }
+    panel_counts = {
+        key: sum(1 for t in semua if t.panel == key)
+        for key, _ in Toko.PANEL_CHOICES
+    }
+    ringkasan = {
+        "total": len(semua),
+        "aktif": n_aktif,
+        "nonaktif": len(semua) - n_aktif,
+        "kepemilikan": [
+            (key, label, kep_counts.get(key, 0))
+            for key, label in Toko.KEPEMILIKAN_CHOICES
+        ],
+        "panel": [
+            (key, label, panel_counts.get(key, 0))
+            for key, label in Toko.PANEL_CHOICES
+        ],
+    }
+
+    # Filter daftar (?kep= / ?panel=) — nilai di luar pilihan diabaikan.
+    f_kep = (request.GET.get("kep") or "").strip()
+    f_panel = (request.GET.get("panel") or "").strip()
+    if f_kep not in KEPEMILIKAN_LABELS:
+        f_kep = ""
+    if f_panel not in PANEL_LABELS:
+        f_panel = ""
+    tokos = semua
+    if f_kep:
+        tokos = [t for t in tokos if t.kepemilikan == f_kep]
+    if f_panel:
+        tokos = [t for t in tokos if t.panel == f_panel]
+
+    return render(request, "web/kelola/toko.html", {
+        "tokos": tokos,
+        "n_semua": len(semua),
+        "ringkasan": ringkasan,
+        "f_kep": f_kep,
+        "f_panel": f_panel,
+        "panel_choices": Toko.PANEL_CHOICES,
+        "kepemilikan_choices": Toko.KEPEMILIKAN_CHOICES,
+        **BEBAS_TOKO,
+    })
 
 
 @admin_required

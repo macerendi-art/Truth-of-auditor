@@ -88,3 +88,33 @@ class KelolaTokoPanelBadgeTests(TestCase):
         self.assertContains(r, 'badge ok plain">Pusat</span>')
         self.assertContains(r, 'name="kepemilikan"')
         self.assertContains(r, ">Partner</option>")
+
+    def test_ringkasan_pusat_partner_dan_panel(self):
+        r = self.client.get(reverse("kelola_toko"))
+        self.assertContains(r, "Ringkasan Toko")
+        ctx = r.context["ringkasan"]
+        self.assertGreater(ctx["total"], 0)
+        kep = {k: n for k, _l, n in ctx["kepemilikan"]}
+        self.assertIn("pusat", kep)
+        self.assertIn("partner", kep)
+        pan = {k: n for k, _l, n in ctx["panel"]}
+        self.assertIn("nexus", pan)
+        self.assertIn("vigor", pan)
+        self.assertIn("tm_gaming", pan)
+        # chip filter link
+        self.assertContains(r, 'href="?kep=pusat"')
+        self.assertContains(r, 'href="?panel=nexus"')
+
+    def test_filter_kep_dan_panel(self):
+        lbs = Toko.objects.get(key="lbs")  # nexus + pusat
+        slo = Toko.objects.get(key="slo")  # vigor
+        slo.kepemilikan = Toko.KEPEMILIKAN_PARTNER
+        slo.save(update_fields=["kepemilikan"])
+        r = self.client.get(reverse("kelola_toko"), {"kep": "pusat", "panel": "nexus"})
+        keys = {t.key for t in r.context["tokos"]}
+        self.assertIn("lbs", keys)
+        self.assertNotIn("slo", keys)
+        self.assertEqual(r.context["f_kep"], "pusat")
+        self.assertEqual(r.context["f_panel"], "nexus")
+        self.assertContains(r, "Filter aktif")
+        self.assertContains(r, "Hapus filter")
