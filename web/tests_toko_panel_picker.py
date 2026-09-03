@@ -92,6 +92,7 @@ class KelolaTokoPanelBadgeTests(TestCase):
     def test_ringkasan_pusat_partner_dan_panel(self):
         r = self.client.get(reverse("kelola_toko"))
         self.assertContains(r, "Ringkasan Toko")
+        self.assertContains(r, 'id="ringkasan-toko"')
         ctx = r.context["ringkasan"]
         self.assertGreater(ctx["total"], 0)
         kep = {k: n for k, _l, n in ctx["kepemilikan"]}
@@ -101,9 +102,15 @@ class KelolaTokoPanelBadgeTests(TestCase):
         self.assertIn("nexus", pan)
         self.assertIn("vigor", pan)
         self.assertIn("tm_gaming", pan)
-        # chip filter link
-        self.assertContains(r, 'href="?kep=pusat"')
-        self.assertContains(r, 'href="?panel=nexus"')
+        # Ringkasan = stat saja (bukan link filter)
+        html = r.content.decode()
+        sum_block = html.split('id="ringkasan-toko"', 1)[1].split("Filter Daftar", 1)[0]
+        self.assertNotIn("href=\"?kep=", sum_block)
+        self.assertNotIn("href=\"?panel=", sum_block)
+        # Filter terpisah
+        self.assertContains(r, "Filter Daftar")
+        self.assertContains(r, 'name="kep"')
+        self.assertContains(r, 'name="panel"')
 
     def test_filter_kep_dan_panel(self):
         lbs = Toko.objects.get(key="lbs")  # nexus + pusat
@@ -118,3 +125,4 @@ class KelolaTokoPanelBadgeTests(TestCase):
         self.assertEqual(r.context["f_panel"], "nexus")
         self.assertContains(r, "Filter aktif")
         self.assertContains(r, "Hapus filter")
+        self.assertContains(r, "Filter Daftar")

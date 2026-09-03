@@ -10,69 +10,98 @@
   </div>
 </div>
 
-<div class="card reveal" style="max-width:430px">
-  <h3>Tambah Toko</h3>
-  <form method="post">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="create">
-    <div class="field"><label>Kode toko (mis. AHK)</label>
-      <input name="kode" maxlength="30" placeholder="KODE" required style="text-transform:uppercase"></div>
-    <div class="field"><label>Panel</label>
-      <select name="panel" required>
-        <option value="">— pilih panel —</option>
-        {% for val, label in panel_choices %}
-        <option value="{{ val }}">{{ label }}</option>
-        {% endfor %}
-      </select>
+{# Baris atas: form kiri + ringkasan kanan (area yang ditandai). #}
+<div class="toko-top reveal">
+  <div class="card toko-form-card">
+    <h3>Tambah Toko</h3>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="create">
+      <div class="field"><label>Kode toko (mis. AHK)</label>
+        <input name="kode" maxlength="30" placeholder="KODE" required style="text-transform:uppercase"></div>
+      <div class="field"><label>Panel</label>
+        <select name="panel" required>
+          <option value="">— pilih panel —</option>
+          {% for val, label in panel_choices %}
+          <option value="{{ val }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>Pusat / Partner</label>
+        <select name="kepemilikan" required>
+          <option value="">— pilih —</option>
+          {% for val, label in kepemilikan_choices %}
+          <option value="{{ val }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn primary" type="submit">+ Tambah</button>
+    </form>
+  </div>
+
+  {# Ringkasan = tampilan hitungan saja, BUKAN filter. #}
+  <div class="card toko-sum" id="ringkasan-toko">
+    <div class="toko-sum-head">
+      <h3 style="margin:0">Ringkasan Toko</h3>
+      <span class="faint" style="font-size:12.5px">{{ ringkasan.total }} total · {{ ringkasan.aktif }} aktif{% if ringkasan.nonaktif %} · {{ ringkasan.nonaktif }} nonaktif{% endif %}</span>
     </div>
-    <div class="field"><label>Pusat / Partner</label>
-      <select name="kepemilikan" required>
-        <option value="">— pilih —</option>
-        {% for val, label in kepemilikan_choices %}
-        <option value="{{ val }}">{{ label }}</option>
+    <div class="toko-sum-row">
+      <span class="toko-sum-lbl">Pusat / Partner</span>
+      <div class="toko-sum-chips">
+        {% for key, label, n in ringkasan.kepemilikan %}
+        <span class="toko-stat">{{ label }} <b>{{ n }}</b></span>
         {% endfor %}
-      </select>
+      </div>
     </div>
-    <button class="btn primary" type="submit">+ Tambah</button>
-  </form>
+    <div class="toko-sum-row">
+      <span class="toko-sum-lbl">Panel</span>
+      <div class="toko-sum-chips">
+        {% for key, label, n in ringkasan.panel %}
+        <span class="toko-stat">{{ label }} <b>{{ n }}</b></span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
 </div>
 
-{# Ringkasan hitungan Pusat/Partner + Panel — chip juga jadi filter daftar. #}
-<div class="card reveal toko-sum" style="margin-top:16px">
-  <div class="toko-sum-head">
-    <h3 style="margin:0">Ringkasan Toko</h3>
-    <span class="faint" style="font-size:12.5px">{{ ringkasan.total }} total · {{ ringkasan.aktif }} aktif{% if ringkasan.nonaktif %} · {{ ringkasan.nonaktif }} nonaktif{% endif %}</span>
-  </div>
-  <div class="toko-sum-row">
-    <span class="toko-sum-lbl">Pusat / Partner</span>
-    <div class="toko-sum-chips">
-      {% for key, label, n in ringkasan.kepemilikan %}
-      <a class="toko-chip {% if f_kep == key %}on{% endif %}"
-         href="?kep={{ key }}{% if f_panel %}&panel={{ f_panel }}{% endif %}"
-         title="Saring daftar: {{ label }}">{{ label }} <b>{{ n }}</b></a>
-      {% endfor %}
+{# Filter daftar — terpisah dari ringkasan. #}
+<div class="card reveal toko-filter" style="margin-top:16px">
+  <form method="get" class="toko-filter-form">
+    <h3 style="margin:0 0 12px">Filter Daftar</h3>
+    <div class="toko-filter-row">
+      <div class="field" style="margin:0;min-width:160px">
+        <label>Pusat / Partner</label>
+        <select name="kep" onchange="this.form.submit()">
+          <option value="">Semua</option>
+          {% for val, label in kepemilikan_choices %}
+          <option value="{{ val }}" {% if f_kep == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field" style="margin:0;min-width:160px">
+        <label>Panel</label>
+        <select name="panel" onchange="this.form.submit()">
+          <option value="">Semua</option>
+          {% for val, label in panel_choices %}
+          <option value="{{ val }}" {% if f_panel == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <noscript><button class="btn primary" type="submit">Terapkan</button></noscript>
+      {% if f_kep or f_panel %}
+      <a class="btn" href="{% url 'kelola_toko' %}">Hapus filter</a>
+      {% endif %}
     </div>
-  </div>
-  <div class="toko-sum-row">
-    <span class="toko-sum-lbl">Panel</span>
-    <div class="toko-sum-chips">
-      {% for key, label, n in ringkasan.panel %}
-      <a class="toko-chip {% if f_panel == key %}on{% endif %}"
-         href="?panel={{ key }}{% if f_kep %}&kep={{ f_kep }}{% endif %}"
-         title="Saring daftar: {{ label }}">{{ label }} <b>{{ n }}</b></a>
-      {% endfor %}
-    </div>
-  </div>
-  {% if f_kep or f_panel %}
-  <p class="faint" style="margin:10px 0 0;font-size:12.5px">
-    Filter aktif:
-    {% if f_kep %}<b>{% for k,l in kepemilikan_choices %}{% if k == f_kep %}{{ l }}{% endif %}{% endfor %}</b>{% endif %}
-    {% if f_kep and f_panel %} · {% endif %}
-    {% if f_panel %}<b>{% for k,l in panel_choices %}{% if k == f_panel %}{{ l }}{% endif %}{% endfor %}</b>{% endif %}
-    — menampilkan {{ tokos|length }} dari {{ n_semua }} toko.
-    <a href="{% url 'kelola_toko' %}" style="font-weight:600">Hapus filter</a>
-  </p>
-  {% endif %}
+    {% if f_kep or f_panel %}
+    <p class="faint" style="margin:10px 0 0;font-size:12.5px">
+      Filter aktif:
+      {% if f_kep %}<b>{% for k,l in kepemilikan_choices %}{% if k == f_kep %}{{ l }}{% endif %}{% endfor %}</b>{% endif %}
+      {% if f_kep and f_panel %} · {% endif %}
+      {% if f_panel %}<b>{% for k,l in panel_choices %}{% if k == f_panel %}{{ l }}{% endif %}{% endfor %}</b>{% endif %}
+      — menampilkan {{ tokos|length }} dari {{ n_semua }} toko.
+    </p>
+    {% endif %}
+  </form>
 </div>
 
 <div class="card reveal pad0" style="margin-top:16px">
@@ -144,17 +173,23 @@
 </div>
 
 <style>
-.toko-sum{padding:18px 20px}
+.toko-top{display:flex;gap:16px;align-items:stretch;flex-wrap:wrap}
+.toko-form-card{flex:0 1 430px;max-width:430px;width:100%}
+.toko-sum{flex:1 1 280px;min-width:260px;padding:18px 20px;margin:0}
 .toko-sum-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap}
-.toko-sum-row{display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap}
+.toko-sum-row{display:flex;align-items:center;gap:12px;margin-top:10px;flex-wrap:wrap}
 .toko-sum-lbl{font-size:12.5px;font-weight:600;color:var(--muted);min-width:110px}
 .toko-sum-chips{display:flex;flex-wrap:wrap;gap:8px}
-.toko-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;
+.toko-stat{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;
   background:var(--surface-2,rgba(0,0,0,.04));border:1px solid var(--line,rgba(0,0,0,.08));
-  color:var(--ink);font-size:12.5px;text-decoration:none;line-height:1.2}
-.toko-chip b{font-variant-numeric:tabular-nums}
-.toko-chip:hover{border-color:var(--brand-2, #3b82f6);color:var(--brand-2,#3b82f6)}
-.toko-chip.on{background:var(--info-bg,rgba(59,130,246,.12));border-color:var(--info,#3b82f6);
-  color:var(--info,#1d4ed8);font-weight:600}
+  color:var(--ink);font-size:12.5px;line-height:1.2}
+.toko-stat b{font-variant-numeric:tabular-nums}
+.toko-filter{padding:16px 20px}
+.toko-filter-row{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.toko-filter-row .field label{display:block;margin-bottom:6px;font-weight:600;font-size:13px}
+.toko-filter-row select{min-width:160px}
+@media (max-width:720px){
+  .toko-form-card,.toko-sum{flex:1 1 100%;max-width:none}
+}
 </style>
 {% endblock %}
