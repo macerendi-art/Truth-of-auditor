@@ -1,4 +1,14 @@
-from web.access import boleh_hapus_data, is_admin, mode_semua, tokos_for
+from web.access import (
+    MULTI_TOKO_LABELS,
+    MULTI_TOKO_SENTINELS,
+    MODE_PARTNER,
+    MODE_PUSAT,
+    SEMUA_TOKO,
+    boleh_hapus_data,
+    is_admin,
+    multi_mode,
+    tokos_for,
+)
 
 
 def toko(request):
@@ -12,19 +22,35 @@ def toko(request):
             "boleh_hapus_data": False,
             "show_toko_reminder": False,
             "semua_toko": False,
+            "multi_mode": None,
+            "multi_mode_label": "",
+            "mode_pusat": False,
+            "mode_partner": False,
         }
     tokos = list(tokos_for(user))
     admin = is_admin(user)
-    active_id = request.session.get("active_toko_id")
-    # Mode "Semua Toko": sentinel string, khusus admin. `active_toko` TETAP toko
-    # nyata (fallback pertama) — puluhan template lama memakainya tanpa guard,
-    # dan halaman single-toko memang menampilkan toko itu.
-    semua = mode_semua(request)
-    active = next((t for t in tokos if t.id == active_id), tokos[0] if tokos else None)
-    # Picker toko: kepemilikan (Pusat/Partner) × panel (Nexus/Vigor/TM Gaming).
-    # <optgroup> HTML tak mendukung nest, jadi label digabung
-    # "Toko Pusat · Nexus" — dibangun dari list `tokos` (0 query ekstra).
+    mode = multi_mode(request)
+    semua = mode is not None
     from sources.models import Toko
+
+    # Lingkup multi dari list yang sudah di-fetch (0 query ekstra).
+    if mode == MODE_PUSAT:
+        scope = [t for t in tokos if t.kepemilikan == Toko.KEPEMILIKAN_PUSAT]
+    elif mode == MODE_PARTNER:
+        scope = [t for t in tokos if t.kepemilikan == Toko.KEPEMILIKAN_PARTNER]
+    else:
+        scope = tokos
+    # active_toko: di mode multi = fallback pertama di lingkup; else id sesi.
+    active_id = request.session.get("active_toko_id")
+    if mode is not None:
+        active = scope[0] if scope else (tokos[0] if tokos else None)
+    elif active_id in MULTI_TOKO_SENTINELS:
+        # Sesi warisan non-admin: jangan samakan id string dengan pk.
+        active = tokos[0] if tokos else None
+    else:
+        active = next((t for t in tokos if t.id == active_id), tokos[0] if tokos else None)
+
+    # Picker toko: kepemilikan × panel. Label digabung (HTML optgroup tak nest).
 
     _KEP_LABEL = {
         Toko.KEPEMILIKAN_PUSAT: "Toko Pusat",
@@ -41,14 +67,15 @@ def toko(request):
             if grup:
                 tokos_grouped.append((f"{kep_lbl} · {panel_lbl}", grup))
 
-    # Jumlah antrean tinjau — badge kecil di menu Rekonsiliasi. Mode Semua Toko
-    # menghitung lintas toko lewat `toko__in` (tetap SATU query agregat, bukan
-    # satu query per toko).
+    # Badge tinjau: multi → lingkup mode; tunggal → toko aktif.
     pending_review = 0
     if semua or active is not None:
         from reconciliation.models import MatchResult
 
-        lingkup = {"run__batch__toko__in": tokos} if semua else {"run__batch__toko": active}
+        if semua:
+            lingkup = {"run__batch__toko__in": scope}
+        else:
+            lingkup = {"run__batch__toko": active}
         pending_review = MatchResult.objects.filter(
             bucket=MatchResult.Bucket.TINJAU, **lingkup
         ).count()
@@ -57,13 +84,18 @@ def toko(request):
         "tokos_grouped": tokos_grouped,
         "active_toko": active,
         "is_admin_user": admin,
-        # Tombol hapus DATA KERJA (batch + unggahan): admin + supervisor.
-        # JANGAN dipakai menu /kelola/ maupun kotak cari nama file di halaman
-        # Upload — keduanya tetap is_admin_user.
         "boleh_hapus_data": boleh_hapus_data(user),
         "show_toko_reminder": request.session.pop("show_toko_reminder", False),
         "pending_review_count": pending_review,
         "semua_toko": semua,
+        "multi_mode": mode,
+        "multi_mode_label": MULTI_TOKO_LABELS.get(mode or "", ""),
+        "mode_pusat": mode == MODE_PUSAT,
+        "mode_partner": mode == MODE_PARTNER,
+        # Konstanta sentinel utk template option value (hindari hardcode).
+        "MODE_SEMUA": SEMUA_TOKO,
+        "MODE_PUSAT": MODE_PUSAT,
+        "MODE_PARTNER": MODE_PARTNER,
     }
 
 

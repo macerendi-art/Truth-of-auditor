@@ -1,11 +1,11 @@
 {% extends "web/app_base.html" %}
 {% load humanize %}
-{% block title %}Dashboard · Semua Toko · Truth of Auditor{% endblock %}
-{% block crumb %}Dashboard · Semua Toko{% endblock %}
+{% block title %}Dashboard · {{ multi_mode_label|default:"Semua Toko" }} · Truth of Auditor{% endblock %}
+{% block crumb %}Dashboard · {{ multi_mode_label|default:"Semua Toko" }}{% endblock %}
 {% block content %}
 <div class="page-head reveal">
   <div>
-    <h1>Dashboard <span class="badge src" style="vertical-align:6px;font-size:11.5px">Semua Toko</span></h1>
+    <h1>Dashboard <span class="badge src" style="vertical-align:6px;font-size:11.5px">{{ multi_mode_label|default:"Semua Toko" }}</span></h1>
     {% if mode_filter %}
     <p>Potret gabungan {{ n_toko|intcomma }} toko pada <b>{{ label_periode }}</b> — seluruh rekonsiliasi
       dalam rentang itu dijumlahkan lintas toko.</p>

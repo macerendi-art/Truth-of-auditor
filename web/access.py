@@ -7,27 +7,71 @@ from django.shortcuts import redirect
 
 from sources.models import Toko
 
-# Sentinel sesi mode "Semua Toko": `session["active_toko_id"]` yang biasanya
-# berisi id numerik bisa berisi string ini. Hanya admin yang boleh memasangnya
-# (lihat `web.views.set_toko`). Semua view single-toko TETAP menerima objek Toko
-# nyata — `_active_toko` menerjemahkan sentinel jadi toko fallback.
+# Sentinel sesi mode multi-toko: `session["active_toko_id"]` yang biasanya
+# berisi id numerik bisa berisi salah satu string ini. Hanya admin yang boleh
+# memasangnya (lihat `web.views.set_toko`). Semua view single-toko TETAP
+# menerima objek Toko nyata — `_active_toko` menerjemahkan sentinel jadi
+# toko fallback di dalam lingkup mode.
 SEMUA_TOKO = "all"
+MODE_PUSAT = "kep_pusat"
+MODE_PARTNER = "kep_partner"
+# Semua sentinel multi — filter(id=sentinel) MELEDAK; harus dicegat dulu.
+MULTI_TOKO_SENTINELS = frozenset({SEMUA_TOKO, MODE_PUSAT, MODE_PARTNER})
+MULTI_TOKO_LABELS = {
+    SEMUA_TOKO: "Semua Toko",
+    MODE_PUSAT: "Toko Pusat",
+    MODE_PARTNER: "Toko Partner",
+}
 
 
 def is_admin(user) -> bool:
     return bool(user.is_authenticated and (user.is_superuser or user.role == "admin"))
 
 
-def mode_semua(request) -> bool:
-    """True bila sesi sedang di mode Semua Toko DAN user memang admin.
+def multi_mode(request):
+    """Sentinel multi-toko aktif, atau None.
 
-    Cek peran ikut di sini supaya pencabutan hak admin langsung mematikan mode
-    ini tanpa perlu menyentuh sesi yang sudah tersimpan.
+    Nilai: SEMUA_TOKO / MODE_PUSAT / MODE_PARTNER. Hanya admin — pencabutan
+    peran mematikan mode tanpa menyentuh sesi warisan.
     """
-    return (
-        request.session.get("active_toko_id") == SEMUA_TOKO
-        and is_admin(request.user)
-    )
+    user = getattr(request, "user", None)
+    if not is_admin(user):
+        return None
+    tid = request.session.get("active_toko_id")
+    return tid if tid in MULTI_TOKO_SENTINELS else None
+
+
+def mode_semua(request) -> bool:
+    """True bila sesi di mode multi-toko (Semua / Pusat / Partner) DAN admin.
+
+    Nama historis \"semua\" dipertahankan: flag ini membuka dashboard gabungan,
+    ceklis hutang multi-toko, bar mode, dan badge tinjau lintas toko. Lingkup
+    toko di dalam mode ditentukan `scope_tokos` (bukan selalu seluruh toko).
+    """
+    return multi_mode(request) is not None
+
+
+def tokos_for(user):
+    """Queryset Toko aktif yang boleh diakses user — satu-satunya sumber kebenaran RBAC."""
+    qs = Toko.objects.filter(is_active=True).order_by("name")
+    if not user.is_authenticated:
+        return qs.none()
+    if user.is_superuser or user.role in ("admin", "supervisor"):
+        return qs
+    return qs.filter(assigned_users=user)
+
+
+def scope_tokos(user, mode=None):
+    """Queryset Toko untuk lingkup mode multi (atau seluruh RBAC bila mode=None/all).
+
+    `mode` = nilai `multi_mode` / sentinel, atau None (= semua yang diizinkan).
+    """
+    qs = tokos_for(user)
+    if mode == MODE_PUSAT:
+        return qs.filter(kepemilikan=Toko.KEPEMILIKAN_PUSAT)
+    if mode == MODE_PARTNER:
+        return qs.filter(kepemilikan=Toko.KEPEMILIKAN_PARTNER)
+    return qs
 
 
 def is_ip_gated(user) -> bool:
@@ -42,16 +86,6 @@ def is_ip_gated(user) -> bool:
         and not is_admin(user)
         and getattr(user, "role", "") in ("auditor", "supervisor")
     )
-
-
-def tokos_for(user):
-    """Queryset Toko aktif yang boleh diakses user — satu-satunya sumber kebenaran RBAC."""
-    qs = Toko.objects.filter(is_active=True).order_by("name")
-    if not user.is_authenticated:
-        return qs.none()
-    if user.is_superuser or user.role in ("admin", "supervisor"):
-        return qs
-    return qs.filter(assigned_users=user)
 
 
 def admin_required(view):

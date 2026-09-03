@@ -45,7 +45,20 @@ from sources.models import SourceType, Upload
 from sources.parsers.banks import NBMB_RE
 from sources.services import PARSERS, ingest, is_encrypted_xlsx
 from transactions.models import Transaction, specific_source_label
-from web.access import SEMUA_TOKO, admin_required, is_admin, mode_semua, role_required, tokos_for
+from web.access import (
+    MODE_PARTNER,
+    MODE_PUSAT,
+    MULTI_TOKO_LABELS,
+    MULTI_TOKO_SENTINELS,
+    SEMUA_TOKO,
+    admin_required,
+    is_admin,
+    mode_semua,
+    multi_mode,
+    role_required,
+    scope_tokos,
+    tokos_for,
+)
 from web.biaya import rincian_biaya as hitung_rincian_biaya
 from web.bonus import rekonsiliasi_bonus as hitung_rekonsiliasi_bonus
 from web.breakdown import (
@@ -171,14 +184,18 @@ def csrf_failure(request, reason=""):
 def _active_toko(request):
     """Toko aktif sesi — SELALU objek Toko nyata (atau None bila tak punya toko).
 
-    Mode "Semua Toko" menyimpan sentinel string di sesi; di halaman single-toko
-    sentinel itu diterjemahkan jadi toko fallback (yang pertama menurut nama).
-    Tanpa terjemahan ini `allowed.filter(id="all")` melempar ValueError dan
-    SETIAP halaman ikut mati — bukan cuma dashboard.
+    Mode multi-toko (Semua / Pusat / Partner) menyimpan sentinel string di sesi;
+    di halaman single-toko sentinel diterjemahkan jadi toko fallback pertama di
+    *lingkup mode* (bukan selalu seluruh toko). Tanpa terjemahan ini
+    `allowed.filter(id=\"kep_pusat\")` melempar ValueError dan SETIAP halaman ikut mati.
     """
+    mode = multi_mode(request)
+    if mode is not None:
+        return scope_tokos(request.user, mode).first()
     allowed = tokos_for(request.user)
     tid = request.session.get("active_toko_id")
-    if tid == SEMUA_TOKO:
+    # Sentinel multi yang lolos multi_mode (non-admin warisan) — jangan query id.
+    if tid in MULTI_TOKO_SENTINELS:
         return allowed.first()
     t = allowed.filter(id=tid).first() if tid else None
     return t or allowed.first()
@@ -188,11 +205,11 @@ def _active_toko(request):
 def set_toko(request):
     if request.method == "POST":
         tid = request.POST.get("toko_id", "")
-        if tid == SEMUA_TOKO:
-            # Mode gabungan lintas toko — khusus admin. Peran lain: abaikan diam
-            # (nilai kiriman tak dipercaya; sesi lama tetap utuh).
+        if tid in MULTI_TOKO_SENTINELS:
+            # Mode gabungan lintas toko (semua / pusat / partner) — khusus admin.
+            # Peran lain: abaikan diam (nilai kiriman tak dipercaya).
             if is_admin(request.user):
-                request.session["active_toko_id"] = SEMUA_TOKO
+                request.session["active_toko_id"] = tid
         # len <= 10: sama batas yang dipakai rekap_penyebab_simpan — digit
         # sebanyak ini sudah tak masuk akal utk pk Toko, tolak diam-diam
         # (pola sama dengan nilai kiriman tak sah lain di view ini) sebelum
@@ -399,7 +416,7 @@ def _dashboard_semua(request, f_dari=None, f_sampai=None):
     """
     from reconciliation.engine import pending_settlement_counts
 
-    tokos = list(tokos_for(request.user))
+    tokos = list(scope_tokos(request.user, multi_mode(request)))
     if not tokos:
         return render(request, "web/no_toko.html")
 
@@ -2405,9 +2422,9 @@ def _toko_scope(request):
     """
     if not mode_semua(request):
         return _active_toko(request), [], []
-    daftar = list(tokos_for(request.user))
+    daftar = list(scope_tokos(request.user, multi_mode(request)))
     if not daftar:
-        return None, [], []  # tak punya toko sama sekali → halaman no_toko
+        return None, [], []  # tak punya toko di lingkup mode → halaman no_toko
     sah = {t.id for t in daftar}
     dipilih = list(dict.fromkeys(
         int(v) for v in request.GET.getlist("toko")
@@ -3001,7 +3018,8 @@ def toko_overview(request):
     date_from = _parse_date(request.GET.get("from", ""))
     date_to = _parse_date(request.GET.get("to", ""))
     filtered = bool(date_from or date_to)
-    tokos = list(tokos_for(request.user))
+    # Mode multi (Semua/Pusat/Partner) mempersempit daftar; tunggal = seluruh RBAC.
+    tokos = list(scope_tokos(request.user, multi_mode(request)))
 
     batch_qs = ReconBatch.objects.filter(toko__in=tokos, recon_date__isnull=False)
     tinjau_qs = MatchResult.objects.filter(

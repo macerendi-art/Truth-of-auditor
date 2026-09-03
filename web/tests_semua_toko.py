@@ -85,9 +85,24 @@ class SetTokoSentinelTests(TestCase):
         self.client.post(reverse("set_toko"), {"toko_id": "all"})
         self.assertEqual(self.client.session.get("active_toko_id"), "all")
 
+    def test_admin_boleh_pilih_pusat(self):
+        self._login("admin")
+        self.client.post(reverse("set_toko"), {"toko_id": "kep_pusat"})
+        self.assertEqual(self.client.session.get("active_toko_id"), "kep_pusat")
+
+    def test_admin_boleh_pilih_partner(self):
+        self._login("admin")
+        self.client.post(reverse("set_toko"), {"toko_id": "kep_partner"})
+        self.assertEqual(self.client.session.get("active_toko_id"), "kep_partner")
+
     def test_auditor_tak_boleh_pilih_semua(self):
         self._login("auditor")
         self.client.post(reverse("set_toko"), {"toko_id": "all"})
+        self.assertIsNone(self.client.session.get("active_toko_id"))
+
+    def test_auditor_tak_boleh_pilih_pusat(self):
+        self._login("auditor")
+        self.client.post(reverse("set_toko"), {"toko_id": "kep_pusat"})
         self.assertIsNone(self.client.session.get("active_toko_id"))
 
     def test_supervisor_tak_boleh_pilih_semua(self):
@@ -226,27 +241,40 @@ class PickerDanBarTests(TestCase):
 
     def test_admin_melihat_opsi_semua_toko(self):
         self._admin()
-        self.assertContains(self.client.get("/upload/"), 'value="all"')
+        html = self.client.get("/upload/").content.decode()
+        self.assertIn('value="all"', html)
+        self.assertIn('value="kep_pusat"', html)
+        self.assertIn('value="kep_partner"', html)
+        self.assertIn("Semua Toko Pusat", html)
+        self.assertIn("Semua Toko Partner", html)
 
     def test_non_admin_tak_melihat_opsi(self):
         u = User.objects.create_user("a2", password="pw12345", role="auditor")
         u.allowed_tokos.set([self.lbs])
         self.client.login(username="a2", password="pw12345")
-        self.assertNotContains(self.client.get("/upload/"), 'value="all"')
+        html = self.client.get("/upload/").content.decode()
+        self.assertNotIn('value="all"', html)
+        self.assertNotIn('value="kep_pusat"', html)
 
     def test_opsi_terpilih_saat_mode_aktif(self):
         self._admin()
         _sesi_semua(self.client)
         self.assertContains(self.client.get("/upload/"), '<option value="all" selected>')
 
+    def test_opsi_pusat_terpilih(self):
+        self._admin()
+        s = self.client.session
+        s["active_toko_id"] = "kep_pusat"
+        s.save()
+        self.assertContains(
+            self.client.get("/upload/"), '<option value="kep_pusat" selected>')
+
     def test_bar_muncul_di_halaman_single_toko(self):
         self._admin()
         _sesi_semua(self.client)
-        # /rekening/ = halaman BACA (bar bernada info) — /upload/ & /rekonsiliasi/
-        # kini punya varian bernada peringatan sendiri (lihat BarTulisTests).
         r = self.client.get("/rekening/")
-        self.assertContains(r, "Mode Semua Toko aktif")
-        # bar menyebut toko fallback yang sedang ditampilkan
+        self.assertContains(r, "Mode")
+        self.assertContains(r, "Semua Toko")
         self.assertContains(r, f"<b>{_active_name(r)}</b>")
 
     def test_bar_tak_muncul_saat_mode_mati(self):
@@ -831,3 +859,69 @@ class DashboardSemuaFilterTests(_DataGabungan):
         self.assertEqual(
             len(before), len(after),
             f"query tumbuh {len(before)}→{len(after)} saat toko bertambah (N+1)")
+
+
+class ModePusatPartnerTests(TestCase):
+    """Mode kep_pusat / kep_partner memfilter dashboard gabungan."""
+
+    def setUp(self):
+        User.objects.create_user("adm", password="pw12345", role="admin")
+        self.client.login(username="adm", password="pw12345")
+        self.lbs = Toko.objects.get(key="lbs")  # pusat
+        self.slo = Toko.objects.get(key="slo")
+        self.slo.kepemilikan = Toko.KEPEMILIKAN_PARTNER
+        self.slo.save(update_fields=["kepemilikan"])
+        self.tol = ToleranceProfile.objects.get(name="Default")
+
+    def _batch(self, toko, d=date(2026, 7, 1)):
+        return ReconBatch.objects.create(
+            toko=toko, tolerance=self.tol, recon_date=d,
+            summary={"dp": {"panel": 100, "money": 100, "selisih": 0},
+                     "wd": {"panel": 0, "money": 0, "selisih": 0},
+                     "buckets": {"cocok": 1, "perlu_tinjau": 0, "tidak_cocok": 0}},
+        )
+
+    def test_dashboard_mode_pusat_hanya_toko_pusat(self):
+        self._batch(self.lbs)
+        self._batch(self.slo)
+        s = self.client.session
+        s["active_toko_id"] = "kep_pusat"
+        s.save()
+        r = self.client.get(reverse("dashboard"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Toko Pusat")
+        keys = {row["toko"].key for row in r.context["rows"]}
+        self.assertIn("lbs", keys)
+        self.assertNotIn("slo", keys)
+
+    def test_dashboard_mode_partner_hanya_toko_partner(self):
+        self._batch(self.lbs)
+        self._batch(self.slo)
+        s = self.client.session
+        s["active_toko_id"] = "kep_partner"
+        s.save()
+        r = self.client.get(reverse("dashboard"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Toko Partner")
+        keys = {row["toko"].key for row in r.context["rows"]}
+        self.assertIn("slo", keys)
+        self.assertNotIn("lbs", keys)
+
+    def test_active_toko_fallback_di_lingkup_pusat(self):
+        from web.views import _active_toko
+
+        s = self.client.session
+        s["active_toko_id"] = "kep_pusat"
+        s.save()
+        req = self.client.get("/upload/").wsgi_request
+        t = _active_toko(req)
+        self.assertEqual(t.kepemilikan, Toko.KEPEMILIKAN_PUSAT)
+
+    def test_sesi_kep_pusat_tak_meledak_rute(self):
+        s = self.client.session
+        s["active_toko_id"] = "kep_pusat"
+        s.save()
+        for nama in ("dashboard", "upload", "rekening_breakdown", "toko_overview", "hutang_piutang"):
+            with self.subTest(rute=nama):
+                r = self.client.get(reverse(nama))
+                self.assertLess(r.status_code, 500)
