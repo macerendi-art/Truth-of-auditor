@@ -193,28 +193,39 @@ def kelola_toko(request):
         t.n_tx = tx_counts.get(t.id, 0)
         t.n_up = up_counts.get(t.id, 0)
 
-    # Ringkasan hitungan (semua baris daftar, termasuk nonaktif) — 0 query ekstra.
+    # Ringkasan matriks silang: baris Pusat/Partner × kolom Panel + TOTAL.
+    # Dihitung dari list `semua` — 0 query ekstra.
+    from collections import Counter
+
     n_aktif = sum(1 for t in semua if t.is_active)
-    kep_counts = {
-        key: sum(1 for t in semua if t.kepemilikan == key)
-        for key, _ in Toko.KEPEMILIKAN_CHOICES
+    cell = Counter((t.kepemilikan, t.panel) for t in semua)
+    panel_keys = [k for k, _ in Toko.PANEL_CHOICES]
+    # Header kolom uppercase sesuai mockup (NEXUS / VIGOR / TMGAMING).
+    _PANEL_HDR = {
+        Toko.PANEL_NEXUS: "NEXUS",
+        Toko.PANEL_VIGOR: "VIGOR",
+        Toko.PANEL_TMG: "TMGAMING",
     }
-    panel_counts = {
-        key: sum(1 for t in semua if t.panel == key)
-        for key, _ in Toko.PANEL_CHOICES
-    }
+    headers = [_PANEL_HDR.get(k, lab.upper()) for k, lab in Toko.PANEL_CHOICES]
+    rows = []
+    for kep_key, kep_lab in Toko.KEPEMILIKAN_CHOICES:
+        cells = [cell.get((kep_key, pk), 0) for pk in panel_keys]
+        rows.append({
+            "key": kep_key,
+            "label": kep_lab.upper(),  # PUSAT / PARTNER
+            "cells": cells,
+            "total": sum(cells),
+        })
+    col_totals = [sum(r["cells"][i] for r in rows) for i in range(len(panel_keys))]
     ringkasan = {
         "total": len(semua),
         "aktif": n_aktif,
         "nonaktif": len(semua) - n_aktif,
-        "kepemilikan": [
-            (key, label, kep_counts.get(key, 0))
-            for key, label in Toko.KEPEMILIKAN_CHOICES
-        ],
-        "panel": [
-            (key, label, panel_counts.get(key, 0))
-            for key, label in Toko.PANEL_CHOICES
-        ],
+        "headers": headers,
+        "panel_keys": panel_keys,
+        "rows": rows,
+        "col_totals": col_totals,
+        "grand_total": sum(col_totals),
     }
 
     # Filter daftar (?kep= / ?panel=) — nilai di luar pilihan diabaikan.

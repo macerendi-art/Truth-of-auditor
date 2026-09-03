@@ -95,18 +95,28 @@ class KelolaTokoPanelBadgeTests(TestCase):
         self.assertContains(r, 'id="ringkasan-toko"')
         ctx = r.context["ringkasan"]
         self.assertGreater(ctx["total"], 0)
-        kep = {k: n for k, _l, n in ctx["kepemilikan"]}
-        self.assertIn("pusat", kep)
-        self.assertIn("partner", kep)
-        pan = {k: n for k, _l, n in ctx["panel"]}
-        self.assertIn("nexus", pan)
-        self.assertIn("vigor", pan)
-        self.assertIn("tm_gaming", pan)
-        # Ringkasan = stat saja (bukan link filter)
+        self.assertEqual(ctx["headers"], ["NEXUS", "VIGOR", "TMGAMING"])
+        self.assertEqual(ctx["grand_total"], ctx["total"])
+        self.assertEqual(sum(ctx["col_totals"]), ctx["grand_total"])
+        by_kep = {row["key"]: row for row in ctx["rows"]}
+        self.assertIn("pusat", by_kep)
+        self.assertIn("partner", by_kep)
+        self.assertEqual(by_kep["pusat"]["label"], "PUSAT")
+        self.assertEqual(by_kep["partner"]["label"], "PARTNER")
+        self.assertEqual(len(by_kep["pusat"]["cells"]), 3)
+        # Matriks + footer TOTAL TOKO
+        self.assertContains(r, "TOTAL TOKO")
+        self.assertContains(r, ">NEXUS<")
+        self.assertContains(r, ">VIGOR<")
+        self.assertContains(r, ">TMGAMING<")
+        self.assertContains(r, ">PUSAT<")
+        self.assertContains(r, ">PARTNER<")
+        # Ringkasan = tabel saja (bukan link filter)
         html = r.content.decode()
         sum_block = html.split('id="ringkasan-toko"', 1)[1].split("Filter Daftar", 1)[0]
         self.assertNotIn("href=\"?kep=", sum_block)
         self.assertNotIn("href=\"?panel=", sum_block)
+        self.assertIn("toko-sum-table", sum_block)
         # Filter terpisah
         self.assertContains(r, "Filter Daftar")
         self.assertContains(r, 'name="kep"')
