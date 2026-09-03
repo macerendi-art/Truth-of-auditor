@@ -1,7 +1,7 @@
-"""Picker toko berkelompok per panel (Nexus/Vigor/TM Gaming) — topbar + kelola.
+"""Picker toko berkelompok Pusat/Partner — topbar + reminder.
 
-Grouping murni tampilan/metadata: lihat sources/tests_toko.py utk perilaku
-model & aksi kelola_toko (create wajib panel, aksi ubah panel + audit).
+Grouping murni tampilan/metadata (`Toko.kepemilikan`). Panel client tetap
+di halaman Kelola Toko, bukan di picker topbar.
 """
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -21,9 +21,12 @@ def _buat_auditor(username, *tokos):
 
 class TopbarPickerBerkelompokTests(TestCase):
     def setUp(self):
-        self.lbs = Toko.objects.get(key="lbs")   # nexus (default)
-        self.slo = Toko.objects.get(key="slo")   # vigor (migrasi 0012)
-        self.ahk = Toko.objects.get(key="ahk")   # nexus (default)
+        self.lbs = Toko.objects.get(key="lbs")   # pusat (default)
+        self.slo = Toko.objects.get(key="slo")
+        self.ahk = Toko.objects.get(key="ahk")   # pusat (default)
+        # Satu partner supaya dua optgroup muncul.
+        self.slo.kepemilikan = Toko.KEPEMILIKAN_PARTNER
+        self.slo.save(update_fields=["kepemilikan"])
 
     def _login(self, user, active_toko):
         self.client.force_login(user)
@@ -31,18 +34,18 @@ class TopbarPickerBerkelompokTests(TestCase):
         s["active_toko_id"] = active_toko.id
         s.save()
 
-    def test_dua_panel_tampil_optgroup(self):
-        u = _buat_auditor("aud_dua_panel", self.lbs, self.slo)
+    def test_dua_kepemilikan_tampil_optgroup(self):
+        u = _buat_auditor("aud_dua_kep", self.lbs, self.slo)
         self._login(u, self.lbs)
         r = self.client.get(reverse("dashboard"))
-        self.assertContains(r, '<optgroup label="Nexus"')
-        self.assertContains(r, '<optgroup label="Vigor"')
-        # Opsi toko tetap ada di dalamnya, selected logic tak berubah.
+        self.assertContains(r, '<optgroup label="Toko Pusat"')
+        self.assertContains(r, '<optgroup label="Toko Partner"')
         self.assertContains(r, f'<option value="{self.lbs.id}"')
         self.assertContains(r, f'<option value="{self.slo.id}"')
 
-    def test_satu_panel_tampil_flat_tanpa_optgroup(self):
-        u = _buat_auditor("aud_satu_panel", self.lbs, self.ahk)
+    def test_satu_kepemilikan_tampil_flat_tanpa_optgroup(self):
+        # lbs + ahk keduanya pusat → satu grup → flat (tanpa header).
+        u = _buat_auditor("aud_satu_kep", self.lbs, self.ahk)
         self._login(u, self.lbs)
         r = self.client.get(reverse("dashboard"))
         self.assertNotContains(r, "<optgroup")
@@ -58,8 +61,8 @@ class TopbarPickerBerkelompokTests(TestCase):
         s.save()
         r = self.client.get(reverse("dashboard"))
         self.assertContains(r, "reminderOverlay")
-        self.assertContains(r, '<optgroup label="Nexus"')
-        self.assertContains(r, '<optgroup label="Vigor"')
+        self.assertContains(r, '<optgroup label="Toko Pusat"')
+        self.assertContains(r, '<optgroup label="Toko Partner"')
 
 
 class KelolaTokoPanelBadgeTests(TestCase):

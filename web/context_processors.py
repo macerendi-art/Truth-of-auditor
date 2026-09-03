@@ -21,14 +21,19 @@ def toko(request):
     # dan halaman single-toko memang menampilkan toko itu.
     semua = mode_semua(request)
     active = next((t for t in tokos if t.id == active_id), tokos[0] if tokos else None)
-    # Picker toko berkelompok per panel client (Nexus/Vigor/TM Gaming) — dibangun
+    # Picker toko berkelompok Pusat / Partner (metadata kepemilikan) — dibangun
     # dari `tokos` yang SUDAH difetch di atas (list, bukan queryset baru), jadi
     # nol query tambahan. Hanya grup berisi yang dikirim ke template.
     from sources.models import Toko
 
+    # Label UI: "Toko Pusat" / "Toko Partner" (bukan sekadar "Pusat"/"Partner").
+    _KEP_LABEL = {
+        Toko.KEPEMILIKAN_PUSAT: "Toko Pusat",
+        Toko.KEPEMILIKAN_PARTNER: "Toko Partner",
+    }
     tokos_grouped = [
-        (label, [t for t in tokos if t.panel == key])
-        for key, label in Toko.PANEL_CHOICES
+        (_KEP_LABEL[key], [t for t in tokos if t.kepemilikan == key])
+        for key, _lbl in Toko.KEPEMILIKAN_CHOICES
     ]
     tokos_grouped = [(label, grup) for label, grup in tokos_grouped if grup]
     # Jumlah antrean tinjau — badge kecil di menu Rekonsiliasi. Mode Semua Toko

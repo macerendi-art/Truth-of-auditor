@@ -23,9 +23,11 @@ User = get_user_model()
 
 class TokoPickerWiredTests(TestCase):
     def setUp(self):
-        # Dua panel berbeda supaya markup <optgroup> ikut ter-render.
-        self.lbs = Toko.objects.get(key="lbs")  # nexus
-        self.slo = Toko.objects.get(key="slo")  # vigor
+        # Dua kepemilikan berbeda supaya markup <optgroup> ikut ter-render.
+        self.lbs = Toko.objects.get(key="lbs")  # pusat
+        self.slo = Toko.objects.get(key="slo")
+        self.slo.kepemilikan = Toko.KEPEMILIKAN_PARTNER
+        self.slo.save(update_fields=["kepemilikan"])
         u = User.objects.create_user("aud_tp", password="rahasia123", role="auditor")
         u.allowed_tokos.add(self.lbs, self.slo)
         self.client.force_login(u)
@@ -45,6 +47,8 @@ class TokoPickerWiredTests(TestCase):
         html = r.content.decode()
         self.assertIn('<select name="toko_id"', html)
         self.assertIn("<optgroup", html)
+        self.assertIn('label="Toko Pusat"', html)
+        self.assertIn('label="Toko Partner"', html)
 
     def test_css_kontrol_terpasang(self):
         """Kelas penyembunyi select asli ada di <style> — tanpa itu, setelah JS
