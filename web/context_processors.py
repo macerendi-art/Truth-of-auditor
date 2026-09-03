@@ -21,21 +21,26 @@ def toko(request):
     # dan halaman single-toko memang menampilkan toko itu.
     semua = mode_semua(request)
     active = next((t for t in tokos if t.id == active_id), tokos[0] if tokos else None)
-    # Picker toko berkelompok Pusat / Partner (metadata kepemilikan) — dibangun
-    # dari `tokos` yang SUDAH difetch di atas (list, bukan queryset baru), jadi
-    # nol query tambahan. Hanya grup berisi yang dikirim ke template.
+    # Picker toko: kepemilikan (Pusat/Partner) × panel (Nexus/Vigor/TM Gaming).
+    # <optgroup> HTML tak mendukung nest, jadi label digabung
+    # "Toko Pusat · Nexus" — dibangun dari list `tokos` (0 query ekstra).
     from sources.models import Toko
 
-    # Label UI: "Toko Pusat" / "Toko Partner" (bukan sekadar "Pusat"/"Partner").
     _KEP_LABEL = {
         Toko.KEPEMILIKAN_PUSAT: "Toko Pusat",
         Toko.KEPEMILIKAN_PARTNER: "Toko Partner",
     }
-    tokos_grouped = [
-        (_KEP_LABEL[key], [t for t in tokos if t.kepemilikan == key])
-        for key, _lbl in Toko.KEPEMILIKAN_CHOICES
-    ]
-    tokos_grouped = [(label, grup) for label, grup in tokos_grouped if grup]
+    tokos_grouped = []
+    for kep_key, _ in Toko.KEPEMILIKAN_CHOICES:
+        kep_lbl = _KEP_LABEL[kep_key]
+        for panel_key, panel_lbl in Toko.PANEL_CHOICES:
+            grup = [
+                t for t in tokos
+                if t.kepemilikan == kep_key and t.panel == panel_key
+            ]
+            if grup:
+                tokos_grouped.append((f"{kep_lbl} · {panel_lbl}", grup))
+
     # Jumlah antrean tinjau — badge kecil di menu Rekonsiliasi. Mode Semua Toko
     # menghitung lintas toko lewat `toko__in` (tetap SATU query agregat, bukan
     # satu query per toko).

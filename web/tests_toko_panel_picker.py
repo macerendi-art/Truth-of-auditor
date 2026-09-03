@@ -1,7 +1,7 @@
-"""Picker toko berkelompok Pusat/Partner — topbar + reminder.
+"""Picker toko: kepemilikan (Pusat/Partner) × panel (Nexus/Vigor/TM Gaming).
 
-Grouping murni tampilan/metadata (`Toko.kepemilikan`). Panel client tetap
-di halaman Kelola Toko, bukan di picker topbar.
+Grouping murni tampilan/metadata. <optgroup> digabung
+\"Toko Pusat · Nexus\" karena HTML tidak mendukung nest.
 """
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -21,10 +21,9 @@ def _buat_auditor(username, *tokos):
 
 class TopbarPickerBerkelompokTests(TestCase):
     def setUp(self):
-        self.lbs = Toko.objects.get(key="lbs")   # pusat (default)
-        self.slo = Toko.objects.get(key="slo")
-        self.ahk = Toko.objects.get(key="ahk")   # pusat (default)
-        # Satu partner supaya dua optgroup muncul.
+        self.lbs = Toko.objects.get(key="lbs")   # pusat · nexus
+        self.slo = Toko.objects.get(key="slo")   # vigor (0012)
+        self.ahk = Toko.objects.get(key="ahk")   # pusat · nexus
         self.slo.kepemilikan = Toko.KEPEMILIKAN_PARTNER
         self.slo.save(update_fields=["kepemilikan"])
 
@@ -34,23 +33,33 @@ class TopbarPickerBerkelompokTests(TestCase):
         s["active_toko_id"] = active_toko.id
         s.save()
 
-    def test_dua_kepemilikan_tampil_optgroup(self):
+    def test_kepemilikan_x_panel_tampil_optgroup(self):
         u = _buat_auditor("aud_dua_kep", self.lbs, self.slo)
         self._login(u, self.lbs)
         r = self.client.get(reverse("dashboard"))
-        self.assertContains(r, '<optgroup label="Toko Pusat"')
-        self.assertContains(r, '<optgroup label="Toko Partner"')
+        self.assertContains(r, '<optgroup label="Toko Pusat · Nexus"')
+        self.assertContains(r, '<optgroup label="Toko Partner · Vigor"')
         self.assertContains(r, f'<option value="{self.lbs.id}"')
         self.assertContains(r, f'<option value="{self.slo.id}"')
 
-    def test_satu_kepemilikan_tampil_flat_tanpa_optgroup(self):
-        # lbs + ahk keduanya pusat → satu grup → flat (tanpa header).
+    def test_satu_grup_tampil_flat_tanpa_optgroup(self):
+        # lbs + ahk = pusat · nexus saja → flat.
         u = _buat_auditor("aud_satu_kep", self.lbs, self.ahk)
         self._login(u, self.lbs)
         r = self.client.get(reverse("dashboard"))
         self.assertNotContains(r, "<optgroup")
         self.assertContains(r, f'<option value="{self.lbs.id}"')
         self.assertContains(r, f'<option value="{self.ahk.id}"')
+
+    def test_satu_kepemilikan_dua_panel_tampil_optgroup(self):
+        # keduanya pusat, beda panel → dua header panel di dalam Pusat.
+        self.slo.kepemilikan = Toko.KEPEMILIKAN_PUSAT
+        self.slo.save(update_fields=["kepemilikan"])
+        u = _buat_auditor("aud_dua_panel", self.lbs, self.slo)
+        self._login(u, self.lbs)
+        r = self.client.get(reverse("dashboard"))
+        self.assertContains(r, '<optgroup label="Toko Pusat · Nexus"')
+        self.assertContains(r, '<optgroup label="Toko Pusat · Vigor"')
 
     def test_reminder_modal_picker_ikut_berkelompok(self):
         u = _buat_auditor("aud_reminder", self.lbs, self.slo)
@@ -61,8 +70,8 @@ class TopbarPickerBerkelompokTests(TestCase):
         s.save()
         r = self.client.get(reverse("dashboard"))
         self.assertContains(r, "reminderOverlay")
-        self.assertContains(r, '<optgroup label="Toko Pusat"')
-        self.assertContains(r, '<optgroup label="Toko Partner"')
+        self.assertContains(r, '<optgroup label="Toko Pusat · Nexus"')
+        self.assertContains(r, '<optgroup label="Toko Partner · Vigor"')
 
 
 class KelolaTokoPanelBadgeTests(TestCase):
@@ -74,10 +83,8 @@ class KelolaTokoPanelBadgeTests(TestCase):
         r = self.client.get(reverse("kelola_toko"))
         self.assertContains(r, "<th>Panel</th>")
         self.assertContains(r, "<th>Pusat / Partner</th>")
-        # AHK = nexus (default), SLO = vigor (migrasi 0012).
         self.assertContains(r, 'badge muted plain">Nexus</span>')
         self.assertContains(r, 'badge warn plain">Vigor</span>')
-        # default kepemilikan = Pusat
         self.assertContains(r, 'badge ok plain">Pusat</span>')
         self.assertContains(r, 'name="kepemilikan"')
         self.assertContains(r, ">Partner</option>")

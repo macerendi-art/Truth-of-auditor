@@ -47,8 +47,8 @@ class TokoPickerWiredTests(TestCase):
         html = r.content.decode()
         self.assertIn('<select name="toko_id"', html)
         self.assertIn("<optgroup", html)
-        self.assertIn('label="Toko Pusat"', html)
-        self.assertIn('label="Toko Partner"', html)
+        self.assertIn('label="Toko Pusat · Nexus"', html)
+        self.assertIn('label="Toko Partner · Vigor"', html)
 
     def test_css_kontrol_terpasang(self):
         """Kelas penyembunyi select asli ada di <style> — tanpa itu, setelah JS
