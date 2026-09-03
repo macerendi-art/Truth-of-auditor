@@ -37,11 +37,21 @@ def monthly_filename(toko, year, month):
 
 
 def build_monthly_workbook(toko, year, month, data=None):
-    """Workbook ringkasan bulanan: 1 baris per tanggal + TOTAL (sama UI Ringkasan Bulanan).
+    """Workbook ringkasan bulanan + sheet Breakdown / Rekening / Bonus sebulan.
 
-    `data` opsional = keluaran `web.monthly.monthly_summary` — dihitung di sini
-    bila tidak diisi supaya view & tes builder bisa memanggil mandiri.
+    Sheet 1 \"Ringkasan Bulanan\": 1 baris per tanggal + TOTAL (sama UI Ringkasan
+    Bulanan). `data` opsional = `web.monthly.monthly_summary`.
+
+    Sheet tambahan (query-time, rentang tgl 1–akhir bulan) — sama builder export
+    harian/batch, hanya rentangnya sebulan:
+      - Breakdown Bracket (Control Bracket per FR Account + kolom kategori)
+      - Rincian Rekening (bank/gateway)
+      - Rekonsiliasi Bonus (baris + kolom Kategori / Status)
+    Sheet kosong (tanpa baris sumber) tidak ditambahkan.
     """
+    from calendar import monthrange
+    from datetime import date as date_cls
+
     if data is None:
         from web.monthly import monthly_summary
 
@@ -51,11 +61,15 @@ def build_monthly_workbook(toko, year, month, data=None):
     ws = wb.active
     ws.title = "Ringkasan Bulanan"
 
+    dari = date_cls(year, month, 1)
+    sampai = date_cls(year, month, monthrange(year, month)[1])
     periode = f"{month:02d}/{year:04d}"
+    rentang_label = f"{dari.strftime('%d/%m/%Y')} – {sampai.strftime('%d/%m/%Y')}"
     meta = [
         ("Toko", toko.name if getattr(toko, "name", None) else str(toko)),
         ("Periode", periode),
-        ("Jenis", "Ringkasan bulanan (agregat batch harian)"),
+        ("Rentang", rentang_label),
+        ("Jenis", "Ringkasan bulanan + Breakdown Bracket / Rekening / Bonus"),
         ("Versi aplikasi", f"v{app_versi()}"),
         ("", ""),
     ]
@@ -105,6 +119,23 @@ def build_monthly_workbook(toko, year, month, data=None):
     ])
     for c in ws[ws.max_row]:
         c.font = Font(bold=True)
+
+    # Sheet sebulan: mirror build_batch_workbook, rentang [tgl1, akhir bulan].
+    titles = {"Ringkasan Bulanan"}
+    from web.bonus import rekonsiliasi_bonus
+    from web.breakdown import bracket_breakdown
+    from web.rekening import rekening_breakdown
+
+    bd = bracket_breakdown(toko, dari, sampai)
+    if bd["count"]:
+        breakdown_sheet(wb, bd, _sheet_title("Breakdown Bracket", titles), rentang_label)
+    rk = rekening_breakdown(toko, dari, sampai)
+    if rk["count"]:
+        rekening_sheet(wb, rk, _sheet_title("Rincian Rekening", titles))
+    bn = rekonsiliasi_bonus(toko, dari, sampai)
+    if (bn["cocok"] or bn["panel_only"] or bn["bracket_only"]
+            or bn.get("agregat")):
+        bonus_sheet(wb, bn, _sheet_title("Rekonsiliasi Bonus", titles), rentang_label)
     return wb
 
 

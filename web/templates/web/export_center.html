@@ -40,7 +40,7 @@
   {# ---- Export bulanan (summary 1 bulan) ---- #}
   <div class="card export-card" style="margin-top:18px">
     <h2 class="export-sec">Export Bulanan</h2>
-    <p class="faint export-sec-desc">Ringkasan 1 bulan — satu baris per tanggal (Panel/Uang DP &amp; WD, selisih, cocok/tinjau/tidak) + TOTAL. Sama angka halaman Ringkasan Bulanan.</p>
+    <p class="faint export-sec-desc">Ringkasan 1 bulan (1 baris/tanggal + TOTAL) plus sheet <b>Breakdown Bracket</b>, <b>Rincian Rekening</b>, dan <b>Rekonsiliasi Bonus</b> (per kategori) untuk seluruh bulan — sama builder export harian, rentang sebulan.</p>
     <form method="get">
       <input type="hidden" name="mode" value="bulanan">
       <div class="field">
@@ -56,8 +56,8 @@
         <input type="month" name="bulan" required value="{{ default_bulan }}">
       </div>
       <p class="faint export-hint">
-        Hasil = <b>summary satu bulan kalender</b> (bukan detail transaksi per baris).
-        Banyak toko → ZIP berisi satu file per toko yang punya batch di bulan itu.
+        Hasil = <b>summary satu bulan kalender</b> + breakdown bracket / rekening / bonus sebulan
+        (bukan detail match batch harian). Banyak toko → ZIP satu file per toko ber-batch.
       </p>
       <button class="btn primary export-btn" type="submit">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>

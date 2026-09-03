@@ -1,8 +1,10 @@
 """Menu Export: per-tanggal / per-toko / semua toko (admin) — bulk = ZIP berisi
-xlsx per-(toko,tanggal); nama file memuat toko + tanggal."""
+xlsx per-(toko,tanggal); nama file memuat toko + tanggal. Export bulanan =
+ringkasan + Breakdown Bracket / Rincian Rekening / Bonus sebulan.
+"""
 import io
 import zipfile
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -250,3 +252,128 @@ class ExportBulananTests(ExportCenterBase):
             "mode": "bulanan", "toko": self.lbs.id, "bulan": "2026-06",
         })
         self.assertTrue(AuditLog.objects.filter(aksi="export_bulanan").exists())
+
+    def test_xlsx_memuat_breakdown_rekening_bonus(self):
+        """Export bulanan + FR/mutasi/bonus sebulan → 4 sheet (sama builder harian)."""
+        self._batch(self.lbs, date(2026, 6, 15))
+        self._batch(self.lbs, date(2026, 6, 28))
+
+        bracket = SourceType.objects.get_or_create(
+            key="bracket", defaults={"name": "Bracket"}
+        )[0]
+        bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        panel_bonus = SourceType.objects.get(key="panel_bonus")
+        bracket_bonus = SourceType.objects.get(key="bracket_bonus")
+
+        # FR Control Bracket — 2 hari di Juni (kategori DP & Bonus)
+        up_br = Upload.objects.create(source_type=bracket, toko=self.lbs)
+        for tgl, kat, total, saldo in (
+            (date(2026, 6, 10), "Deposit", "100000", "500000"),
+            (date(2026, 6, 20), "Bonus", "25000", "525000"),
+        ):
+            n = next(_seq)
+            Transaction.objects.create(
+                upload=up_br, source_type=bracket, toko=self.lbs, jenis="lainnya",
+                amount=abs(Decimal(total)), money_delta=Decimal(total),
+                balance_after=Decimal(saldo), posted_date=tgl,
+                occurred_at=datetime(tgl.year, tgl.month, tgl.day, 10, 0),
+                row_hash=f"fr-m-{n}",
+                raw={"Bank": "QRIS HOKI", "Kategori": kat, "Jam": "10:00"},
+            )
+
+        # Mutasi bank
+        up_bk = Upload.objects.create(
+            source_type=bank, toko=self.lbs, provider="BCA", owner_name="CM TEST"
+        )
+        tgl_m = date(2026, 6, 12)
+        Transaction.objects.create(
+            upload=up_bk, source_type=bank, toko=self.lbs, jenis="depo",
+            amount=Decimal("75000"), money_delta=Decimal("75000"),
+            balance_after=Decimal("1000000"),
+            occurred_at=datetime(tgl_m.year, tgl_m.month, tgl_m.day, 11, 0),
+            row_hash=f"bk-m-{next(_seq)}", raw={},
+        )
+
+        # Bonus panel + bracket (kategori Lucky Draw) di bulan yang sama
+        up_pb = Upload.objects.create(source_type=panel_bonus, toko=self.lbs)
+        up_bb = Upload.objects.create(source_type=bracket_bonus, toko=self.lbs)
+        tgl_b = date(2026, 6, 18)
+        for up, st, user in (
+            (up_pb, panel_bonus, "Cici"),
+            (up_bb, bracket_bonus, "cici"),
+        ):
+            n = next(_seq)
+            Transaction.objects.create(
+                upload=up, source_type=st, toko=self.lbs, jenis="bonus",
+                amount=Decimal("40000"), money_delta=Decimal("0"), ticket_no="",
+                username=user, posted_date=tgl_b,
+                occurred_at=datetime(tgl_b.year, tgl_b.month, tgl_b.day, 10, 0),
+                description=f"Lucky Draw {user}",
+                raw={"Kategori": "Lucky Draw"}, row_hash=f"bn-m-{n}",
+            )
+
+        r = self.client.get(reverse("export_center"), {
+            "mode": "bulanan", "toko": self.lbs.id, "bulan": "2026-06",
+        })
+        self.assertEqual(r["Content-Type"], XLSX_CT)
+        wb = load_workbook(io.BytesIO(r.content))
+        names = wb.sheetnames
+        self.assertIn("Ringkasan Bulanan", names)
+        self.assertIn("Breakdown Bracket", names)
+        self.assertIn("Rincian Rekening", names)
+        self.assertIn("Rekonsiliasi Bonus", names)
+
+        # Breakdown: caption rentang sebulan + FR Account
+        bd = wb["Breakdown Bracket"]
+        self.assertIn("01/06/2026", str(bd["A1"].value))
+        self.assertIn("30/06/2026", str(bd["A1"].value))
+        # cari nama akun di kolom B
+        found_fr = any(
+            row[1] and "QRIS HOKI" in str(row[1])
+            for row in bd.iter_rows(values_only=True)
+            if row and len(row) > 1
+        )
+        self.assertTrue(found_fr)
+
+        # Rekening: label bank
+        rk = wb["Rincian Rekening"]
+        found_rk = any(
+            row[1] and "BCA" in str(row[1]) and "CM TEST" in str(row[1])
+            for row in rk.iter_rows(values_only=True)
+            if row and len(row) > 1
+        )
+        self.assertTrue(found_rk)
+
+        # Bonus: kolom Kategori + status Cocok
+        bn = wb["Rekonsiliasi Bonus"]
+        headers = None
+        for row in bn.iter_rows(values_only=True):
+            if row and row[0] == "Tanggal":
+                headers = list(row)
+                break
+        self.assertEqual(
+            headers,
+            ["Tanggal", "Username", "Kategori", "Nominal Panel",
+             "Nominal Bracket", "Selisih", "Status"],
+        )
+        statuses = [
+            row[6] for row in bn.iter_rows(values_only=True)
+            if row and row[6] in ("Cocok", "Hanya Panel", "Hanya Bracket")
+        ]
+        self.assertIn("Cocok", statuses)
+        kats = [
+            row[2] for row in bn.iter_rows(values_only=True)
+            if row and row[2] and row[0] not in (None, "Tanggal", "TOTAL")
+            and not str(row[0]).startswith("01/")
+        ]
+        # baris data punya kategori Lucky Draw
+        self.assertTrue(any("Lucky" in str(k) for k in kats))
+
+    def test_tanpa_fr_rekening_bonus_hanya_ringkasan(self):
+        """Tanpa data sumber tambahan → workbook tetap 1 sheet (tak error)."""
+        self._batch(self.lbs, date(2026, 6, 5))
+        r = self.client.get(reverse("export_center"), {
+            "mode": "bulanan", "toko": self.lbs.id, "bulan": "2026-06",
+        })
+        wb = load_workbook(io.BytesIO(r.content))
+        self.assertEqual(wb.sheetnames, ["Ringkasan Bulanan"])
