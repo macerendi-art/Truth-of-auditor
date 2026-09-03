@@ -162,3 +162,91 @@ class ExportRBACTests(ExportCenterBase):
         self._login_auditor(self.lbs)
         r = self.client.get(reverse("export_center"))
         self.assertNotContains(r, "Semua toko")
+
+
+class ExportBulananTests(ExportCenterBase):
+    """mode=bulanan → xlsx ringkasan 1 bulan (bukan detail batch)."""
+
+    def test_form_tampil_section_bulanan(self):
+        r = self.client.get(reverse("export_center"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "Export Bulanan")
+        self.assertContains(r, 'name="mode"')
+        self.assertContains(r, 'value="bulanan"')
+        self.assertContains(r, 'name="bulan"')
+
+    def test_satu_toko_xlsx_summary(self):
+        self._batch(self.lbs, date(2026, 6, 27))
+        self._batch(self.lbs, date(2026, 6, 28))
+        r = self.client.get(reverse("export_center"), {
+            "mode": "bulanan", "toko": self.lbs.id, "bulan": "2026-06",
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"], XLSX_CT)
+        cd = r["Content-Disposition"]
+        self.assertIn("ringkasan_bulanan_", cd)
+        self.assertIn("2026-06", cd)
+        self.assertIn(self.lbs.name.replace(" ", "_"), cd)
+        wb = load_workbook(io.BytesIO(r.content))
+        self.assertIn("Ringkasan Bulanan", wb.sheetnames)
+        ws = wb["Ringkasan Bulanan"]
+        # meta + header + 2 baris harian + TOTAL
+        cells_a = [ws.cell(row=i, column=1).value for i in range(1, ws.max_row + 1)]
+        self.assertIn("Tanggal", cells_a)
+        self.assertIn("TOTAL", cells_a)
+        # baris data 27 & 28 Juni
+        tgls = [ws.cell(row=i, column=1).value for i in range(1, ws.max_row + 1)]
+        self.assertIn("27/06/2026", tgls)
+        self.assertIn("28/06/2026", tgls)
+        # TOTAL cocok = 1+1 dari fixture _batch
+        total_row = ws.max_row
+        self.assertEqual(ws.cell(row=total_row, column=1).value, "TOTAL")
+        self.assertEqual(ws.cell(row=total_row, column=8).value, 2)  # Cocok
+
+    def test_bulan_kosong_redirect(self):
+        r = self.client.get(reverse("export_center"), {
+            "mode": "bulanan", "toko": self.lbs.id, "bulan": "2026-01",
+        }, follow=True)
+        self.assertContains(r, "Tidak ada ringkasan bulanan")
+
+    def test_bulan_invalid_redirect(self):
+        self._batch(self.lbs, date(2026, 6, 27))
+        r = self.client.get(reverse("export_center"), {
+            "mode": "bulanan", "toko": self.lbs.id, "bulan": "2026-13",
+        }, follow=True)
+        self.assertContains(r, "Bulan tidak valid")
+
+    def test_semua_toko_admin_zip(self):
+        self._batch(self.lbs, date(2026, 6, 27))
+        self._batch(self.slo, date(2026, 6, 15))
+        r = self.client.get(reverse("export_center"), {
+            "mode": "bulanan", "toko": "all", "bulan": "2026-06",
+        })
+        self.assertEqual(r["Content-Type"], "application/zip")
+        zf = zipfile.ZipFile(io.BytesIO(r.content))
+        names = sorted(zf.namelist())
+        self.assertEqual(len(names), 2)
+        self.assertTrue(all(n.startswith("ringkasan_bulanan_") for n in names))
+        self.assertTrue(all("2026-06" in n for n in names))
+        wb = load_workbook(io.BytesIO(zf.read(names[0])))
+        self.assertIn("Ringkasan Bulanan", wb.sheetnames)
+
+    def test_auditor_semua_toko_ditolak(self):
+        self._batch(self.lbs, date(2026, 6, 27))
+        u = User.objects.create_user("aud_m", "audm@a.co", "pw12345", role="auditor")
+        u.allowed_tokos.set([self.lbs])
+        self.client.logout()
+        self.client.login(username="aud_m", password="pw12345")
+        r = self.client.get(reverse("export_center"), {
+            "mode": "bulanan", "toko": "all", "bulan": "2026-06",
+        }, follow=True)
+        self.assertNotEqual(r.get("Content-Type"), "application/zip")
+        self.assertContains(r, "admin")
+
+    def test_audit_log_export_bulanan(self):
+        from core.models import AuditLog
+        self._batch(self.lbs, date(2026, 6, 27))
+        self.client.get(reverse("export_center"), {
+            "mode": "bulanan", "toko": self.lbs.id, "bulan": "2026-06",
+        })
+        self.assertTrue(AuditLog.objects.filter(aksi="export_bulanan").exists())

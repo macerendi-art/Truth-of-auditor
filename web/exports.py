@@ -30,6 +30,84 @@ def batch_filename(batch):
     return f"rekonsiliasi_{toko}_{tgl}.xlsx"
 
 
+def monthly_filename(toko, year, month):
+    """ringkasan_bulanan_<toko>_YYYY-MM.xlsx — export summary 1 bulan."""
+    name = safe_name(toko.name if getattr(toko, "name", None) else toko)
+    return f"ringkasan_bulanan_{name}_{year:04d}-{month:02d}.xlsx"
+
+
+def build_monthly_workbook(toko, year, month, data=None):
+    """Workbook ringkasan bulanan: 1 baris per tanggal + TOTAL (sama UI Ringkasan Bulanan).
+
+    `data` opsional = keluaran `web.monthly.monthly_summary` — dihitung di sini
+    bila tidak diisi supaya view & tes builder bisa memanggil mandiri.
+    """
+    if data is None:
+        from web.monthly import monthly_summary
+
+        data = monthly_summary(toko, year, month)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Ringkasan Bulanan"
+
+    periode = f"{month:02d}/{year:04d}"
+    meta = [
+        ("Toko", toko.name if getattr(toko, "name", None) else str(toko)),
+        ("Periode", periode),
+        ("Jenis", "Ringkasan bulanan (agregat batch harian)"),
+        ("Versi aplikasi", f"v{app_versi()}"),
+        ("", ""),
+    ]
+    for label, val in meta:
+        ws.append([label, val])
+    for cell in ws["A"]:
+        cell.font = Font(bold=True)
+
+    headers = [
+        "Tanggal",
+        "Panel DP", "Uang DP", "Selisih DP",
+        "Panel WD", "Uang WD", "Selisih WD",
+        "Cocok", "Tinjau", "Tidak",
+    ]
+    ws.append(headers)
+    header_row = ws.max_row
+    for c in ws[header_row]:
+        c.font = Font(bold=True)
+
+    for r in data.get("rows") or ():
+        tgl = r.get("date")
+        ws.append([
+            tgl.strftime("%d/%m/%Y") if tgl else "",
+            _num(r.get("dp_panel", 0)),
+            _num(r.get("dp_uang", 0)),
+            _num(r.get("dp_selisih", 0)),
+            _num(r.get("wd_panel", 0)),
+            _num(r.get("wd_uang", 0)),
+            _num(r.get("wd_selisih", 0)),
+            r.get("cocok", 0) or 0,
+            r.get("tinjau", 0) or 0,
+            r.get("tidak", 0) or 0,
+        ])
+
+    tot = data.get("total") or {}
+    ws.append([
+        "TOTAL",
+        _num(tot.get("dp_panel", 0)),
+        _num(tot.get("dp_uang", 0)),
+        _num(tot.get("dp_selisih", 0)),
+        _num(tot.get("wd_panel", 0)),
+        _num(tot.get("wd_uang", 0)),
+        _num(tot.get("wd_selisih", 0)),
+        tot.get("cocok", 0) or 0,
+        tot.get("tinjau", 0) or 0,
+        tot.get("tidak", 0) or 0,
+    ])
+    for c in ws[ws.max_row]:
+        c.font = Font(bold=True)
+    return wb
+
+
 def _num(x):
     """Nilai numerik untuk sel Excel: Decimal→float, None→sel kosong (bukan 0).
 

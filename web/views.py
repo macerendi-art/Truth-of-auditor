@@ -3283,19 +3283,118 @@ def export_run(request, pk):
 EXPORT_BATCH_CAP = 200
 
 
+def _export_scope_toko(request, allowed, toko_param):
+    """Resolusi scope toko export — RBAC via tokos_for. (scope, label) atau (None, err)."""
+    from web.exports import safe_name
+
+    if toko_param == "all":
+        if not is_admin(request.user):
+            return None, "Export semua toko khusus admin."
+        return list(allowed), "semua-toko"
+    toko = allowed.filter(id=toko_param).first() if str(toko_param).isdigit() else None
+    if toko is None:
+        return None, "Toko tidak dikenal atau bukan wewenangmu."
+    return [toko], safe_name(toko.name)
+
+
+def _parse_month_ym(s):
+    """'YYYY-MM' → (year, month) atau None."""
+    s = (s or "").strip()
+    if len(s) != 7 or s[4] != "-":
+        return None
+    try:
+        year, month = int(s[:4]), int(s[5:7])
+    except ValueError:
+        return None
+    if not (1 <= month <= 12):
+        return None
+    return year, month
+
+
 @login_required
 def export_center(request):
-    """Menu Export: per-tanggal / per-toko / semua toko (admin) / kombinasi.
+    """Menu Export: harian (batch detail) + bulanan (ringkasan 1 bulan).
 
-    1 batch -> xlsx langsung; >1 -> ZIP berisi xlsx per-(toko,tanggal) —
-    output tetap per-tanggal walaupun export dilakukan sekaligus (bulk).
+    Harian: 1 batch -> xlsx; >1 -> ZIP xlsx per-(toko,tanggal).
+    Bulanan: mode=bulanan + bulan=YYYY-MM — summary agregat batch harian
+    (kolom sama halaman Ringkasan Bulanan). 1 toko -> xlsx; multi -> ZIP.
     """
     import io
 
-    from web.exports import XLSX_CT, batch_filename, build_batch_workbook, safe_name
+    from web.exports import (
+        XLSX_CT,
+        batch_filename,
+        build_batch_workbook,
+        build_monthly_workbook,
+        monthly_filename,
+    )
+    from web.monthly import monthly_summary
 
     allowed = tokos_for(request.user)
     toko_param = request.GET.get("toko", "")
+    mode = (request.GET.get("mode") or "").strip().lower()
+
+    if not toko_param:  # form
+        return render(request, "web/export_center.html", {
+            "tokos": allowed,
+            "default_bulan": date_cls.today().strftime("%Y-%m"),
+        })
+
+    scope, scope_or_err = _export_scope_toko(request, allowed, toko_param)
+    if scope is None:
+        messages.error(request, scope_or_err)
+        return redirect("export_center")
+    scope_label = scope_or_err
+
+    # ---- Export bulanan: summary 1 bulan (bukan detail batch) ---------------
+    if mode == "bulanan":
+        parsed = _parse_month_ym(request.GET.get("bulan", ""))
+        if parsed is None:
+            messages.error(request, "Bulan tidak valid — pilih format YYYY-MM.")
+            return redirect("export_center")
+        year, month = parsed
+        packs = []
+        for t in scope:
+            data = monthly_summary(t, year, month)
+            if data["rows"]:
+                packs.append((t, data))
+        if not packs:
+            messages.error(
+                request,
+                "Tidak ada ringkasan bulanan pada pilihan itu — cek toko/bulannya.",
+            )
+            return redirect("export_center")
+
+        tag = f"{year:04d}-{month:02d}"
+        catat(request.user, "export_bulanan", f"{len(packs)} toko · {tag} ({scope_label})")
+
+        if len(packs) == 1:
+            t, data = packs[0]
+            wb = build_monthly_workbook(t, year, month, data=data)
+            buf = io.BytesIO()
+            wb.save(buf)
+            buf.seek(0)
+            resp = HttpResponse(buf.read(), content_type=XLSX_CT)
+            resp["Content-Disposition"] = (
+                f'attachment; filename="{monthly_filename(t, year, month)}"'
+            )
+            return resp
+
+        zbuf = io.BytesIO()
+        with zipfile.ZipFile(zbuf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for t, data in packs:
+                wb = build_monthly_workbook(t, year, month, data=data)
+                inner = io.BytesIO()
+                wb.save(inner)
+                zf.writestr(monthly_filename(t, year, month), inner.getvalue())
+        zbuf.seek(0)
+        resp = HttpResponse(zbuf.read(), content_type="application/zip")
+        resp["Content-Disposition"] = (
+            f'attachment; filename="ringkasan_bulanan_{scope_label}_{tag}.zip"'
+        )
+        return resp
+
+    # ---- Export harian (batch detail) — perilaku lama ----------------------
     date_from = _parse_date(request.GET.get("from", ""))
     date_to = _parse_date(request.GET.get("to", ""))
     # UX rentang: isi "Dari" saja = tarik satu tanggal (Sampai ikut); isi "Sampai"
@@ -3304,24 +3403,6 @@ def export_center(request):
         date_to = date_from
     elif date_to and not date_from:
         date_from = date_to
-
-    if not toko_param:  # form
-        return render(request, "web/export_center.html", {"tokos": allowed})
-
-    # --- resolusi scope toko (RBAC: tokos_for = satu-satunya sumber kebenaran) ---
-    if toko_param == "all":
-        if not is_admin(request.user):
-            messages.error(request, "Export semua toko khusus admin.")
-            return redirect("export_center")
-        scope = allowed
-        scope_label = "semua-toko"
-    else:
-        toko = allowed.filter(id=toko_param).first() if toko_param.isdigit() else None
-        if toko is None:
-            messages.error(request, "Toko tidak dikenal atau bukan wewenangmu.")
-            return redirect("export_center")
-        scope = [toko]
-        scope_label = safe_name(toko.name)
 
     batches = (
         ReconBatch.objects.filter(toko__in=scope, recon_date__isnull=False)

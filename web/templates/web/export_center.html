@@ -6,10 +6,13 @@
   <div class="export-hero">
     <span class="export-ico" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
     <h1>Export Hasil Rekonsiliasi</h1>
-    <p>Unduh hasil per tanggal &amp; toko dalam format Excel. Banyak file otomatis dibungkus satu ZIP.</p>
+    <p>Unduh hasil harian (detail batch) atau ringkasan bulanan dalam format Excel. Banyak file otomatis dibungkus satu ZIP.</p>
   </div>
 
+  {# ---- Export harian (batch detail) ---- #}
   <div class="card export-card">
+    <h2 class="export-sec">Export Harian</h2>
+    <p class="faint export-sec-desc">Detail rekonsiliasi per tanggal — sheet Ringkasan + Hasil (sama unduhan batch).</p>
     <form method="get">
       <div class="field">
         <label>Toko</label>
@@ -29,12 +32,44 @@
       </p>
       <button class="btn primary export-btn" type="submit">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Unduh Export
+        Unduh Export Harian
       </button>
     </form>
   </div>
 
-  <p class="faint export-foot">Nama file: <span class="mono">rekonsiliasi_&lt;toko&gt;_&lt;tanggal&gt;.xlsx</span></p>
+  {# ---- Export bulanan (summary 1 bulan) ---- #}
+  <div class="card export-card" style="margin-top:18px">
+    <h2 class="export-sec">Export Bulanan</h2>
+    <p class="faint export-sec-desc">Ringkasan 1 bulan — satu baris per tanggal (Panel/Uang DP &amp; WD, selisih, cocok/tinjau/tidak) + TOTAL. Sama angka halaman Ringkasan Bulanan.</p>
+    <form method="get">
+      <input type="hidden" name="mode" value="bulanan">
+      <div class="field">
+        <label>Toko</label>
+        <select name="toko" required>
+          <option value="">— pilih toko —</option>
+          {% if is_admin_user %}<option value="all">Semua toko (admin)</option>{% endif %}
+          {% for t in tokos %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>Bulan</label>
+        <input type="month" name="bulan" required value="{{ default_bulan }}">
+      </div>
+      <p class="faint export-hint">
+        Hasil = <b>summary satu bulan kalender</b> (bukan detail transaksi per baris).
+        Banyak toko → ZIP berisi satu file per toko yang punya batch di bulan itu.
+      </p>
+      <button class="btn primary export-btn" type="submit">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Unduh Export Bulanan
+      </button>
+    </form>
+  </div>
+
+  <p class="faint export-foot">
+    Harian: <span class="mono">rekonsiliasi_&lt;toko&gt;_&lt;tanggal&gt;.xlsx</span><br>
+    Bulanan: <span class="mono">ringkasan_bulanan_&lt;toko&gt;_YYYY-MM.xlsx</span>
+  </p>
 </div>
 
 <style>
@@ -45,14 +80,16 @@
 .export-hero h1{margin:0 0 6px}
 .export-hero p{color:var(--muted);margin:0 auto;font-size:14px;max-width:440px;line-height:1.55}
 .export-card{text-align:left;max-width:500px;margin:0 auto;padding:26px}
+.export-sec{margin:0 0 4px;font-size:16px}
+.export-sec-desc{margin:0 0 16px;font-size:12.5px;line-height:1.5}
 .export-card .field{margin-bottom:16px}
 .export-card label{display:block;margin-bottom:6px;font-weight:600;font-size:13px;color:var(--ink)}
-.export-card select,.export-card input[type=date]{width:100%}
+.export-card select,.export-card input[type=date],.export-card input[type=month]{width:100%}
 .export-dates{display:flex;gap:12px}
 .export-dates .field{flex:1;margin-bottom:0}
 .export-hint{font-size:12.5px;margin:14px 0 18px;line-height:1.55}
 .export-btn{width:100%;justify-content:center}
-.export-foot{margin-top:16px;font-size:12px}
+.export-foot{margin-top:16px;font-size:12px;line-height:1.6}
 </style>
 <script>
 (function(){
