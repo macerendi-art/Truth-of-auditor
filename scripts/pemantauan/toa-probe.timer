@@ -1,0 +1,12 @@
+[Unit]
+Description=Jadwal probe HTTP layanan produksi (tiap 5 menit -- B6)
+
+[Timer]
+# Tiap 5 menit -- jauh lebih sering dari toa-kesehatan.timer (harian) SENGAJA: ini satu-satunya
+# cara mendeteksi "service mati setelah 3x restart" dalam hitungan menit, bukan jam. Ringan
+# (satu curl), jadi aman berjalan sesering ini tanpa membebani produksi.
+OnCalendar=*:0/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target

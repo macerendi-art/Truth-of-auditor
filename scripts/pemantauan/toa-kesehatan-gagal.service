@@ -1,0 +1,12 @@
+[Unit]
+Description=Alarm kegagalan pemeriksaan kesehatan toa (dicatat ke journal prioritas err)
+
+[Service]
+Type=oneshot
+User=toa
+Group=toa
+# kirim-alarm.sh adalah TITIK TUNGGAL tempat pemilik memasang saluran nyata (SMTP/webhook) --
+# lihat docstring di berkas itu + docs/runbook-pemantauan-2026-09-04.md. Tanpa saluran
+# terpasang ia hanya `logger` (journal), sama seperti sebelum refactor ini -- perilaku itu
+# TERBUKTI (lihat bukti di runbook) sebelum dipindah ke belakang titik tunggal ini.
+ExecStart=/home/toa/pemantauan/kirim-alarm.sh "kesehatan toa BAHAYA -- cek: journalctl -u toa-kesehatan.service -n 100  |  cat /home/toa/kesehatan/status.json"

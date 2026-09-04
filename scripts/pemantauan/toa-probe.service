@@ -1,0 +1,12 @@
+[Unit]
+Description=Probe HTTP layanan produksi Truth of Auditor (B6 -- deteksi mati sesudah 3x restart)
+OnFailure=toa-probe-gagal.service
+
+[Service]
+Type=oneshot
+User=toa
+Group=toa
+ExecStart=/home/toa/probe/probe-layanan.sh
+# Ringan: satu curl ke domain publik, timeout internal skrip 15 dtk. Longgar tapi jauh di bawah
+# interval jadwal (5 menit) supaya tak pernah tumpang tindih dengan run berikutnya.
+TimeoutStartSec=60

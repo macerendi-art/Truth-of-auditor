@@ -1,0 +1,10 @@
+[Unit]
+Description=Alarm layanan produksi tak menjawab (dicatat ke journal prioritas err)
+
+[Service]
+Type=oneshot
+User=toa
+Group=toa
+# kirim-alarm.sh adalah TITIK TUNGGAL yang SAMA dipakai toa-kesehatan-gagal.service -- lihat
+# komentar di sana + docs/runbook-pemantauan-2026-09-04.md. Satu berkas, dua pemanggil.
+ExecStart=/home/toa/pemantauan/kirim-alarm.sh "PROBE toa: layanan produksi TIDAK MENJAWAB (gagal beruntun >= ambang) -- cek: journalctl -u toa-probe.service -n 50  |  cat /home/toa/probe/status.json"

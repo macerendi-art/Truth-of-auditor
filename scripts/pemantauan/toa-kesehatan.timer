@@ -1,0 +1,12 @@
+[Unit]
+Description=Jadwal pemeriksaan kesehatan produksi Truth of Auditor
+
+[Timer]
+# 04:00 WIB -- SESUDAH cadangan (03:00 + jitter s/d 5 menit, toa-cadangan.timer), supaya
+# status.json cadangan hari ini sudah pasti diperbarui saat dibaca di sini.
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

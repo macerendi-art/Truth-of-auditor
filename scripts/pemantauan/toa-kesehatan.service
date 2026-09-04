@@ -1,0 +1,14 @@
+[Unit]
+Description=Pemeriksaan kesehatan produksi Truth of Auditor (periksa_kesehatan + index F6 + disk% + cadangan-terakhir)
+Wants=network-online.target
+After=network-online.target
+OnFailure=toa-kesehatan-gagal.service
+
+[Service]
+Type=oneshot
+User=toa
+Group=toa
+ExecStart=/home/toa/kesehatan/periksa-kesehatan-terjadwal.sh
+# Longgar: periksa_kesehatan+periksa_index lewat proxy publik + satu COPY FROM PROGRAM df.
+# Terukur ±5-10 detik pada percobaan; ruang jauh di atas itu sebelum systemd membunuhnya.
+TimeoutStartSec=600

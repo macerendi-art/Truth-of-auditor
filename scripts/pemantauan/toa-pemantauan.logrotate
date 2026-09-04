@@ -1,0 +1,8 @@
+/home/toa/kesehatan/kesehatan.log /home/toa/probe/probe.log {
+    weekly
+    rotate 8
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
