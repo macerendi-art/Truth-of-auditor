@@ -1,0 +1,14 @@
+[Unit]
+Description=Cadangan harian database produksi Truth of Auditor (dari Railway lewat proxy)
+Wants=network-online.target
+After=network-online.target
+OnFailure=toa-cadangan-gagal.service
+
+[Service]
+Type=oneshot
+User=toa
+Group=toa
+ExecStart=/home/toa/cadangan/backup-harian.sh
+# Timeout longgar: dump 1,4 GB terukur ±12 menit (gladi 2026-09-01); produksi
+# terus tumbuh, beri ruang jauh di atas itu sebelum systemd membunuhnya.
+TimeoutStartSec=3600

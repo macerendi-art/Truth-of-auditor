@@ -1,0 +1,6 @@
+[Unit]
+Description=Alarm kegagalan cadangan toa (dicatat ke journal prioritas err)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'logger -p user.err "cadangan toa GAGAL -- cek: journalctl -u toa-cadangan.service -n 100  |  cat /home/toa/cadangan/status.json"'

@@ -1,0 +1,14 @@
+[Unit]
+Description=Jadwal cadangan harian database produksi Truth of Auditor
+
+[Timer]
+# 03:00 WIB (server sudah Asia/Jakarta) -- jam sepi, di luar jam kerja tim
+# dan di luar jendela unggah berkas siang/sore.
+OnCalendar=*-*-* 03:00:00
+# Jadwal yang terlewat karena mesin mati dijalankan begitu mesin hidup lagi
+# (alasan utama systemd timer dipilih ketimbang cron di sini).
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
