@@ -116,8 +116,10 @@ class FilterBulanViewTests(_Base):
         self.assertEqual(r.context["panel_sum"]["dp"]["n"], 2)
         self.assertEqual(r.context["panel_sum"]["dp"]["v"], 250000.0)
         self.assertContains(r, "Tren volume")
-        self.assertContains(r, "Bulan")
+        self.assertContains(r, 'type="month"')
+        self.assertContains(r, 'name="bulan"')
         self.assertEqual(r.context["sel_bulan"], "2026-08")
+        self.assertEqual(r.context["default_bulan"], "2026-08")
 
     def test_tren_vs_bulan_lalu(self):
         b_jul = self.batch(JUL)

@@ -703,12 +703,22 @@ def _dashboard_semua(request, f_dari=None, f_sampai=None, mode_bulan=False, ym=N
     label_periode = _label_periode(f_dari, f_sampai) if mode_filter else None
     bar_dari = f_dari if mode_filter else (tgl_terakhir or today)
     opsi_bulan = _opsi_bulan_dashboard(tokos)
-    # pastikan bulan aktif selalu ada di dropdown (meski kosong batch)
+    # pastikan bulan aktif selalu ada di daftar (meski kosong batch)
     if mode_bulan and ym is not None:
         aktif = date_cls(ym[0], ym[1], 1)
         if aktif not in opsi_bulan:
             opsi_bulan = [aktif] + opsi_bulan
     sel_bulan = f"{ym[0]:04d}-{ym[1]:02d}" if ym else ""
+    # Prefill input type=month (sama Export Bulanan): bulan dipilih, atau
+    # batch terakhir, atau hari ini.
+    if sel_bulan:
+        default_bulan = sel_bulan
+    elif tgl_terakhir:
+        default_bulan = f"{tgl_terakhir.year:04d}-{tgl_terakhir.month:02d}"
+    elif opsi_bulan:
+        default_bulan = opsi_bulan[0].strftime("%Y-%m")
+    else:
+        default_bulan = today.strftime("%Y-%m")
     return render(request, "web/dashboard_all.html", {
         "semua_toko_page": True,
         "rows": rows,
@@ -730,6 +740,7 @@ def _dashboard_semua(request, f_dari=None, f_sampai=None, mode_bulan=False, ym=N
         "bar_sampai": f_sampai if mode_filter else bar_dari,
         "opsi_bulan": opsi_bulan,
         "sel_bulan": sel_bulan,
+        "default_bulan": default_bulan,
         "tren_bulan": tren_bulan,
         "tren_label_prev": tren_label_prev,
     })
@@ -988,6 +999,15 @@ def dashboard(request):
         if aktif not in opsi_bulan:
             opsi_bulan = [aktif] + opsi_bulan
     sel_bulan = f"{ym[0]:04d}-{ym[1]:02d}" if ym else ""
+    # Prefill type=month sama Export Bulanan
+    if sel_bulan:
+        default_bulan = sel_bulan
+    elif last is not None and last.recon_date is not None:
+        default_bulan = f"{last.recon_date.year:04d}-{last.recon_date.month:02d}"
+    elif opsi_bulan:
+        default_bulan = opsi_bulan[0].strftime("%Y-%m")
+    else:
+        default_bulan = today.strftime("%Y-%m")
 
     ctx = {
         "active_toko": active,
@@ -1016,6 +1036,7 @@ def dashboard(request):
         "bar_dari": bar_dari, "bar_sampai": bar_sampai,
         "opsi_bulan": opsi_bulan,
         "sel_bulan": sel_bulan,
+        "default_bulan": default_bulan,
         "tren_bulan": tren_bulan,
         "tren_label_prev": tren_label_prev,
     }

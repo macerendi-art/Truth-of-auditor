@@ -14,16 +14,16 @@
   </div>
 </div>
 
-{# ---- FILTER: baris 1 tanggal · baris 2 bulan & tahun (terpisah) ---- #}
+{# ---- FILTER: baris 1 tanggal · baris 2 bulan (sama Export Bulanan) ---- #}
 <style>
 .dash-flt{display:flex;flex-direction:column;gap:14px}
 .dash-flt-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 12px}
 .dash-flt-row form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 12px;margin:0;flex:1 1 auto;min-width:0}
 .dash-flt-row .field{margin-bottom:0;flex:0 0 auto}
-.dash-flt-row .field label{display:block;margin-bottom:4px}
+.dash-flt-row .field label{display:block;margin-bottom:4px;font-weight:600;font-size:13px;color:var(--ink)}
 .dash-flt-row .field input[type=date],
-.dash-flt-row .field select{min-width:158px;width:158px}
-.dash-flt-row .field.select-bulan select{min-width:180px;width:180px}
+.dash-flt-row .field input[type=month]{min-width:158px;width:158px}
+.dash-flt-row .field.field-bulan input[type=month]{min-width:180px;width:180px}
 .dash-flt-row .btn,
 .dash-flt-row a.btn{margin-bottom:0;flex:0 0 auto}
 .dash-flt-status{margin-left:auto;font-size:12px;color:var(--faint);align-self:center;text-align:right;max-width:280px;line-height:1.4}
@@ -31,8 +31,8 @@
 .dash-flt-sep{height:1px;background:var(--line);border:0;margin:0}
 @media (max-width:640px){
   .dash-flt-row .field input[type=date],
-  .dash-flt-row .field select,
-  .dash-flt-row .field.select-bulan select{width:100%;min-width:0}
+  .dash-flt-row .field input[type=month],
+  .dash-flt-row .field.field-bulan input[type=month]{width:100%;min-width:0}
   .dash-flt-row form{flex-direction:column;align-items:stretch;width:100%}
   .dash-flt-status{margin-left:0;text-align:left;max-width:none}
 }
@@ -59,17 +59,12 @@
 
   <hr class="dash-flt-sep">
 
-  {# Baris 2 — bulan & tahun #}
+  {# Baris 2 — bulan & tahun: input type=month sama Export Bulanan #}
   <div class="dash-flt-row">
     <form method="get">
-      <div class="field select-bulan">
-        <label>Bulan &amp; tahun <span class="faint" style="font-weight:500">(terpisah)</span></label>
-        <select name="bulan">
-          <option value="">— pilih bulan —</option>
-          {% for m in opsi_bulan %}
-          <option value="{{ m|date:'Y-m' }}" {% if sel_bulan == m|date:'Y-m' %}selected{% endif %}>{{ m|date:"M Y" }}</option>
-          {% endfor %}
-        </select>
+      <div class="field field-bulan">
+        <label>Bulan</label>
+        <input type="month" name="bulan" value="{% if sel_bulan %}{{ sel_bulan }}{% elif default_bulan %}{{ default_bulan }}{% endif %}" {% if not sel_bulan %}placeholder="YYYY-MM"{% endif %}>
       </div>
       <button class="btn primary" type="submit">Terapkan bulan</button>
     </form>
@@ -80,7 +75,7 @@
     <span class="dash-flt-status">tanpa filter — potret rekon terakhir</span>
     {% endif %}
   </div>
-  <p class="dash-flt-hint">Baris atas = rentang harian. Baris bawah = satu bulan penuh (tgl 1–akhir) + tren vs bulan lalu.</p>
+  <p class="dash-flt-hint">Baris atas = rentang harian. Baris bawah = pilih bulan (kontrol sama Export Data bulanan) → tgl 1–akhir + tren vs bulan lalu.</p>
 </div>
 
 {# ---- KARTU STATUS ---- #}
