@@ -45,6 +45,15 @@ whitenoise==6.12.0
 psycopg2-binary==2.9.12
 dj-database-url==3.1.2
 
+# --- pelacak error (B2, Gelombang 1 — 04-09-2026): OPSIONAL, mati total
+# tanpa env SENTRY_DSN (truth_auditor/security.py configure_sentry, tak
+# mengimpor paket ini sama sekali kalau DSN kosong). Ditambah ke produksi
+# sekarang supaya tersedia begitu pemilik memutuskan mengaktifkan — bukan
+# keputusan mengaktifkan SaaS berbayar itu sendiri.
+sentry-sdk==2.68.1
+urllib3==2.7.0
+certifi==2026.7.22
+
 # --- MATI: nol impor di seluruh repo (diverifikasi), tapi TERPASANG di
 # produksi. Dipatok apa adanya supaya lingkungan VPS identik dengan yang
 # sekarang berjalan. Membuangnya = commit terpisah, sesudah migrasi stabil.

@@ -245,17 +245,82 @@ GEO_BLOCK_CF_CIDRS = [
     x.strip() for x in os.environ.get('GEO_BLOCK_CF_CIDRS', _CF_CIDRS_DEFAULT).split(',') if x.strip()
 ]
 
+# --- Pelacak error (opsional) & penerima email 500 ---
+# ADMINS/SERVER_EMAIL/EMAIL_* dari env, semuanya DEFAULT identik dengan
+# default Django/kosong — nol env di-set = nol perubahan perilaku. Format
+# env: DJANGO_ADMIN_EMAILS="nama@x.com,nama2@y.com" (nama ambil local-part
+# alamat, tak ada UI utk beri nama tampilan terpisah — cukup utk notifikasi).
+_admin_emails = [
+    e.strip() for e in os.environ.get('DJANGO_ADMIN_EMAILS', '').split(',') if e.strip()
+]
+ADMINS = [(email.split('@')[0], email) for email in _admin_emails]
+SERVER_EMAIL = os.environ.get('SERVER_EMAIL', 'root@localhost')
+
+# SMTP dari env — tanpa env, ini persis default bawaan Django (localhost:25,
+# tanpa TLS/kredensial) sehingga mail_admins() gagal diam-diam (ditangkap
+# logging.Handler.handleError, tidak pernah menjatuhkan request) bila belum
+# dikonfigurasi. Bukan regresi: sebelum ini EMAIL_* tak bisa diatur sama
+# sekali tanpa mengubah kode.
+EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '25'))
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'False').lower() == 'true'
+
+# Sentry: NOL ketergantungan tanpa env SENTRY_DSN — `configure_sentry` bahkan
+# tidak mengimpor `sentry_sdk` bila DSN kosong (lihat truth_auditor/security.py).
+# Keputusan pemilik: jangan menambah ketergantungan SaaS berbayar tanpa opt-in
+# eksplisit lewat env — jadi ini default-mati, bisa dites tanpa akun/DSN asli.
+from truth_auditor.security import configure_sentry  # noqa: E402
+
+configure_sentry(os.environ, DEBUG)
+
 # Traceback error 500 harus muncul di log Railway (default Django dengan
-# DEBUG=False hanya mengirim ke email ADMINS — tidak pernah terlihat di log).
+# DEBUG=False hanya mengirim ke email ADMINS — tidak pernah terlihat di log
+# tanpa handler 'console' eksplisit di bawah). Formatter 'ringkas': waktu +
+# level + nama logger + pesan, supaya baris bisa difilter/diurutkan di log
+# Railway tanpa menebak asalnya. Level root bisa dinaikkan lewat env
+# DJANGO_LOG_LEVEL TANPA deploy ulang — default TETAP WARNING (perilaku
+# lama): root level DEBUG/INFO akan membanjiri log dengan query analitik
+# panjang di matcher pada 8,8 juta baris data. JANGAN nyalakan DEBUG-level
+# SQL logging (django.db.backends) di sini — sengaja tak diberi entri khusus
+# supaya tak ada yang menganggapnya didukung.
+_level_valid = {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}
+_root_log_level = os.environ.get('DJANGO_LOG_LEVEL', 'WARNING').upper()
+if _root_log_level not in _level_valid:
+    _root_log_level = 'WARNING'
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
-    'handlers': {
-        'console': {'class': 'logging.StreamHandler'},
+    'formatters': {
+        'ringkas': {
+            'format': '%(asctime)s %(levelname)s %(name)s: %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
     },
-    'root': {'handlers': ['console'], 'level': 'WARNING'},
+    'filters': {
+        'require_debug_false': {'()': 'django.utils.log.RequireDebugFalse'},
+    },
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler', 'formatter': 'ringkas'},
+        # mail_admins: no-op aman bila ADMINS kosong (django.core.mail.mail_admins
+        # mengecek `if not settings.ADMINS: return` sebelum mengirim apa pun) —
+        # jadi handler ini aman terpasang tanpa syarat, tak perlu digerbang env.
+        'mail_admins': {
+            'class': 'django.utils.log.AdminEmailHandler',
+            'level': 'ERROR',
+            'filters': ['require_debug_false'],
+        },
+    },
+    'root': {'handlers': ['console'], 'level': _root_log_level},
     'loggers': {
-        'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+        'django.request': {
+            'handlers': ['console', 'mail_admins'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
     },
 }
 
