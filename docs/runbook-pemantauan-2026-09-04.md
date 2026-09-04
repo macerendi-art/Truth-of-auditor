@@ -198,6 +198,16 @@ Cek kedua yang independen dari isi berkas (kalau timer sendiri berhenti, berkas 
 diperbarui tapi isinya tetap terakhir "OK"): `systemctl list-timers toa-kesehatan.timer
 toa-probe.timer` — kolom `NEXT`/`LAST` harus masuk akal.
 
+**Cara memastikan alarm SUDAH/BELUM berbunyi: `journalctl -t toa-alarm`, bukan
+`journalctl -u <nama>-gagal.service`.** Dibuktikan nyata saat membangun ini: `logger` yang
+dipanggil dari unit oneshot yang cepat keluar kadang salah-atribusi ke journald (unit start/
+finish normal tercatat, tapi baris `logger`-nya sendiri kadang TIDAK muncul di filter `-u`,
+walau prosesnya benar-benar jalan dan pesannya ADA di journal lewat filter lain). `-t toa-alarm`
+tidak bergantung atribusi unit — semua alarm dari `kirim-alarm.sh` (dari KEDUA unit
+`*-gagal.service`) selalu tertangkap di situ. **Jangan pernah menyimpulkan "alarm tidak
+berbunyi" hanya dari `journalctl -u toa-kesehatan-gagal.service`/`-u toa-probe-gagal.service`
+kosong** — cek ulang dengan `-t toa-alarm` (atau `-p err` tanpa filter unit) sebelum percaya itu.
+
 ## Memasang saluran pemberitahuan nyata — TITIK TUNGGAL
 
 Repo ini tidak punya SMTP/Slack/webhook terkonfigurasi, dan memilih (apalagi membayar) layanan
@@ -328,6 +338,14 @@ cadangan A1.
   menjalankan skrip bersama, bukan `root` menjalankan `logger` langsung) — dan jalan nyata
   `toa-kesehatan.service` (BAHAYA `mmk`) diulang sesudah refactor juga →
   `toa[…]: ALARM toa: kesehatan toa BAHAYA …`. Keduanya lewat titik yang sama.
+- **Tag stabil `-t toa-alarm` ditambah dan diverifikasi ULANG** sesudah ditemukan (nyata, bukan
+  teori) bahwa `journalctl -u toa-probe-gagal.service` TIDAK SELALU menampilkan baris alarm
+  walau alarmnya benar terkirim dan unitnya start/finish normal (journald salah-atribusi proses
+  `logger` yang cepat keluar). Diulang: override sementara + 3x gagal beruntun → kali ini
+  `-u toa-probe-gagal.service` menampilkan barisnya juga, TAPI `journalctl -t toa-alarm`
+  menampilkannya di KEDUA percobaan, stabil — itu sebabnya bagian "Cara membaca `status.json`"
+  di atas merekomendasikan `-t toa-alarm`, bukan `-u <nama>-gagal.service`, untuk memastikan
+  alarm benar-benar tidak berbunyi.
 - **Jadwal terbukti aktif** (`systemctl list-timers toa-kesehatan.timer toa-probe.timer
   toa-cadangan.timer`, akhir pekerjaan):
   ```
@@ -352,10 +370,19 @@ cadangan A1.
    ADA yang memantau apa pun — termasuk tidak ada yang memantau bahwa pemantauannya sendiri
    mati (tak ada dead-man's-switch eksternal). Ini risiko terbuka, bukan sesuatu yang diam-diam
    dianggap sudah beres oleh pekerjaan ini.
-4. **Temuan produksi NYATA yang belum ditindaklanjuti**: toko `mmk` belum punya batch
-   rekonsiliasi bertanggal sejak **2026-08-26 (9 hari)** per saat runbook ini ditulis — muncul
-   sebagai BAHAYA asli (bukan rekayasa pengujian) pada jalan pertama `toa-kesehatan.service`.
-   Ini temuan operasional untuk pemilik/tim, bukan bug pemantauan.
+4. **Temuan produksi NYATA yang belum ditindaklanjuti — DAN konsekuensinya pada alarm ini
+   sendiri**: toko `mmk` belum punya batch rekonsiliasi bertanggal sejak **2026-08-26 (9 hari)**
+   per saat runbook ini ditulis — muncul sebagai BAHAYA asli (bukan rekayasa pengujian) pada
+   jalan pertama `toa-kesehatan.service`. Ini temuan operasional untuk pemilik/tim, bukan bug
+   pemantauan — **tapi selama `mmk` belum dapat batch (atau dinonaktifkan), `toa-kesehatan.timer`
+   akan BAHAYA setiap pagi, terus-menerus.** Begitu saluran nyata di atas terpasang, ini berarti
+   alarm berbunyi SETIAP HARI sampai `mmk` selesai — dan temuan BAHAYA lain yang muncul
+   BERSAMAAN (index invalid baru, disk menipis) akan mendarat di keadaan yang SUDAH merah,
+   tidak kelihatan beda di level "alarm berbunyi atau tidak". Satu-satunya cara membedakannya
+   hari itu adalah membuka `~/kesehatan/status.json` dan membandingkan bagian mana yang
+   berubah — alarm sendirian tidak cukup begitu ada temuan berdiri lama yang belum
+   ditindaklanjuti. Menindaklanjuti `mmk` bukan cuma soal data toko itu — itu yang membuat
+   alarm ini kembali punya daya beda (discriminating) besok pagi.
 5. **Ketergantungan pada akses superuser Postgres lewat proxy publik** (dipakai untuk cek disk
    produksi #6 di atas) berasal dari kredensial `~/.pgpass` yang disiapkan untuk gladi migrasi
    Contabo — kalau kredensial itu diputar/dicabut atau hak superuser dicabut sesudah migrasi
@@ -364,3 +391,16 @@ cadangan A1.
    keras untuk kegagalan infrastruktur kredensial yang di luar kendalinya). Ini titik rapuh yang
    perlu diingat saat migrasi Contabo berjalan (lihat
    `docs/rencana-migrasi-contabo-2026-08-31.md`).
+6. **`COPY ... FROM PROGRAM 'df ...'` mengeksekusi perintah SHELL di host Postgres produksi lewat
+   SQL superuser — ini LEBIH dari sekadar `SELECT`, walau efeknya sendiri tidak berbahaya
+   (`df` baca-saja, tabelnya sementara-sesi) dan brief menyebut "kamu hanya membaca".** Teknik
+   ini dipakai secara sadar karena satu-satunya cara membaca disk NYATA produksi tanpa akses
+   shell langsung ke host Postgres (lihat keputusan #6 di bagian jalur di atas), tapi itu
+   keputusan TEKNIS yang diambil pekerjaan ini, bukan sesuatu yang otomatis disetujui pemilik
+   hanya karena "membaca". Kalau pemilik tidak nyaman dengan `COPY FROM PROGRAM` berjalan
+   terjadwal terhadap produksi (mis. karena kebijakan keamanan internal, atau karena mengizinkan
+   eksekusi program lewat SQL adalah permukaan yang sebisa mungkin dihindari terlepas dari
+   isinya), bagian "Sisa disk produksi" di `periksa-kesehatan-terjadwal.sh` bisa dinonaktifkan
+   sendirian (variabel `DISK_STATUS` tetap tercatat di `status.json` sebagai
+   `"PERHATIAN"`/dilewati) tanpa mempengaruhi tiga gerbang lain — ini satu blok kode yang jelas
+   batasnya, disengaja begitu supaya mudah dicabut kalau pemilik keberatan.

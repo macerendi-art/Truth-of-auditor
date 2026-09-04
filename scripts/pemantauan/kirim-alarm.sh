@@ -36,9 +36,13 @@ ENV_FILE="${ALARM_ENV_FILE:-/home/toa/pemantauan/alarm.env}"
 
 # Journal selalu jalan -- FALLBACK yang SUDAH ADA dan TERBUKTI (lihat bukti di
 # docs/runbook-pemantauan-2026-09-04.md), bukan bagian yang menunggu pemilik.
-# `journalctl -p err` (lintas SEMUA unit alarm sekaligus) atau `-u <nama>-gagal.service`
-# untuk satu jenis saja.
-logger -p user.err "ALARM toa: $PESAN"
+# `-t toa-alarm` WAJIB: tanpa tag stabil, journald kadang salah atribusi proses `logger` yang
+# cepat keluar ke unit systemd-nya -- dibuktikan nyata di sesi ini (`journalctl -u
+# toa-kesehatan-gagal.service` sempat TIDAK menunjukkan baris alarmnya sama sekali walau unitnya
+# start/finish normal; baru ketemu lewat `-t root` sebelum tag ini ditambah). Baca alarm dengan
+# `journalctl -t toa-alarm` (lintas SEMUA unit alarm, stabil, tidak bergantung atribusi unit) --
+# JANGAN mengandalkan `-u <nama>-gagal.service` sendirian untuk memastikan alarm TIDAK berbunyi.
+logger -p user.err -t toa-alarm "ALARM toa: $PESAN"
 
 [ -r "$ENV_FILE" ] || exit 0
 # shellcheck source=/dev/null
@@ -50,7 +54,7 @@ if [ -n "${WEBHOOK_URL:-}" ]; then
   body="$(jq -n --arg text "ALARM toa: $PESAN" '{text: $text}' 2>/dev/null)"
   if [ -n "$body" ]; then
     curl -fsS -m 10 -X POST -H 'Content-Type: application/json' -d "$body" "$WEBHOOK_URL" \
-      >/dev/null 2>&1 || logger -p user.err "ALARM toa: webhook GAGAL terkirim ke saluran terpasang"
+      >/dev/null 2>&1 || logger -p user.err -t toa-alarm "ALARM toa: webhook GAGAL terkirim ke saluran terpasang"
   fi
 fi
 
@@ -58,7 +62,7 @@ fi
 #     TERISI oleh pemilik lebih dulu; keduanya di luar cakupan skrip ini) ----------------------
 if [ -n "${ALARM_EMAIL_TO:-}" ] && command -v msmtp >/dev/null 2>&1; then
   printf 'Subject: [toa] ALARM pemantauan\n\n%s\n' "$PESAN" | msmtp "$ALARM_EMAIL_TO" \
-    || logger -p user.err "ALARM toa: email GAGAL terkirim ke saluran terpasang"
+    || logger -p user.err -t toa-alarm "ALARM toa: email GAGAL terkirim ke saluran terpasang"
 fi
 
 exit 0
