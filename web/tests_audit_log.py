@@ -229,6 +229,29 @@ class IPUserAgentTests(TestCase):
         log = AuditLog.objects.filter(aksi="buat_user", objek="via_xff").latest("id")
         self.assertEqual(log.ip, "203.0.113.55")
 
+    def test_xff_bukan_ip_tidak_menghilangkan_baris_audit(self):
+        """M1 (04-09-2026): `AuditLog.ip` = `inet` di Postgres; XFF yang bukan
+        IP (`"unknown"`, `"1.2.3.4:80"`) membuat INSERT `DataError` dan
+        `except` di `catat` menelannya — SELURUH baris audit lenyap, bukan
+        cuma IP-nya. SQLite tak menegakkan `inet`, jadi yang bisa diuji di
+        sini adalah kontraknya: IP tak valid dijatuhkan ke None SEBELUM
+        INSERT (bersuara di log), barisnya tetap ditulis. Hilangnya baris
+        itu sendiri hanya bisa direproduksi di Postgres."""
+        for xff in ("unknown", "1.2.3.4:80", "x", "203.0.113.5, unknown"):
+            with self.subTest(xff=xff):
+                req = RequestFactory().post("/", HTTP_X_FORWARDED_FOR=xff)
+                objek = f"xff_{xff}"
+                if xff.startswith("203.0.113.5"):
+                    catat(self.adm, "buat_user", objek, request=req)
+                    log = AuditLog.objects.get(aksi="buat_user", objek=objek)
+                    self.assertEqual(log.ip, "203.0.113.5")  # paling kiri sah → tetap tercatat
+                    continue
+                with self.assertLogs("core.audit", level="WARNING"):
+                    catat(self.adm, "buat_user", objek, request=req)
+                log = AuditLog.objects.get(aksi="buat_user", objek=objek)
+                self.assertIsNone(log.ip)
+                self.assertEqual(log.username, "admip")
+
     def test_ip_tercatat_untuk_aksi_nyata_lewat_test_client(self):
         """Definisi selesai C5: IP tercatat untuk satu aksi nyata lewat test client."""
         self.client.login(username="admip", password="Adm-Kuat#88")

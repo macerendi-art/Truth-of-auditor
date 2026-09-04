@@ -3,6 +3,7 @@
 Sengaja best-effort: kegagalan mencatat tidak boleh menggagalkan aksi utamanya
 (hapus/reconcile tetap jalan), tapi tetap terlihat di log server.
 """
+import ipaddress
 import logging
 
 from core.models import AuditLog
@@ -12,6 +13,29 @@ logger = logging.getLogger(__name__)
 # Batas `AuditLog.user_agent` (CharField) — potong, jangan biarkan header
 # klien yang sangat panjang mental di INSERT.
 _USER_AGENT_MAXLEN = 255
+
+
+def _ip_sah(ip):
+    """IP klien yang boleh masuk `AuditLog.ip`, atau None (M1, 04-09-2026).
+
+    Kolomnya `GenericIPAddressField` = `inet` di Postgres. String XFF yang
+    bukan IP (`"unknown"`, `"1.2.3.4:80"`, `"x"`) membuat INSERT-nya
+    `DataError`, dan `except` di `catat` menelannya — SELURUH baris audit
+    hilang diam-diam, bukan cuma IP-nya. Hari ini tak bisa dieksploitasi
+    (Railway menimpa XFF), tapi di belakang proxy yang meneruskan XFF apa
+    adanya (mis. nginx Contabo yang salah konfigurasi) seorang auditor bisa
+    memasang `X-Forwarded-For: x` lewat ekstensi browser dan setiap
+    `hapus_batch`/`review` miliknya tak pernah tercatat. Jejak lebih penting
+    daripada IP-nya: yang tak valid dijatuhkan ke None, barisnya tetap ditulis.
+    """
+    ip = (ip or "").strip()
+    if not ip:
+        return None
+    try:
+        return str(ipaddress.ip_address(ip))
+    except ValueError:
+        logger.warning("IP klien tak valid diabaikan di audit: %r", ip[:64])
+        return None
 
 
 def catat(user, aksi, objek, toko=None, request=None, **detail):
@@ -29,7 +53,7 @@ def catat(user, aksi, objek, toko=None, request=None, **detail):
         user_agent = ""
         if request is not None:
             from web.middleware import resolve_client_ip  # impor lokal: hindari siklus
-            ip = resolve_client_ip(request) or None
+            ip = _ip_sah(resolve_client_ip(request))
             user_agent = (request.META.get("HTTP_USER_AGENT") or "")[:_USER_AGENT_MAXLEN]
         AuditLog.objects.create(
             user=user if getattr(user, "pk", None) else None,
