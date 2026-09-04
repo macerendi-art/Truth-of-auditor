@@ -22,17 +22,30 @@
 #   (a) curl gagal terhubung sama sekali (DNS/timeout/refused/TLS) -- tidak ada jawaban TCP/HTTP
 #       sama sekali. Ini kasus paling jelas: railway.json ON_FAILURE+3x lalu diam berarti container
 #       benar-benar berhenti menjawab port.
-#   (b) HTTP 502/503/504 -- kode dari EDGE Railway SENDIRI (proxy di depan container), bukan dari
-#       aplikasi. Edge TETAP membalas (jadi "ada respons HTTP") saat container di baliknya tidak
-#       menjawab port -- ini kasus yang TIDAK disebutkan eksplisit di daftar perbaikan asli, tapi
-#       secara nyata inilah bentuk paling mungkin dari "service mati" versi Railway: bukan
-#       "tidak ada jawaban TCP sama sekali" (Railway tetap punya edge yang menjawab), melainkan
-#       edge itu sendiri bilang "tidak ada yang di belakang saya". Dibedakan SENGAJA dari 403
-#       (yang APLIKASI ITU SENDIRI yang balas, lewat GeoBlockMiddleware) -- keduanya "ada respons
-#       HTTP" tapi maknanya berlawanan: satu aplikasi hidup, satu aplikasi mati.
-# HTTP 200 (mis. dari IP Kamboja/staf berbypass) dan kode lain yang tak diduga (404/500 aplikasi/
-# dst) dicatat sebagai "tak_terduga" -- aplikasi MASIH menjawab (bukan edge yang menjawab sendiri),
-# jadi TIDAK mengalarm, tapi dicatat supaya kelihatan kalau geo-block/config berubah tak terduga.
+#   (b) HTTP 5xx APA PUN (revisi P3, tinjauan akhir 04-09-2026 -- versi awal hanya 502/503/504):
+#       - 502/503/504 dari EDGE Railway SENDIRI saat container di baliknya tidak menjawab port;
+#       - 521/522/523/524 dari CLOUDFLARE: domain probe ini di belakang Cloudflare (WAF KH-only
+#         ber-scope hostname), dan saat Cloudflare tidak bisa mencapai origin ia menjawab 52x,
+#         BUKAN 502/503/504 -- versi awal memasukkannya ke "tak_terduga" (tidak mengalarm), jadi
+#         bentuk mati yang paling khas dilihat dari luar justru tak pernah menaikkan gagal_beruntun;
+#       - 500 dari aplikasi sendiri (mis. Postgres jatuh: gunicorn menjawab 500, Cloudflare
+#         meneruskannya) -- layanan yang menjawab 500 pada halaman root BUKAN layanan hidup.
+#       Semuanya "ada respons HTTP" tapi maknanya sama: tidak ada aplikasi sehat di baliknya.
+#   (c) HTTP 403 TANPA judul halaman geo-block aplikasi (revisi P3). 403 hanya berarti hidup kalau
+#       APLIKASI ITU SENDIRI yang menjawabnya (GeoBlockMiddleware -> halaman "Akses Ditolak · Truth
+#       of Auditor"). Kalau aturan WAF Cloudflare berubah atau IP VPS ini masuk daftar blokir WAF,
+#       403 datang dari Cloudflare walau origin mati total -- dan versi awal akan melaporkan
+#       hidup_tergerbang selamanya. docs/rencana-migrasi-contabo-2026-08-31.md sudah melarang
+#       persis ini ("assert isi halaman, jangan 'bukan 5xx'"). Judulnya diperiksa dari $BODY_FILE
+#       yang memang sudah disimpan; nilainya bisa ditimpa env JUDUL_TERGERBANG bila judul halaman
+#       berubah SADAR (ubah di sini juga, jangan biarkan probe mengalarm palsu).
+# HTTP 200 (mis. dari IP Kamboja/staf berbypass) dan kode non-5xx lain yang tak diduga (404/3xx/
+# dst) dicatat sebagai "tak_terduga" -- aplikasi MASIH menjawab, jadi TIDAK mengalarm, tapi dicatat
+# supaya kelihatan kalau geo-block/config berubah tak terduga.
+#
+# Probe kedua ke domain Railway asli (tanpa Cloudflare) SUDAH DIPERTIMBANGKAN dan TIDAK LAYAK:
+# https://truth-of-auditor.up.railway.app/ menjawab 404 dari edge Railway (dicek curl 04-09-2026)
+# -- domain itu tidak lagi merutekan ke service ini, jadi tidak membuktikan apa pun. Jangan dipasang.
 # ============================================================================================
 #
 # Anti-kedip: SATU kegagalan tunggal (jaringan publik VPS<->Railway bisa nyendat sesaat, bukan
@@ -50,6 +63,9 @@ LOG_FILE="$STATE_DIR/probe.log"
 STATUS_FILE="$STATE_DIR/status.json"
 AMBANG_BERUNTUN="${AMBANG_BERUNTUN:-3}"
 TIMEOUT_DETIK="${TIMEOUT_DETIK:-15}"
+# Judul <title> halaman geo-block APLIKASI (web/templates ... GeoBlockMiddleware). 403 tanpa judul
+# ini = bukan aplikasi yang menjawab (WAF/edge) -> diperlakukan mati. Lihat butir (c) di atas.
+JUDUL_TERGERBANG="${JUDUL_TERGERBANG:-Akses Ditolak · Truth of Auditor}"
 
 mkdir -p "$STATE_DIR"
 log() { printf '[%s] %s\n' "$(date '+%F %T %Z')" "$*" | tee -a "$LOG_FILE" >&2; }
@@ -71,11 +87,20 @@ if [ "$CURL_OK" -ne 1 ]; then
   KATEGORI="mati"
   PESAN="curl gagal terhubung ke $URL (timeout/DNS/refused/TLS) dalam ${TIMEOUT_DETIK}d -- TIDAK ADA jawaban TCP/HTTP sama sekali"
 elif [ "$HTTP_CODE" = "403" ]; then
-  KATEGORI="hidup_tergerbang"
-  PESAN="HTTP 403 -- geo-block KH-only membalas (APLIKASI HIDUP; ini NORMAL dari VPS non-KH, bukan tanda mati)"
-elif echo "$HTTP_CODE" | grep -qE '^(502|503|504)$'; then
+  if grep -qF -- "$JUDUL_TERGERBANG" "$BODY_FILE"; then
+    KATEGORI="hidup_tergerbang"
+    PESAN="HTTP 403 berjudul '$JUDUL_TERGERBANG' -- geo-block KH-only APLIKASI membalas (HIDUP; ini NORMAL dari VPS non-KH, bukan tanda mati)"
+  else
+    KATEGORI="mati"
+    PESAN="HTTP 403 TANPA judul '$JUDUL_TERGERBANG' -- bukan aplikasi yang menjawab (WAF/edge Cloudflare?); origin bisa saja mati di baliknya"
+  fi
+elif echo "$HTTP_CODE" | grep -qE '^5[0-9]{2}$'; then
   KATEGORI="mati"
-  PESAN="HTTP $HTTP_CODE dari edge Railway -- container di baliknya tidak menjawab port"
+  case "$HTTP_CODE" in
+    502|503|504) PESAN="HTTP $HTTP_CODE dari edge Railway -- container di baliknya tidak menjawab port" ;;
+    52*)         PESAN="HTTP $HTTP_CODE dari Cloudflare -- origin (edge Railway) tidak terjangkau" ;;
+    *)           PESAN="HTTP $HTTP_CODE dari aplikasi/edge -- halaman root menjawab 5xx (mis. Postgres jatuh); bukan layanan sehat" ;;
+  esac
 elif echo "$HTTP_CODE" | grep -qE '^[0-9]{3}$'; then
   KATEGORI="tak_terduga"
   PESAN="HTTP $HTTP_CODE -- aplikasi menjawab tapi bukan 403 yang diharapkan; cek geo-block/konfigurasi (tidak mengalarm)"
@@ -85,7 +110,9 @@ else
 fi
 
 log "$KATEGORI: $PESAN (kode=$HTTP_CODE, ${WAKTU}d, url=$URL)"
-if [ "$KATEGORI" != "hidup_tergerbang" ] && [ "$KATEGORI" != "mati" ]; then
+# Cuplikan badan untuk SEMUA respons HTTP yang bukan hidup_tergerbang (termasuk 403 tanpa judul
+# dan 5xx): itulah bukti pertama yang dibutuhkan saat membaca log insiden.
+if [ "$CURL_OK" -eq 1 ] && [ "$KATEGORI" != "hidup_tergerbang" ]; then
   log "cuplikan badan respons (200 byte pertama): $(head -c 200 "$BODY_FILE" | tr '\n' ' ')"
 fi
 

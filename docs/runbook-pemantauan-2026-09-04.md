@@ -157,21 +157,39 @@ sungguhan sebelum skrip ditulis — judul halamannya persis "Akses Ditolak · Tr
 tidak pernah dan tidak boleh mencoba mem-bypass geo-block atau menambah IP VPS ke
 `GEO_BLOCK_ALLOWLIST`.
 
-Kategori respons:
+Kategori respons (**direvisi P3, tinjauan akhir 04-09-2026** — versi awal hanya mengalarm
+502/503/504 dan menganggap SETIAP 403 hidup):
 
 | Kondisi | Kategori | Alarm? |
 |---|---|---|
 | curl gagal terhubung sama sekali (DNS/timeout/refused/TLS) | `mati` | Ya (lihat ambang beruntun) |
-| HTTP 403 | `hidup_tergerbang` | Tidak — ini yang NORMAL |
-| HTTP 502/503/504 | `mati` | Ya |
-| HTTP lain (200/404/500 aplikasi/dst.) | `tak_terduga` | Tidak, tapi dicatat |
+| HTTP 403 **dengan** judul `Akses Ditolak · Truth of Auditor` di badan | `hidup_tergerbang` | Tidak — ini yang NORMAL |
+| HTTP 403 **tanpa** judul itu (WAF/edge Cloudflare yang menjawab, bukan aplikasi) | `mati` | Ya |
+| HTTP **5xx apa pun**: 502/503/504 (edge Railway), 521–524 (Cloudflare tak mencapai origin), 500 (aplikasi, mis. Postgres jatuh) | `mati` | Ya |
+| HTTP non-5xx lain (200/404/3xx/dst.) | `tak_terduga` | Tidak, tapi dicatat |
 
-**502/503/504 sengaja disamakan dengan "tidak ada jawaban sama sekali"**, walau keduanya secara
-teknis "ada respons HTTP" — kode itu datang dari EDGE Railway sendiri saat container di
-baliknya tidak menjawab port, bukan dari aplikasi. Ini bentuk paling mungkin dari "service mati
-setelah 3x restart" versi Railway (edge tetap ada, aplikasinya yang hilang) dan brief asli tidak
-menyebutnya eksplisit — ditambahkan di sini karena "tak ada jawaban TCP/HTTP sama sekali" secara
-harfiah tidak akan pernah terjadi kalau Railway selalu punya edge yang menjawab.
+**Kenapa direvisi.** Domain probe berada di belakang Cloudflare. Saat Cloudflare tidak bisa
+mencapai origin ia menjawab **521/522/523/524**, bukan 502/503/504 — versi awal memasukkannya ke
+`tak_terduga` (tidak mengalarm), sehingga bentuk mati yang paling khas dilihat dari luar justru
+tidak pernah menaikkan `gagal_beruntun`. Dan 403 hanya membuktikan hidup kalau **aplikasi itu
+sendiri** yang menjawab (GeoBlockMiddleware); kalau aturan WAF Cloudflare berubah atau IP VPS
+masuk daftar blokir WAF, 403 datang dari Cloudflare walau origin mati total — probe lama akan
+melaporkan `hidup_tergerbang` selamanya. `docs/rencana-migrasi-contabo-2026-08-31.md` sudah
+melarang persis pola itu (*"assert isi halaman, jangan 'bukan 5xx'"*). Judul yang diperiksa bisa
+ditimpa env `JUDUL_TERGERBANG` bila halaman geo-block diubah **sadar** — ubah di skrip juga,
+jangan biarkan probe mengalarm palsu. Cuplikan 200 byte badan kini dicatat untuk semua respons
+HTTP selain `hidup_tergerbang` (termasuk 403 tanpa judul dan 5xx) — bukti pertama saat membaca
+log insiden.
+
+**Probe kedua ke domain Railway asli (`truth-of-auditor.up.railway.app`, tanpa Cloudflare) sudah
+dipertimbangkan dan TIDAK layak:** dicek `curl` 04-09-2026, domain itu menjawab **404** dari edge
+Railway — tidak lagi merutekan ke service ini, jadi tidak membuktikan apa pun. Jangan dipasang.
+
+Diverifikasi sebelum dipasang: keenam cabang dijalankan terhadap server HTTP lokal palsu
+(403+judul → `hidup_tergerbang`; 403 WAF, 522, 500, 503 → `mati`; 200 → `tak_terduga`), lalu
+salinan VPS `/home/toa/probe/probe-layanan.sh` diganti (backup `.pre-p3-bak`, sha256 identik
+dengan repo) dan dijalankan sekali lewat `bash` langsung: `hidup_tergerbang` dengan judul
+terbaca, `verdict=OK`, `gagal_beruntun=0`.
 
 **Anti-kedip:** satu kegagalan tunggal tidak langsung mengalarm — perlu **3 kali gagal
 berturut-turut** (jadi ±15 menit downtime nyata pada jadwal 5 menit) baru verdict `GAGAL` dan
