@@ -20,5 +20,11 @@ staticfiles/
 # Artefak alat bantu lokal. WAJIB di-ignore, bukan sekadar kerapian repo:
 # `railway up` memakai .gitignore untuk menentukan apa yang diunggah, jadi
 # tanpa baris ini graphify-out/ (8+ MB) ikut terkirim ke kontainer produksi.
+.coverage
+htmlcov/
+
 .gstack/
 graphify-out/
+
+# Ledger orkestrasi subagen (lokal, jangan ikut railway up)
+.superpowers/
