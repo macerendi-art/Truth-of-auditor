@@ -6,8 +6,9 @@ lebih buruk daripada tidak ada — orang akan memercayai angka yang salah.
 Karena itu tes pertama di sini bukan tes tampilan, melainkan tes tie-out atas
 SETIAP sel (akun × kategori) sekaligus totalnya.
 """
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -458,3 +459,67 @@ class AngkaChipTest(_Basis):
         self.assertEqual(d["akun_pilihan"], [])
         self.assertEqual(d["kategori_pilihan"], [])
         self.assertEqual(d["jumlah"], 0)
+
+
+class DetailFRQueryShapeTests(_Basis):
+    """Bentuk query WAJIB konstan — invarian v1.23.0 (CLAUDE.md 'Performa
+    v1.23.0'): halaman ini query-time murni atas `.values_list(...)` (bukan
+    iterasi objek `Transaction` penuh), jadi biayanya bergantung pada apakah
+    sel koreksi dilihat (1 atau 2 query), bukan pada jumlah baris/akun yang
+    tersaring maupun umur data di luar rentang. Mengunci BENTUK, bukan
+    milidetik.
+    """
+
+    def test_query_konstan_tanpa_filter_sel(self):
+        """1 query bila akun/kategori TIDAK keduanya dipilih (tak ada lookup
+        `FRKoreksi`) — tetap 1 walau 32 baris lintas banyak akun."""
+        for i in range(32):
+            self.fr(f"BANK BCA | Y{i} | WITHDRAW", "Adjustment", "-1000", jam="09:00")
+        with self.assertNumQueries(1):
+            data = detail_fr(self.toko, date(2026, 8, 3))
+        self.assertEqual(data["jumlah"], 32)
+
+    def test_query_konstan_dengan_filter_sel_dan_koreksi(self):
+        """2 query bila akun DAN kategori dipilih pada mode 1-hari: (1) baris
+        `.values_list(...)` + (2) lookup sel `FRKoreksi` (`_koreksi_sel`) —
+        tetap 2 walau jumlah baris yang lolos filter berbeda-beda."""
+        akun = "BANK BCA | IGNATIUS IVAN | WITHDRAW"
+        self.fr(akun, "Adjustment", "-200000", jam="09:00")
+        self.fr(akun, "Adjustment", "-100000", jam="11:00")
+        for i in range(20):
+            self.fr(f"BANK BCA | LAIN{i} | WITHDRAW", "Deposit", "500", jam="10:00")
+        with self.assertNumQueries(2):
+            data = detail_fr(self.toko, date(2026, 8, 3), akun=akun, kategori="adjustment")
+        self.assertEqual(data["jumlah"], 2)
+
+    def test_query_konstan_walau_ada_riwayat_jauh_lebih_tua_di_luar_rentang(self):
+        """Query TIDAK bertambah karena data lama di luar `[dari, sampai]` —
+        `posted_date__range` di SQL, bukan penyaringan Python atas seluruh
+        riwayat toko."""
+        tgl = date(2026, 8, 3)
+        self.fr("BANK BCA | X | WITHDRAW", "Adjustment", "-1000", tgl=tgl)
+
+        with self.assertNumQueries(1):
+            sebelum = detail_fr(self.toko, tgl)
+
+        for d in range(60):
+            self.fr("BANK BCA | OLD | WITHDRAW", "Adjustment", "-1000",
+                    tgl=tgl - timedelta(days=d + 1))
+
+        with self.assertNumQueries(1):
+            sesudah = detail_fr(self.toko, tgl)
+
+        self.assertEqual(sebelum["jumlah"], sesudah["jumlah"])
+
+    def test_baris_tidak_dimaterialisasi_jadi_objek_orm(self):
+        """`Transaction.from_db` HANYA dipanggil saat queryset mengembalikan
+        instance model penuh — `.values_list(...)` melewatinya sama sekali.
+        Nol panggilan membuktikan baris ditarik sebagai tuple ringan, bukan
+        objek `Transaction` penuh per baris (yang akan menyeret kolom `raw`
+        JSONB dan relasi yang sama sekali tak dipakai modul ini)."""
+        for i in range(30):
+            self.fr("BANK BCA | X | WITHDRAW", "Adjustment", "-1000", jam="09:00")
+        with patch.object(Transaction, "from_db", wraps=Transaction.from_db) as m:
+            data = detail_fr(self.toko, date(2026, 8, 3))
+        self.assertEqual(data["jumlah"], 30)
+        self.assertEqual(m.call_count, 0)

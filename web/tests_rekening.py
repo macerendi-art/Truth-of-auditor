@@ -322,6 +322,78 @@ class RekeningAgregatSQLTests(_MoneyData):
         self.assertEqual(acc["selisih"], Decimal("0"))
 
 
+class RekeningQueryShapeTests(_MoneyData):
+    """Bentuk query WAJIB konstan — invarian inti v1.23.0 (CLAUDE.md, bagian
+    "Performa v1.23.0"): dulu rentang sebulan memateralisasi 267 rb baris jadi
+    ~800 rb objek ORM (20,7 dtk di `Model.__init__`); sekarang GROUP BY di SQL
+    plus `values_list` ringan HANYA untuk baris ber-`balance_after`. Tes di sini
+    mengunci BENTUK (jumlah query, nol materialisasi ORM per baris) — bukan
+    milidetik, yang rapuh di runner CI berbagi.
+    """
+
+    def test_jumlah_query_konstan_walau_ada_riwayat_jauh_lebih_tua(self):
+        """5 query TETAP SAMA baik ada maupun tidak ada riwayat lama di luar
+        rentang — invarian "biaya bergantung UKURAN RENTANG, bukan UMUR DATA".
+
+        5 = (1) GROUP BY agregat + (2) `values_list` rantai saldo — keduanya
+        atas `dasar` yang sama — PLUS `_label_kombinasi`: (3) `SourceType.in_bulk`
+        + (4) `Account.in_bulk` + (5) `Upload.filter(...).select_related`.
+        Jumlahnya tak bergantung jumlah baris maupun kombinasi
+        (source_type, account, upload) — `Account.in_bulk` cuma benar-benar
+        mengeksekusi bila SET id-nya tak kosong (in_bulk({}) = 0 query, Django
+        pulang lebih awal), jadi fixture di sini sengaja menyertakan satu baris
+        ber-`account` supaya kelima query itu nyata semua.
+        """
+        acc = Account.objects.create(
+            kind="bank", provider="BRI", name="BRI HENDI", toko=self.toko)
+        self.mv(self.bank, "BCA", "HENDI", "500000", "500000", jam=9)
+        self.mv(self.bank, "BRI", "PANCA", "-100000", "900000", jam=10, account=acc)
+
+        with self.assertNumQueries(5):
+            data_sebelum = rekening_breakdown(self.toko, TGL)
+
+        # Riwayat JAUH lebih tua, 30 rekening berbeda, di luar rentang — kalau
+        # kode kembali menyapu seluruh riwayat (bug yang dilunasi v1.23.0),
+        # query dan/atau baris yang tersentuh ikut naik.
+        for i in range(30):
+            self.mv(self.bank, f"OLDBANK{i}", f"OWNER{i}", "1000", "1000", jam=8,
+                    tanggal=date(2020, 1, 1))
+
+        with self.assertNumQueries(5):
+            data_sesudah = rekening_breakdown(self.toko, TGL)
+
+        self.assertEqual(data_sebelum["count"], data_sesudah["count"])
+        self.assertEqual(len(data_sebelum["accounts"]), len(data_sesudah["accounts"]))
+
+    def test_query_konstan_terhadap_jumlah_rekening_bukan_n_plus_1(self):
+        """18 rekening berbeda dalam SATU rentang tetap 5 query — GROUP BY di
+        SQL, bukan satu query tambahan per rekening (pola N+1). Satu baris
+        sengaja ber-`account` supaya `Account.in_bulk` benar-benar tereksekusi
+        (lihat komentar di tes umur-data di atas)."""
+        acc = Account.objects.create(
+            kind="bank", provider="BRI", name="BRI HENDI", toko=self.toko)
+        self.mv(self.bank, "BRI", "HENDI", "1000", "1000", jam=8, account=acc)
+        for i in range(17):
+            self.mv(self.bank, f"P{i}", f"O{i}", "1000", "1000", jam=8)
+        with self.assertNumQueries(5):
+            data = rekening_breakdown(self.toko, TGL)
+        self.assertEqual(len(data["accounts"]), 18)
+
+    def test_baris_tidak_dimaterialisasi_jadi_objek_orm(self):
+        """`Transaction.from_db` HANYA dipanggil saat queryset mengembalikan
+        instance model penuh (iterasi langsung) — `.values()`/`.values_list()`
+        melewatinya sama sekali. Nol panggilan membuktikan agregasi benar-benar
+        di SQL/tuple ringan, bukan `for t in Transaction.objects.filter(...)`
+        yang lalu dijumlah satu-satu di Python (bug lama: 267 rb baris → ~800 rb
+        `Model.__init__`, 20,7 dtk)."""
+        for i in range(30):
+            self.mv(self.bank, "BCA", "HENDI", "1000", "1000", jam=8, menit=i)
+        with patch.object(Transaction, "from_db", wraps=Transaction.from_db) as m:
+            data = rekening_breakdown(self.toko, TGL)
+        self.assertEqual(data["count"], 30)
+        self.assertEqual(m.call_count, 0)
+
+
 class RekeningViewTests(_MoneyData):
     def setUp(self):
         super().setUp()

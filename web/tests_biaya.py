@@ -4,7 +4,9 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 import transactions.models as tx_models
@@ -244,4 +246,88 @@ class TanpaKolomRawTests(_BiayaData):
                           wraps=kolom_raw.from_db_value) as m:
             data = rincian_biaya(self.toko, dari=TGL, sampai=TGL)
         self.assertEqual(data["ringkas"]["n"], 2)
+        self.assertEqual(m.call_count, 0)
+
+
+class BiayaQueryShapeTests(_BiayaData):
+    """Bentuk query WAJIB konstan — invarian v1.23.0 (CLAUDE.md 'Performa
+    v1.23.0'): tiga query BORONGAN (`SourceType`/`Account`/`Upload.in_bulk`)
+    sesudah penyaringan, bukan `select_related` per baris, dan hasilnya tak
+    boleh tumbuh baik karena banyak kombinasi sumber maupun karena riwayat
+    lama di luar rentang. Mengunci BENTUK, bukan milidetik.
+    """
+
+    def test_jumlah_query_konstan_walau_ada_riwayat_jauh_lebih_tua(self):
+        """4 query TETAP SAMA baik ada maupun tidak riwayat lama di luar
+        rentang tanggal yang diminta.
+
+        4 = (1) `qs.filter(PRAFILTER_FEE).values(*_KOLOM)` + `_label_kombinasi`
+        semu di dalam `rincian_biaya`: (2) `SourceType.in_bulk` + (3)
+        `Account.in_bulk` + (4) `Upload.select_related("account").in_bulk`.
+        Satu baris sengaja ber-`account` supaya `Account.in_bulk` (kosong =
+        0 query, Django pulang lebih awal) benar-benar tereksekusi.
+        """
+        acc = Account.objects.create(
+            kind="bank", provider="BCA", name="BCA HENDI", toko=self.toko)
+        self.tx(self.up_bri, "BFST1", "2500", jenis="admin")
+        self.tx(self.up_bri, "BFST2", "2500", jenis="admin", account=acc)
+
+        with CaptureQueriesContext(connection) as ctx:
+            sebelum = rincian_biaya(self.toko, dari=TGL, sampai=TGL)
+        self.assertEqual(len(ctx.captured_queries), 4)
+        # Jumlah query saja tak cukup: sebuah regresi bisa memindahkan
+        # penyaringan tanggal ke Python (fetch SELURUH riwayat toko via
+        # `.values(*_KOLOM)` — yang tetap menyertakan kolom `posted_date` di
+        # SELECT — lalu `if r["posted_date"] in rentang: ...`) dan tetap
+        # lolos hitungan-4-query, karena baris pertamanya tetap SATU query
+        # mentah. Kuncinya harus pada MEKANISMENYA: `posted_date` WAJIB
+        # dibandingkan (`>=`/`<=`) di WHERE, bukan sekadar dibaca di SELECT
+        # — karena itu diperiksa via regex perbandingan, bukan substring.
+        sql_pertama = ctx.captured_queries[0]["sql"]
+        self.assertRegex(
+            sql_pertama, r'"posted_date"\s*(>=|<=)',
+            "penyaringan tanggal hilang dari WHERE — pindah ke Python?")
+
+        # riwayat JAUH lebih tua, banyak upload/rekening berbeda, DI LUAR
+        # rentang — kalau kode kembali menyapu seluruh riwayat, baik query
+        # maupun baris yang tersentuh akan ikut naik.
+        for i in range(20):
+            up = Upload.objects.create(
+                source_type=self.bank, toko=self.toko,
+                original_name=f"OLD{i}.csv", owner_name=f"OLDOWN{i}")
+            self.tx(up, "BFSTOLD", "2500", jenis="admin", tanggal=date(2020, 1, 1))
+
+        with self.assertNumQueries(4):
+            sesudah = rincian_biaya(self.toko, dari=TGL, sampai=TGL)
+
+        self.assertEqual(sebelum["ringkas"]["n"], sesudah["ringkas"]["n"])
+        self.assertEqual(len(sebelum["rows"]), len(sesudah["rows"]))
+
+    def test_query_konstan_terhadap_jumlah_kombinasi_sumber(self):
+        """15 kombinasi (upload) berbeda dalam satu rentang tetap 4 query —
+        borongan `in_bulk`, bukan satu query tambahan per kombinasi (N+1)."""
+        acc = Account.objects.create(
+            kind="bank", provider="BCA", name="BCA HENDI", toko=self.toko)
+        self.tx(self.up_bri, "BFST0", "2500", jenis="admin", account=acc)
+        for i in range(15):
+            up = Upload.objects.create(
+                source_type=self.bank, toko=self.toko,
+                original_name=f"P{i}.csv", owner_name=f"O{i}")
+            self.tx(up, "BFSTX", "2500", jenis="admin")
+
+        with self.assertNumQueries(4):
+            data = rincian_biaya(self.toko, dari=TGL, sampai=TGL)
+        self.assertEqual(data["ringkas"]["n"], 16)
+        self.assertEqual(len(data["rows"]), 16)
+
+    def test_baris_tidak_dimaterialisasi_jadi_objek_orm(self):
+        """`Transaction.from_db` HANYA dipanggil saat queryset mengembalikan
+        instance model penuh — `.values(*_KOLOM)` melewatinya sama sekali.
+        Nol panggilan membuktikan baris ditarik sebagai dict ringan, bukan
+        objek `Transaction` penuh per baris."""
+        for i in range(30):
+            self.tx(self.up_bri, f"BFST{i}", "2500", jenis="admin")
+        with patch.object(Transaction, "from_db", wraps=Transaction.from_db) as m:
+            data = rincian_biaya(self.toko, dari=TGL, sampai=TGL)
+        self.assertEqual(data["ringkas"]["n"], 30)
         self.assertEqual(m.call_count, 0)

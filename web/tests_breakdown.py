@@ -5,16 +5,18 @@ baris per FR Account (`raw["Bank"]`), pivot per kategori asli (`raw["Kategori"]`
 saldo awal/akhir dari `balance_after` urut `(raw["Jam"], id)`, dan
 Selisih Kontrol = saldo_akhir − (saldo_awal + Σ money_delta) — idealnya 0.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from sources.models import SourceType, Toko, Upload
 from transactions.models import Transaction
-from web.breakdown import bracket_breakdown
+from web.breakdown import _saldo_carry, bracket_breakdown
 
 TGL = date(2026, 7, 1)
 
@@ -173,6 +175,135 @@ class AgregasiPivotTests(_BracketData):
         data = bracket_breakdown(self.toko, TGL)
         self.assertEqual(data["count"], 1)
         self.assertEqual(data["accounts"][0]["kategori"]["deposit"], Decimal("100000"))
+
+
+class BreakdownQueryShapeTests(_BracketData):
+    """Bentuk query WAJIB konstan — invarian inti v1.23.0 (CLAUDE.md 'Performa
+    v1.23.0'): halaman ini dulu menyapu seluruh riwayat toko untuk mencari
+    saldo penutup `dari−1` (terukur 608 ms/15 hari → 1.605 ms/52 hari, TUMBUH
+    SELAMANYA). Sekarang `_saldo_carry` memakai loose index scan rekursif
+    (WITH RECURSIVE) — biayanya O(#akun × log N), bukan O(umur data). Tes di
+    sini mengunci BENTUK (jumlah query tetap, tak bergantung umur/rentang
+    data), bukan milidetik yang rapuh di runner CI berbagi.
+    """
+
+    def test_bracket_breakdown_query_konstan_walau_riwayat_jauh_lebih_tua(self):
+        """5 query TETAP SAMA baik ada 1 hari riwayat pra-`dari` maupun 60 hari.
+
+        5 = (1) `grup` (GROUP BY Bank×Kategori, sel kategori/mutasi/trx) +
+        (2) `_ujung_saldo` (hitungan-bertanda ujung rantai saldo, 1 query raw
+        cursor) + `_saldo_carry`: (3) WITH RECURSIVE (akun + tanggal-penutup
+        pra-`dari`) + (4) `_ujung_saldo_hari` (penutup per akun×hari-penutup,
+        1 query raw cursor lain) — keduanya HANYA berjalan karena ada riwayat
+        pra-`dari` (`_saldo_carry` pulang di query (3) saja bila kosong) — plus
+        (5) `FRKoreksi.objects.filter(...)` dari `_apply_koreksi` (mode 1-hari
+        selalu memanggilnya, walau hasilnya kosong). Tak satu pun tumbuh
+        dengan JUMLAH HARI riwayat pra-`dari` — hanya jumlah AKUN yang
+        (jika beda-beda) menambah baris hasil, bukan baris query.
+        """
+        D0 = date(2026, 6, 30)
+        self.fr("BANK BRI | MARGANI | DEPOSIT", "Deposit", "500000", "1500000",
+                jam="09:00", tanggal=TGL)
+        self.fr("BANK BRI | MARGANI | DEPOSIT", "BEBAN ADMIN QRIS", "-4972",
+                "1495028", jam="10:30", tanggal=TGL)
+        # satu baris riwayat pra-`dari`, cukup memasuki cabang carry 2-query.
+        self.fr("BANK BRI | MARGANI | DEPOSIT", "Deposit", "1000000", "1000000",
+                jam="08:00", tanggal=D0)
+
+        with self.assertNumQueries(5):
+            sebelum = bracket_breakdown(self.toko, TGL)
+
+        # 60 hari riwayat JAUH lebih tua, 5 rekening berbeda — kalau kode
+        # kembali menyapu seluruh riwayat (bug yang dilunasi v1.23.0), query
+        # ATAU baris yang tersentuh akan ikut naik dengan kedalamannya.
+        for d in range(60):
+            tgl_lama = D0 - timedelta(days=d + 1)
+            for i in range(5):
+                self.fr(f"BANK BRI | OLD{i} | DEPOSIT", "Deposit", "1000", "1000",
+                        jam="08:00", tanggal=tgl_lama)
+
+        with self.assertNumQueries(5):
+            sesudah = bracket_breakdown(self.toko, TGL)
+
+        # baris IN-RANGE tak berubah — hanya akun dorman baru (carry ≠ 0)
+        # bertambah, itu memang data baru, bukan kebocoran biaya.
+        self.assertEqual(sebelum["count"], sesudah["count"])
+        self.assertEqual(len(sesudah["accounts"]), len(sebelum["accounts"]) + 5)
+
+    def test_saldo_carry_biaya_tetap_walau_kedalaman_sejarah_bertambah(self):
+        """`_saldo_carry` sendiri: 2 query baik dipotong pada hari ke-3 rantai
+        maupun hari ke-83 — pembuktian langsung "biayanya tak tumbuh dengan
+        umur data" (docstring `_saldo_carry`). SATU rantai kontinu 83 hari
+        dibangun sekali; dipotong di dua titik `dari` berbeda supaya
+        perbandingannya adil (data sama, kedalaman riwayat pra-`dari` beda).
+        """
+        ACC = "BANK BRI | MARGANI | DEPOSIT"
+        awal = date(2026, 6, 1)
+        bal = 0
+        for d in range(83):
+            bal += 1000
+            self.fr(ACC, "Deposit", "1000", str(bal), jam="08:00",
+                    tanggal=awal + timedelta(days=d))
+
+        dari_pendek = awal + timedelta(days=3)  # 3 hari riwayat pra-`dari`
+        with self.assertNumQueries(2):
+            carry_pendek = _saldo_carry(self.toko, dari_pendek)
+
+        dari_panjang = awal + timedelta(days=83)  # 83 hari riwayat pra-`dari`
+        with CaptureQueriesContext(connection) as ctx:
+            carry_panjang = _saldo_carry(self.toko, dari_panjang)
+
+        # Kedua potongan tetap 2 query walau titik potong yang KEDUA melihat
+        # 83 hari riwayat, bukan 3 — dan nilainya benar-benar mencerminkan
+        # kedalaman itu (bukan berhenti di suatu batas lookback tersembunyi).
+        self.assertEqual(len(ctx.captured_queries), 2)
+        self.assertEqual(carry_pendek[ACC], Decimal("3000"))
+        self.assertEqual(carry_panjang[ACC], Decimal("83000"))
+
+        # Jumlah query SAJA tak cukup: sebuah regresi bisa mengganti loose
+        # index scan rekursif dengan agregat `Max(posted_date)` GROUP BY atas
+        # SELURUH riwayat toko pra-`dari` (bug lama yang dilunasi v1.23.0) dan
+        # tetap lolos hitungan-2-query di atas, karena keduanya sama-sama SATU
+        # query mentah. Kuncinya harus pada MEKANISMENYA: query pertama WAJIB
+        # `WITH RECURSIVE` (loose index scan berbasis index ekspresi
+        # `tx_fr_bank_posted_idx`) — bukan `GROUP BY`/`MAX` polos yang menyapu
+        # tabel.
+        sql_pertama = ctx.captured_queries[0]["sql"]
+        self.assertIn("RECURSIVE", sql_pertama.upper(),
+                      "loose index scan rekursif hilang — kembali menyapu riwayat?")
+
+    def test_saldo_dorman_terbawa_tanpa_batas_lookback(self):
+        """Klaim literal docstring `_saldo_carry`: "Akun dorman bersaldo-lama
+        tetap ikut (tak ada batas lookback)". Akun Y HANYA punya satu baris,
+        80 hari sebelum `dari`, TIDAK PERNAH bergerak lagi sesudahnya — beda
+        dengan tes kedalaman di atas (rantai bergerak TIAP hari, jadi
+        `MAX(posted_date)` selalu jatuh di `dari−1` dan sama sekali tak
+        menguji seberapa jauh carry boleh menoleh ke belakang).
+        """
+        Y = "BANK BRI | DORMAN | DEPOSIT"
+        awal = date(2026, 6, 1)
+        self.fr(Y, "Deposit", "77000", "77000", jam="08:00", tanggal=awal)
+
+        dari = awal + timedelta(days=80)
+        with self.assertNumQueries(2):
+            carry = _saldo_carry(self.toko, dari)
+        self.assertEqual(carry[Y], Decimal("77000"))
+
+    def test_query_konstan_terhadap_jumlah_akun_bukan_n_plus_1(self):
+        """21 akun berbeda pada hari yang sama tetap 5 query — GROUP BY di
+        SQL untuk sel kategori maupun ujung rantai saldo, bukan satu query
+        tambahan per akun (pola N+1)."""
+        D0 = date(2026, 6, 30)
+        # satu baris carry supaya _saldo_carry mengambil cabang 2-query,
+        # sama seperti tes umur-data di atas.
+        self.fr("BANK BRI | SEED | DEPOSIT", "Deposit", "1000", "1000",
+                jam="08:00", tanggal=D0)
+        for i in range(20):
+            self.fr(f"BANK BRI | P{i} | DEPOSIT", "Deposit", "1000", "1000",
+                    jam="08:00", tanggal=TGL)
+        with self.assertNumQueries(5):
+            data = bracket_breakdown(self.toko, TGL)
+        self.assertEqual(len(data["accounts"]), 21)
 
 
 class BreakdownViewTests(_BracketData):
