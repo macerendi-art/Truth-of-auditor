@@ -204,7 +204,9 @@ MEDIA_ROOT = Path(os.environ.get('MEDIA_ROOT') or (BASE_DIR / 'media'))
 # tak ada alasan sesi auditor tetap valid 2 minggu di lingkungan mana pun.
 #
 # SESSION_SAVE_EVERY_REQUEST SENGAJA TIDAK dinyalakan (tinjauan akhir
-# 04-09-2026, K1). Sesi 8 jam di sini ABSOLUT sejak login, bukan idle-rolling.
+# 04-09-2026, K1). Sesi 8 jam di sini dihitung sejak PENULISAN sesi terakhir
+# (login, ganti toko, `ip_blokir` — Django menghitung ulang expire_date pada
+# setiap save()), dan TIDAK diperpanjang oleh request biasa; bukan idle-rolling.
 # Alasannya balapan, bukan selera: SessionMiddleware menulis balik salinan
 # sesi yang dimuat DI AWAL request. Dengan save-every-request, request LAMBAT
 # (Mutasi Bank 46 dtk, rekonsiliasi 22–29 dtk) yang selesai belakangan menulis
@@ -213,10 +215,10 @@ MEDIA_ROOT = Path(os.environ.get('MEDIA_ROOT') or (BASE_DIR / 'media'))
 # membaca `_active_toko`) mendarat di toko yang salah tanpa pesan kesalahan.
 # Tanpa setelan itu hanya request yang MENGUBAH sesi (`set_toko`, login,
 # `ip_blokir`) yang menulis, jadi tidak ada penulis basi. Untuk aplikasi
-# internal ini, kedaluwarsa absolut justru lebih ketat — bukan kerugian.
-# Dijaga `web/tests_hardening.py::SesiHardeningTests` (tes balapan nyata,
-# bukan pin konfigurasi).
-SESSION_COOKIE_AGE = 8 * 3600          # 8 jam ABSOLUT sejak login (bukan rolling)
+# internal ini, kedaluwarsa yang tidak digeser request biasa justru lebih
+# ketat — bukan kerugian. Dijaga `web/tests_hardening.py::SesiHardeningTests`
+# (tes balapan nyata, bukan pin konfigurasi).
+SESSION_COOKIE_AGE = 8 * 3600          # 8 jam sejak penulisan sesi terakhir (bukan rolling)
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 # --- C4: pembatas percobaan login (lockout per username+IP) ---

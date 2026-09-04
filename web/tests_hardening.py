@@ -121,7 +121,9 @@ class CspHeaderTests(TestCase):
 # ------------------------------------------------------------- C3: sesi ----
 
 class SesiHardeningTests(TestCase):
-    """C3 + K1 (tinjauan akhir 04-09-2026): sesi 8 jam ABSOLUT, bukan rolling.
+    """C3 + K1 (tinjauan akhir 04-09-2026): sesi 8 jam sejak PENULISAN sesi
+    terakhir (login/ganti toko/ip_blokir — Django menghitung ulang expire_date
+    pada tiap save()), TIDAK diperpanjang oleh request biasa; bukan rolling.
 
     `SESSION_SAVE_EVERY_REQUEST=True` (dipasang C3, dicabut K1) membuat
     `SessionMiddleware.process_response` menulis balik salinan sesi yang
