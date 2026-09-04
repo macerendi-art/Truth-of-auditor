@@ -44,8 +44,14 @@ echo "[lokal] ref '$REF' -> commit $SHA"
 git cat-file -e "$SHA" || { echo "FATAL: commit $SHA tidak ada di riwayat lokal" >&2; exit 2; }
 
 echo "[lokal] bersihkan checkout lama di $HOST:$APP_DIR (kecuali .venv/staticfiles/media)"
+# `cd "$APP_DIR"` dulu WAJIB: sesi SSH mewarisi cwd /home/toa (login user), dan `sudo -u
+# toa_staging` TIDAK mengubah cwd -- proses lalu mencoba ber-cwd di direktori yang justru
+# TERBUKTI tak bisa dibaca toa_staging (itu poin isolasinya), jadi `find` gagal duluan sebelum
+# sempat menyentuh argumen path absolutnya sendiri (dibuktikan gagal 2026-09-04, "Failed to
+# change directory: /home/toa" -- bukan bug find, itu konsekuensi isolasi yang sengaja dibuat).
 ssh "$HOST" "sudo -u $STAGING_USER bash -c '
-  find \"$APP_DIR\" -mindepth 1 -maxdepth 1 \
+  cd \"$APP_DIR\" &&
+  find . -mindepth 1 -maxdepth 1 \
     ! -name .venv ! -name staticfiles ! -name media -exec rm -rf {} +
 '"
 
