@@ -120,7 +120,7 @@ Anggaran koneksi hari ini: web 4 × 8 = **32** persisten + 10 cadangan = 42 dari
 
 ### Opsi A — Celery + Redis
 
-- **Cara kerja:** service Redis di Railway sebagai broker; service worker `celery -A truth_auditor worker --pool solo --concurrency 1` menjalankan task `jalankan_rekonsiliasi(job_id)`. `acks_late=True` + `task_reject_on_worker_lost=True` supaya task tak hilang saat worker mati; `visibility_timeout` Redis harus > durasi task terpanjang atau task **dikirim ulang saat masih berjalan** (footgun yang sama dengan django-q2 di bawah).
+- **Cara kerja [belum diverifikasi]:** service Redis di Railway sebagai broker; service worker `celery -A truth_auditor worker --pool solo --concurrency 1` menjalankan task `jalankan_rekonsiliasi(job_id)`. `acks_late=True` + `task_reject_on_worker_lost=True` supaya task tak hilang saat worker mati; `visibility_timeout` Redis harus > durasi task terpanjang atau task **dikirim ulang saat masih berjalan** (footgun yang sama dengan django-q2 di bawah). Beda dengan bagian django-q2 di §Opsi B (dikutip lengkap dari `configure.html`, dibaca 04-09-2026), butir ini ditulis dari ingatan penulis dokumen — belum dicek ke dokumentasi resmi Celery/Redis. Sebelum dijadikan dasar keputusan, verifikasi ulang lewat docs.celeryq.dev.
 - **Biaya:** Redis ±0,1–0,3 GB + worker ±0,25 GB + CPU kecil ≈ **$4–8/bulan** [perkiraan]. Dua dependensi baru (`celery`, `redis`) di `requirements.txt` yang sengaja dipatok dari `pip freeze` produksi.
 - **Layanan baru yang harus dijaga:** Redis (persistensi, memori, versi) + worker. Dua hal yang bisa mati diam-diam, dua hal yang harus masuk pemantauan B1/B6.
 - **Koneksi DB:** +1 (pool solo).
@@ -134,7 +134,7 @@ Anggaran koneksi hari ini: web 4 × 8 = **32** persisten + 10 cadangan = 42 dari
 - **Biaya:** worker ≈ **$2–4/bulan** [perkiraan]; satu dependensi baru.
 - **Koneksi DB:** cluster = sentinel/scheduler + pusher + monitor + N worker; dengan broker ORM **masing-masing memegang koneksi sendiri** → ±4–5 untuk `workers=1`. Dokumentasi resminya bahkan menyarankan *DB terpisah* untuk broker — bertentangan dengan alasan memilih opsi ini.
 - **Semantik retry (dokumentasi resmi `configure.html`, dibaca 04-09-2026):** `retry` = *"The number of seconds a broker will wait for a cluster to finish a task, before it's presented again."* dan *"The value must be bigger than the time it takes to complete longest task, i.e. timeout must be less than retry value."* Kalau tidak, *"Django-Q2 will start the task again"*. **Ini persis pertanyaan pembunuh di §3.2** — dan jawabannya di sini adalah "setel angkanya dengan benar", bukan mekanisme. `ack_failures` menandai task gagal sebagai terkirim; `max_attempts` default **0 = tak terbatas** — exception deterministik (mis. tanggal salah) akan diulang selamanya kecuali disetel.
-- `huey`: broker bawaan Redis/SQLite/memori; Postgres hanya lewat `huey.contrib.sql_huey` (peewee) — menambah ORM kedua ke proses. Tidak dibahas lebih jauh.
+- `huey` **[belum diverifikasi]**: broker bawaan Redis/SQLite/memori; Postgres hanya lewat `huey.contrib.sql_huey` (peewee) — menambah ORM kedua ke proses. Tidak dibahas lebih jauh. Sama seperti bagian Celery di atas, ditulis dari ingatan — bukan hasil riset lewat dokumentasi resmi `huey` seperti django-q2 di baris sebelumnya.
 - **Rollback:** sama dengan A (flag), tabel `OrmQ`/`Task` tinggal sebagai migrasi pihak ketiga di skema produksi.
 - **Penilaian:** "tanpa broker" ternyata **4–5 koneksi dan satu proses supervisor pihak ketiga** yang perilaku gagalnya diatur konstanta. Untuk 1 worker, kerangka ini lebih berat daripada yang ia gantikan.
 
@@ -208,6 +208,17 @@ Jawaban konkret untuk rancangan D, lapis demi lapis:
 1. **Yang tersimpan saat mati:** batch tanggal D1..Dk sudah commit (masing-masing transaksi sendiri), jejak audit untuk tiap batch ditulis di dalam loop (lihat butir 6), job masih `jalan` dengan `lease_until` ±30 menit ke depan.
 2. **Pemulihan:** worker berikutnya (restart `ALWAYS`, atau kontainer baru saat deploy) mengambil job `jalan` yang `lease_until < now()` → `attempts += 1` → memanggil `run_batches_auto` **dengan argumen tersimpan yang sama**. Tanggal ber-batch masuk `skipped_existing`; tanggal berikutnya diproses. **Ini persis apa yang terjadi hari ini bila pengguna mengklik ulang** — bukan semantik baru.
 3. **Bukti eksekusi, bukan argumen** (skrip `uji_resumable.py`, DB scratch, toko `lbs`): (A) reset → run sekali 26+27+28/06; (B) reset → run `date_to=27` (26+27) → run lagi tanpa batas (hanya 28 baru, 27 `skipped_existing`). Sidik jari `(relasi, left_id, right_id, bucket, reason_code, score)` seluruh 16.348 baris batch 28/06 **identik** (`c2e18f102330c5d9`), himpunan 8.402 baris terkonsumsi **identik** (`5857e6c941f7db94`); daftar `expired` sama (448 tx, dicek programatik). Yang berbeda hanya metadata `ReconBatch.date_from` (26 vs 27 — `lo` dihitung ulang dari panel aktif, dan tak ada lagi baris uang aktif sebelum 27) dan nomor pk batch. Klik ulang setelah selesai (C) tidak mengubah apa pun (B == C, 0 batch baru). Catat jujur: `date_from` yang tampil di halaman batch bisa berbeda antara "sekali jalan" dan "dilanjutkan" — kosmetik, dan **sudah begitu hari ini**.
+   **⚠️ Batas kejujuran bukti ini:** `uji_resumable.py` adalah skrip ad hoc di
+   scratchpad sesi ini, BUKAN harness resmi — pada saat dokumen ini ditulis
+   harness sidik-jari E3 belum dibangun. Harness resminya kini ADA:
+   `scripts/harness/sidik_jari.py` (menulis sidik jari kanonik
+   `(relation, left_id, right_id, bucket, reason_code, score)` per hari nyata)
+   + `scripts/harness/bandingkan.py` (membandingkan dua berkas, exit code 0
+   hanya bila identik) — commit `de94c39`. **Sebelum Fase 1(c) dirilis, ulangi
+   pembuktian "sekali-jalan vs terpotong" di atas lewat harness resmi ini**
+   (bukan skrip ad hoc yang tidak di-commit), pada data toko yang representatif
+   untuk pemicu asli (g25 ELITE) — bukan cuma `lbs` rezim ber-kunci yang
+   dipakai di atas. Ini prasyarat rilis, bukan sekadar catatan.
 4. **Eksekusi ganda yang benar-benar bersamaan** (lease kedaluwarsa padahal proses lama masih hidup — mis. run 35 menit, atau dua kontainer saat deploy): `pg_advisory_xact_lock(toko_id)` membuat pendatang kedua **menunggu** sampai transaksi pertama selesai, lalu ia menemukan batch sudah ada → `skipped_existing`. Tanpa kunci ini pun constraint unik menjaga (pendatang kedua memblokir di INSERT lalu `IntegrityError`) — tetapi ia sudah membaca pool dan membuang CPU; kunci membuatnya rapi. **Lease dipilih 30 menit tanpa thread heartbeat** — `run_batches_auto` tidak punya hook per tanggal, heartbeat berarti thread + koneksi kedua; harga yang dibayar adalah pemulihan lambat (≤30 menit) saat worker mati, yang ditangkap `periksa_kesehatan`. Kalau kelak durasi run mendekati lease, naikkan lease — jangan turunkan.
 5. **`max_attempts = 2`** lalu `gagal` dengan traceback tersimpan: exception deterministik (tanggal salah, `IntegrityError` dari ras lain) tidak berputar selamanya — ini kelemahan default `max_attempts=0` django-q2.
 6. **Jejak audit.** `catat()` hari ini dipanggil view **setelah** `run_batches_auto`, di luar transaksi run, dengan `request` untuk IP/UA. Di worker tidak ada `request`: job membawa `user_id`, `ip`, `user_agent` dari saat enqueue dan `catat` diberi parameter eksplisit `ip=`/`user_agent=` (perubahan kecil di `core/audit.py`). Jendela "commit lalu mati sebelum `catat`" **sudah ada hari ini** dan tidak diperburuk; bila ingin ditutup, `run_batch` menerima hook `on_batch` dan `catat` dipanggil di dalam `atomic`-nya — `reconciliation` boleh mengimpor `core`, **tidak boleh** `web`.
@@ -235,6 +246,23 @@ Hari ini: tekan → tunggu → redirect ke batch (1 tanggal) atau flash "N batch
 
 - **Tekan "Jalankan"** → job dibuat (validasi tanggal/`verify_panel_anchor` **tetap dijalankan sinkron di view** supaya penolakan panel-anchor tetap instan seperti sekarang — itu query murah) → redirect ke `/rekonsiliasi/antrean/<id>/`.
 - **Halaman status** memakai HTMX yang sudah ada di `app_base.html` (`hx-trigger="every 3s"` pada satu partial): `antre` (posisi antrean, "di depan: toko X"), `jalan` (mulai pukul, "tanggal yang sudah selesai: 26/06, 27/06 · sedang: 28/06" — dari `ReconBatch` yang commit, tanpa hook engine), `selesai` (ringkasan seperti flash hari ini + tombol ke batch; bila tepat 1 batch, **redirect otomatis ke `batch_detail`** — perilaku sekarang dipertahankan), `gagal` (pesan manusiawi + "tidak ada batch setengah jadi; tanggal 26/06 dan 27/06 sudah selesai" + traceback untuk admin), `batal` (hanya dari `antre`).
+  **⚠️ Koreksi, diverifikasi di kode sebelum ditulis:** `run_batches_auto`
+  (`reconciliation/engine.py`, sekitar baris 2171–2190) **menelan exception per
+  tanggal** (`except Exception as e: errors.append(...)`) dan **melanjutkan**
+  ke tanggal berikutnya, lalu selalu mengembalikan `"ok": True` (kecuali
+  pelanggaran `verify_panel_anchor` di pre-flight, kasus terpisah yang sudah
+  `ok=False`). Job status `selesai` polos jadi BISA menyembunyikan kegagalan
+  SEBAGIAN tanggal — job dengan 7 tanggal di mana 3 gagal tetap pulang sebagai
+  `"ok": True` dengan `errors` berisi 3 entri. **Status job harus membaca
+  `errors` dari hasil `run_batches_auto`**: bila kosong → `selesai` polos;
+  bila tidak kosong → label wajib berbunyi **"selesai — N tanggal gagal"**
+  (N = `len(errors)`) dengan daftar tanggal+pesan galat per baris, BUKAN status
+  `gagal` murni (batch yang berhasil tetap batch, tidak boleh disembunyikan
+  di balik satu label galat) dan BUKAN `selesai` polos (menyembunyikan yang
+  gagal). `gagal` (status job, bukan per-tanggal) tetap dipakai HANYA untuk
+  exception yang lolos dari `run_batches_auto` sendiri (mis. worker mati/
+  crash di luar loop-nya) — beda kelas dari "N tanggal gagal di dalam satu
+  job yang selesai".
 - **Chip sidebar** "Rekonsiliasi berjalan · g25" lewat `web.context_processors` — satu query murah di index parsial, mengikuti pola `pending_review_count`. Ini juga pengganti notifikasi: pengguna yang menutup tab tetap melihatnya di halaman mana pun. Email/Telegram **tidak** dirancang (satu tim, satu layar).
 - **Panel "Kerjakan hari ini"** dashboard menampilkan job aktif toko itu alih-alih tombol run.
 - **Riwayat** job (siapa, kapan, berapa lama, hasil) di halaman Rekonsiliasi di bawah Riwayat Batch — dan `durasi_ms` di sana adalah **instrumen E4 permanen**.
@@ -249,7 +277,7 @@ Hari ini: tekan → tunggu → redirect ke batch (1 tanggal) atau flash "N batch
 | Fase | Isi | Risiko | Usaha | Syarat mulai |
 |---|---|---|---|---|
 | **0 — Ukur** | `run_batch` menulis `summary["durasi_ms"]` (+ per relasi dari `run_match`). Nol perubahan perilaku; menjadikan tiap run produksi pengukuran E4 dan memberi deret waktu yang §1.4 tidak punya | nihil | ≤ ½ hari termasuk tes | sekarang |
-| **1 — Perkuat jalur sinkron** | (a) `pg_advisory_xact_lock(toko_id)` di `run_batch` + view hapus batch (no-op di SQLite); (b) `IntegrityError` batch ganda → pesan "sedang dijalankan pengguna lain / sudah ada"; (c) **batasi tanggal per klik** (mis. 3) dengan flash "3 dari 7 tanggal selesai — tekan lagi untuk melanjutkan": memotong pemicu tumpukan (§1.4 baris 3) tanpa proses baru, dan **terbukti tidak mengubah hasil** (§3.2 butir 3); (d) tombol `data-busy` diperluas lintas-tab lewat cek job/kunci | rendah — tanpa layanan baru, tanpa migrasi kecuali (c) tidak butuh apa pun | 1–2 hari | sekarang; **rilis PATCH/MINOR biasa** |
+| **1 — Perkuat jalur sinkron** | (a) `pg_advisory_xact_lock(toko_id)` di `run_batch` + view hapus batch (no-op di SQLite); (b) `IntegrityError` batch ganda → pesan "sedang dijalankan pengguna lain / sudah ada"; (c) **batasi tanggal per klik** (mis. 3) dengan flash "3 dari 7 tanggal selesai — tekan lagi untuk melanjutkan": memotong pemicu tumpukan (§1.4 baris 3) tanpa proses baru, dan **belum terbukti tidak mengubah hasil lewat harness resmi** — bukti ad hoc ada di §3.2 butir 3, tapi **WAJIB digerbangi harness sidik-jari E3** (`scripts/harness/sidik_jari.py` + `bandingkan.py`, commit `de94c39`) atas data g25/ELITE sebelum rilis, bukan cuma diargumenkan; (d) tombol `data-busy` diperluas lintas-tab lewat cek job/kunci | rendah — tanpa layanan baru, tanpa migrasi kecuali (c) tidak butuh apa pun | 1–2 hari + gerbang harness E3 utk (c) | sekarang; **rilis PATCH/MINOR biasa** |
 | **2 — Worker `ReconJob`** | model + migrasi, command worker, flag `REKON_ASYNC`, halaman status HTMX + chip sidebar, `catat(ip=, user_agent=)`, `railway.worker.json` + Procfile `worker:` + tes kembar + perluasan aritmetika koneksi, pemeriksaan di `periksa_kesehatan`, SIGTERM | sedang — layanan baru, deploy dua service | **4–5 hari kerja** + 1 hari pengamatan di produksi dengan flag mati dulu (worker hidup, view masih sinkron) | **hanya bila** E1 tidak terwujud DAN `durasi_ms` menunjukkan run tunggal > 50 dtk, ATAU satu 524 nyata terjadi |
 | **3 — opsional** | batalkan job `jalan` (butuh hook engine), notifikasi, worker >1 (kunci per toko sudah siap) | sedang | sesuai kebutuhan | permintaan pengguna |
 
@@ -274,6 +302,7 @@ Jujur, dari angkanya sendiri:
 
 **A. Sumber angka**
 - `run_batch` lokal: `scratchpad/ukur_run_batch.{py,json,log}`, `ukur_run_batch_profile.txt`, `uji_resumable.py` (tidak di-commit; scratchpad sesi).
+- Harness sidik-jari resmi E3 (dipakai untuk gerbang Fase 1(c), §3.2 butir 3 & §4): `scripts/harness/sidik_jari.py` + `scripts/harness/bandingkan.py`, commit `de94c39` — di-commit, bukan scratchpad.
 - Produksi: `CLAUDE.md` §"Anomali matcher 25-08-2026" (29.219 ms; 4.969.497 pasangan; 5,88 µs), §"Performa v1.18.0" (koneksi 32/100), `core/tests_start_command.py` (283 MB, aritmetika).
 - gunicorn 26.2.0: `workers/gthread.py` (`run`, `handle_request`), `arbiter.py` (`murder_workers`), `config.GracefulTimeout.default = 30`.
 - Cloudflare: developers.cloudflare.com Error 524 (125 dtk; Enterprise 6.000 dtk; saran DNS-only).
