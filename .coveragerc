@@ -1,0 +1,33 @@
+# Konfigurasi `coverage` (F4, Gelombang 1 — 04-09-2026).
+#
+# Satu perintah menjalankan modul tes dengan coverage lalu mencetak laporan
+# (jalankan per-modul seperti biasa — suite penuh 1.900+ tes lambat dgn
+# coverage, jangan dijalankan penuh tanpa alasan):
+#
+#   .venv/bin/python -m coverage run manage.py test web.tests_hardening
+#   .venv/bin/python -m coverage report
+#
+# (atau `coverage html` untuk laporan per-baris di htmlcov/, sudah di .gitignore
+# lewat pola *.html/ htmlcov — tambahkan ke .gitignore bila belum ada.)
+
+[run]
+branch = True
+omit =
+    manage.py
+    */migrations/*
+    */tests.py
+    */tests_*.py
+    .venv/*
+    */.venv/*
+    */site-packages/*
+    truth_auditor/wsgi.py
+    truth_auditor/asgi.py
+
+[report]
+show_missing = True
+skip_empty = True
+precision = 1
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError

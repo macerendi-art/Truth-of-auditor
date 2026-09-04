@@ -226,3 +226,13 @@ class LoggingFormatTests(SimpleTestCase):
         for nama in ("web.penjaga", "core.db_ops"):
             with self.subTest(logger=nama):
                 self.assertTrue(_logging.getLogger(nama).isEnabledFor(_logging.WARNING))
+
+
+# --------------------------------------------------------- F4: coverage ----
+
+class CoverageConfigTests(SimpleTestCase):
+    def test_coveragerc_ada_dan_mengecualikan_migrasi_manage_tests(self):
+        isi = (BASE_DIR / ".coveragerc").read_text(encoding="utf-8")
+        self.assertIn("migrations", isi)
+        self.assertIn("manage.py", isi)
+        self.assertIn("tests_*.py", isi)

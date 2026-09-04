@@ -59,3 +59,10 @@ certifi==2026.7.22
 # sekarang berjalan. Membuangnya = commit terpisah, sesudah migrasi stabil.
 pandas==3.0.5
 numpy==2.4.6
+
+# --- alat pengembangan/CI (F4, Gelombang 1 — 04-09-2026): BUKAN bagian
+# `pip freeze` produksi (header berkas ini) — coverage tak pernah diimpor
+# oleh kode aplikasi, hanya dipakai lewat `coverage run manage.py test`.
+# Dipatok di sini karena tak ada requirements-dev.txt terpisah di repo ini;
+# aman ikut ter-install di produksi (murni pasif tanpa dijalankan).
+coverage==7.16.0
