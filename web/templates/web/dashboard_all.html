@@ -20,32 +20,71 @@
   </div>
 </div>
 
-{% comment %}---- FILTER: tanggal spesifik TERPISAH dari filter bulanan ----{% endcomment %}
-<div class="card reveal" style="margin-bottom:16px">
-  <div class="row" style="flex-wrap:wrap;gap:10px 14px;align-items:flex-end">
-    <form method="get" class="row" style="flex-wrap:wrap;gap:10px 14px;align-items:flex-end;margin:0">
-      <div class="field" style="min-width:140px"><label>Dari <span class="faint" style="font-weight:500">(tgl spesifik)</span></label>
-        <input type="date" name="dari" value="{% if mode_filter and not mode_bulan %}{{ bar_dari|date:'Y-m-d' }}{% endif %}"></div>
-      <div class="field" style="min-width:140px"><label>Sampai</label>
-        <input type="date" name="sampai" value="{% if mode_filter and not mode_bulan %}{{ bar_sampai|date:'Y-m-d' }}{% endif %}"></div>
+{% comment %}---- FILTER: baris 1 tanggal · baris 2 bulan & tahun (terpisah) ----{% endcomment %}
+<style>
+.dash-flt{display:flex;flex-direction:column;gap:14px}
+.dash-flt-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 12px}
+.dash-flt-row form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 12px;margin:0;flex:1 1 auto;min-width:0}
+.dash-flt-row .field{margin-bottom:0;flex:0 0 auto}
+.dash-flt-row .field label{display:block;margin-bottom:4px}
+.dash-flt-row .field input[type=date],
+.dash-flt-row .field select{min-width:158px;width:158px}
+.dash-flt-row .field.select-bulan select{min-width:180px;width:180px}
+.dash-flt-row .btn,
+.dash-flt-row a.btn{margin-bottom:0;flex:0 0 auto}
+.dash-flt-status{margin-left:auto;font-size:12px;color:var(--faint);align-self:center;text-align:right;max-width:320px;line-height:1.4}
+.dash-flt-hint{margin:0;font-size:11.5px;color:var(--faint);line-height:1.45}
+.dash-flt-sep{height:1px;background:var(--line);border:0;margin:0}
+@media (max-width:640px){
+  .dash-flt-row .field input[type=date],
+  .dash-flt-row .field select,
+  .dash-flt-row .field.select-bulan select{width:100%;min-width:0}
+  .dash-flt-row form{flex-direction:column;align-items:stretch;width:100%}
+  .dash-flt-status{margin-left:0;text-align:left;max-width:none}
+}
+</style>
+<div class="card reveal dash-flt" style="margin-bottom:16px">
+  <div class="dash-flt-row">
+    <form method="get">
+      <div class="field">
+        <label>Dari <span class="faint" style="font-weight:500">(tgl spesifik)</span></label>
+        <input type="date" name="dari" value="{% if mode_filter and not mode_bulan %}{{ bar_dari|date:'Y-m-d' }}{% endif %}">
+      </div>
+      <div class="field">
+        <label>Sampai</label>
+        <input type="date" name="sampai" value="{% if mode_filter and not mode_bulan %}{{ bar_sampai|date:'Y-m-d' }}{% endif %}">
+      </div>
       <button class="btn" type="submit">Terapkan tgl</button>
     </form>
-    <span style="width:1px;height:28px;background:var(--line);margin:0 4px"></span>
-    <form method="get" class="row" style="flex-wrap:wrap;gap:10px 14px;align-items:flex-end;margin:0">
-      <div class="field" style="min-width:160px"><label>Bulan <span class="faint" style="font-weight:500">(terpisah)</span></label>
-        <select name="bulan" onchange="this.form.submit()">
+    {% if mode_filter and not mode_bulan %}
+    <a class="btn" href="{% url 'dashboard' %}">Terbaru ↺</a>
+    <span class="dash-flt-status">{{ n_batch }} batch · {{ n_rekon }}/{{ n_toko }} toko · {{ label_periode }}</span>
+    {% endif %}
+  </div>
+
+  <hr class="dash-flt-sep">
+
+  <div class="dash-flt-row">
+    <form method="get">
+      <div class="field select-bulan">
+        <label>Bulan &amp; tahun <span class="faint" style="font-weight:500">(terpisah)</span></label>
+        <select name="bulan">
           <option value="">— pilih bulan —</option>
           {% for m in opsi_bulan %}
           <option value="{{ m|date:'Y-m' }}" {% if sel_bulan == m|date:'Y-m' %}selected{% endif %}>{{ m|date:"M Y" }}</option>
           {% endfor %}
-        </select></div>
-      <noscript><button class="btn primary" type="submit">Terapkan bulan</button></noscript>
+        </select>
+      </div>
+      <button class="btn primary" type="submit">Terapkan bulan</button>
     </form>
-    {% if mode_filter %}<a class="btn" href="{% url 'dashboard' %}">Terbaru ↺</a>{% endif %}
-    <span class="spacer"></span>
-    <span class="faint" style="font-size:12px">{% if mode_bulan %}bulan <b>{{ f_dari|date:"M Y" }}</b> · {{ n_batch }} batch · {{ n_rekon }} dari {{ n_toko }} toko{% elif mode_filter %}menampilkan {{ n_batch }} batch · {{ n_rekon }} dari {{ n_toko }} toko{% else %}tanpa filter — potret rekon terakhir tiap toko{% endif %}</span>
+    {% if mode_bulan %}
+    <a class="btn" href="{% url 'dashboard' %}">Terbaru ↺</a>
+    <span class="dash-flt-status">bulan <b style="color:var(--ink)">{{ f_dari|date:"M Y" }}</b> · {{ n_batch }} batch · {{ n_rekon }}/{{ n_toko }} toko</span>
+    {% elif not mode_filter %}
+    <span class="dash-flt-status">tanpa filter — potret rekon terakhir tiap toko</span>
+    {% endif %}
   </div>
-  <p class="faint" style="margin:8px 0 0;font-size:11.5px;line-height:1.5">Filter <b>bulan</b> terpisah dari tanggal spesifik. Mode multi (Semua / Pusat / Partner) + bulan → tren gabungan + tabel tren per toko.</p>
+  <p class="dash-flt-hint">Baris atas = rentang harian. Baris bawah = satu bulan penuh + tren gabungan &amp; per toko (mode Semua/Pusat/Partner).</p>
 </div>
 
 {% comment %}---- KARTU STATUS GABUNGAN ----{% endcomment %}
