@@ -202,6 +202,9 @@ class SentryOpsionalTests(SimpleTestCase):
         _, kwargs = m.call_args
         self.assertEqual(kwargs["dsn"], "https://abc@example.com/1")
         self.assertFalse(kwargs["send_default_pii"])
+        # M7: send_default_pii=False TIDAK menahan badan request POST (bawaan
+        # "medium") — harus "never" sebelum ada yang mengisi SENTRY_DSN.
+        self.assertEqual(kwargs["max_request_body_size"], "never")
 
     def test_boot_tanpa_env_apa_pun_tetap_sah(self):
         # settings.py memanggil configure_sentry(...) di LEVEL MODUL saat

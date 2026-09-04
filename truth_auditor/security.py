@@ -33,6 +33,11 @@ def configure_sentry(env, debug):
         integrations=[DjangoIntegration()],
         environment=env.get("SENTRY_ENVIRONMENT", "production" if not debug else "development"),
         traces_sample_rate=traces_sample_rate,
-        send_default_pii=False,  # data finansial — jangan kirim body request/user PII ke SaaS pihak ketiga
+        send_default_pii=False,  # data finansial — jangan kirim user PII ke SaaS pihak ketiga
+        # M7 (04-09-2026): `send_default_pii=False` TIDAK menahan badan
+        # request — bawaan `max_request_body_size="medium"` tetap mengirim
+        # body POST (form upload, review, koreksi FR) ke Sentry saat error.
+        # "never" = badan request tak pernah ikut, apa pun ukurannya.
+        max_request_body_size="never",
     )
     return True
