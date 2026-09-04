@@ -71,6 +71,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'core.middleware.ContentSecurityPolicyMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -191,6 +192,13 @@ CSRF_FAILURE_VIEW = 'web.views.csrf_failure'
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# --- Sesi: data finansial, jangan hidup 2 minggu (default Django) ---
+# Aktif di dev DAN produksi (bukan hardening khusus-prod seperti HSTS) —
+# tak ada alasan sesi auditor tetap valid 2 minggu di lingkungan mana pun.
+SESSION_COOKIE_AGE = 8 * 3600          # idle timeout 8 jam...
+SESSION_SAVE_EVERY_REQUEST = True      # ...digeser tiap request (rolling)
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
 # --- Produksi / Railway ---
 CSRF_TRUSTED_ORIGINS = []
 if _railway_host:
@@ -256,6 +264,9 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True').lower() == 'true'
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '0'))
+    # HSTS default 1 tahun di produksi (dulu default '0' = mati total — celah
+    # C1). Tetap bisa ditimpa env; hanya menyala saat DEBUG=False (blok ini),
+    # jadi dev lokal tak pernah terkena redirect HTTPS paksa dari HSTS.
+    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '31536000'))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_HSTS_SECONDS > 0
     SECURE_HSTS_PRELOAD = SECURE_HSTS_SECONDS > 0
