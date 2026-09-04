@@ -40,6 +40,18 @@ def _kunci(baris):
 def bandingkan(baseline, kandidat):
     a = {_kunci(b): b for b in baseline}
     b = {_kunci(b): b for b in kandidat}
+    # Kunci HARUS unik per sisi (satu left_id kredit -> tepat satu baris; satu
+    # right_id no_panel -> tepat satu baris) -- kontrak `match()`: `matched`/
+    # `used` mencegah satu p atau b diproses dua kali. Bila ini pernah gagal,
+    # dict di atas diam-diam menimpa baris lama dgn yang baru dan diff bisa
+    # KURANG melapor (bukan salah lapor) -- gagal SEGERA lebih aman daripada
+    # gerbang yang bisa diam-diam bohong.
+    assert len(a) == len(baseline), (
+        f"kunci tabrakan di baseline: {len(baseline)} baris -> {len(a)} kunci unik"
+    )
+    assert len(b) == len(kandidat), (
+        f"kunci tabrakan di kandidat: {len(kandidat)} baris -> {len(b)} kunci unik"
+    )
     hilang = [a[k] for k in a if k not in b]
     baru = [b[k] for k in b if k not in a]
     berubah = [(a[k], b[k]) for k in a if k in b and a[k] != b[k]]

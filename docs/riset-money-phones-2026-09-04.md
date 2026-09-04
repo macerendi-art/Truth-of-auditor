@@ -81,7 +81,10 @@ Harness ini belum pernah dibangun sebelum sesi ini — dicek `scripts/`,
   alatnya benar-benar mendeteksi, bukan selalu bilang "aman") →
   `identik=15105 hilang=0 baru=0 berubah=895`, tiap baris berubah tercetak
   dengan bucket/reason/score lama vs baru, exit code 1. Skrip sabotase itu
-  file sekali-pakai, sudah dihapus — bukan bagian deliverable.
+  file sekali-pakai, sudah dihapus — bukan bagian deliverable. `bandingkan()`
+  juga menjaga diri sendiri: `assert` bahwa jumlah kunci unik == jumlah baris
+  di tiap berkas, supaya kunci yang (secara teori) bertabrakan gagal KERAS
+  alih-alih diam-diam menimpa satu baris dan membuat diff KURANG melapor.
 - **Tidak mengubah data**: harness memanggil `matcher.sides()` + `matcher.match()`
   LANGSUNG, bukan `reconciliation.engine.run_batch` — tidak ada `ReconBatch`/
   `MatchRun`/`MatchResult` yang PERNAH `.save()`/`bulk_create()`. Dijalankan di
@@ -162,6 +165,12 @@ di-monkeypatch di antara dua pengukuran):
 tidak pernah memanggil `_MoneyMatcher._identity` sama sekali, jadi speedup-nya
 HARUS ≈1,0× kalau alat ukurnya jujur — dan memang begitu.
 
+(Relasi keempat, `fr_bank` — default `--relations` yang tidak muncul di tabel
+ini karena `FR_BANK_ENABLED=False` di produksi — sudah diverifikasi TERPISAH
+bisa berjalan lewat harness ini: lbs, 8.069 baris, dua jalan `sidik_jari.py`
+byte-untuk-byte identik. Disebut di sini supaya default `--relations` di
+`sidik_jari.py` tidak diam-diam berisi kombinasi yang tak pernah dicoba.)
+
 **Kesimpulan jujur**: pada rezim Nexus/mode-ticket, dampak kecepatannya **tidak
 terukur di atas noise** (rentang 0,94×–1,02× pada 7 ulangan). Ini masuk akal:
 mode ticket menyelesaikan mayoritas baris di pass 0/0b (join ticket/reference
@@ -193,6 +202,21 @@ besar per bucket nominal), jadi manfaatnya **secara struktural kecil**, bukan
 sekadar "belum sempat terukur". `_phone_match`/`_money_phones` — yang menurut
 profil CLAUDE.md adalah 10,9 dtk dari 14,8 dtk `kandidat` — SAMA SEKALI tidak
 disentuh patch ini, dan tetap dijalankan identik pada kedua varian.
+
+**Sintetik ini bahkan MURAH HATI ke patch, dan tetap tak menang.** Data sintetik
+mengisi `counterparty` di SEMUA baris panel & gateway (supaya `_name_score`
+punya sesuatu utk dikerjakan bila TIDAK di-skip). CLAUDE.md sendiri mencatat
+insiden produksi 25-08-2026 hanya menghasilkan **231 rb panggilan
+`_name_score`** dari **4.969.497 pasangan** (≈4,6%) — artinya pada MAYORITAS
+pasangan produksi sungguhan, `counterparty` kemungkinan KOSONG di salah satu
+sisi (kondisi `if p.counterparty and b.counterparty` di `_identity` gagal
+duluan, `_name_score` tak pernah dipanggil SAMA SEKALI — dgn ATAU tanpa
+patch). Populasi yang benar-benar bisa diselamatkan patch ini di produksi
+kemungkinan LEBIH KECIL lagi daripada fraksi diagonal 0,33%–1,67% di atas,
+bukan lebih besar. Sintetik di sini karena itu adalah skenario yang
+MENGUNTUNGKAN patch dibanding kondisi produksi sungguhan, dan hasilnya
+tetap masuk noise — argumen tambahan bahwa kesimpulan "manfaat kecil" bukan
+artefak desain sintetik yang tak adil.
 
 ### Rekomendasi
 
