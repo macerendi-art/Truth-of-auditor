@@ -4,7 +4,9 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from sources.models import SourceType, Toko, Upload
@@ -1002,3 +1004,106 @@ class MutasiBankFileUtuhTests(MutasiBankBase):
         r = self.client.get(reverse("bank_mutations"), {"upload": self.up2.id, "flow": "depo"})
         self.assertContains(r, "ROW-DULU")
         self.assertNotContains(r, "ROW-WD-DULU")           # flow filter tetap meng-AND
+
+
+class MutasiBankDupSubqueryPerformaTests(MutasiBankBase):
+    """D1 (2026-09-04): /mutasi-bank/?upload=<id> sempat 46 dtk dingin / 37 dtk
+    panas di produksi (8,8 juta baris). "Tak membaik saat dipanaskan" adalah
+    petunjuk polanya, bukan dinginnya data — dan penyebabnya memang bukan cache:
+    `dup_ids = list(sel_upload.duplicate_transactions.values_list("id", flat=True))`
+    menarik SEMUA id duplikat upload ke Python, lalu qs yang memakainya
+    (`Q(id__in=dup_ids)`) dipakai TIGA kali per render — COUNT paginator, SELECT
+    halaman, DAN SUM fee — sehingga literal `IN (...)` sebesar dup_ids terkirim
+    3x ke Postgres tiap kali halaman dibuka. Ekspor bank rolling/tumpang-tindih
+    membuat dup_ids bisa berukuran puluhan ribu.
+
+    Perbaikan: `id__in` menerima queryset (subquery via
+    `SELECT transaction_id FROM <through> WHERE upload_id=...`), bukan list —
+    id tak pernah keluar dari DB, dan `if dup_ids:` (materialisasi penuh utk
+    tahu ada-tidaknya duplikat) diganti `.exists()` (index probe upload_id,
+    lihat migrasi sources/0009 — index tunggal + composite unique sama-sama
+    berdaun upload_id)."""
+
+    def _seed_rolling(self, n_dup, awalan, up1_name, up2_name):
+        up1 = self._up(self.bank, name=up1_name)
+        up2 = self._up(self.bank, name=up2_name)
+        up2.rows_parsed, up2.rows_duplicate = 1, n_dup
+        up2.save(update_fields=["rows_parsed", "rows_duplicate"])
+        self._tx(up2, self.bank, counterparty=f"{awalan}-BARU",
+                 dt=datetime(2026, 7, 12, 22, 16))
+        dulu = [
+            self._tx(up1, self.bank, counterparty=f"{awalan}-DULU-{i}",
+                     dt=datetime(2026, 7, 12, 0, 10))
+            for i in range(n_dup)
+        ]
+        up2.duplicate_transactions.add(*dulu)
+        return up2
+
+    def test_panjang_sql_tidak_tumbuh_dgn_jumlah_dup(self):
+        """Bukti langsung anti-regresi: SQL terpanjang yang dikirim utk upload
+        ber-1.000 duplicate_transactions HARUS identik panjangnya dgn upload
+        ber-5 duplicate_transactions. Di kode lama (list Python -> literal
+        IN(...)) angka ini tumbuh ~6 byte/id — pada 1.000 dup itu ~6.000 byte
+        ekstra x3 query, jauh melampaui apa pun yg dites di sini."""
+        up_kecil = self._seed_rolling(5, "KECIL", "k1.csv", "k2.csv")
+        up_besar = self._seed_rolling(1000, "BESAR", "b1.csv", "b2.csv")
+
+        with CaptureQueriesContext(connection) as ctx_kecil:
+            r1 = self.client.get(reverse("bank_mutations"), {"upload": up_kecil.id})
+        with CaptureQueriesContext(connection) as ctx_besar:
+            r2 = self.client.get(reverse("bank_mutations"), {"upload": up_besar.id})
+
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r2.status_code, 200)
+        panjang_kecil = max(len(q["sql"]) for q in ctx_kecil.captured_queries)
+        panjang_besar = max(len(q["sql"]) for q in ctx_besar.captured_queries)
+        # Toleransi kecil: id upload/transaksi ber-jumlah-digit beda (mis. 7
+        # vs 12) sedikit menggeser panjang literal "upload_id = <id>" itu
+        # sendiri — bukan pertumbuhan O(n_dup) yg justru sedang dibuktikan
+        # TIDAK terjadi lagi. Regresi ke list Python akan menambah ribuan
+        # byte, jauh melampaui toleransi ini.
+        self.assertLessEqual(abs(panjang_kecil - panjang_besar), 10)
+        # Ambang mutlak sbg jaring kedua: subquery + kolom select_related tetap
+        # ringkas, jauh di bawah apa yg dihasilkan literal IN(...) 1.000 id.
+        self.assertLess(panjang_besar, 4000)
+
+    def test_jumlah_query_konstan_terhadap_dup(self):
+        """18 query: session+auth+allowlist-IP (3), active_toko (1), daftar
+        upload dropdown (1), cover rentang per-upload agregat (1), agregat
+        baris ter-link semua upload (1), exists() dup milik upload terpilih
+        (1), COUNT paginator (1), SELECT halaman (1), identitas Sesama CM
+        toko aktif — nama FR (1) + owner_name upload (1), SUM fee+nominal
+        (1), active_toko dipanggil ulang oleh context processor (1), COUNT
+        MatchResult utk badge lain di base template (1), lalu BEGIN/session
+        UPDATE/COMMIT (3). Angka ini dikunci supaya penambahan query baru di
+        jalur ini terlihat eksplisit, BUKAN diam-diam menaikkan N+1.
+
+        `identitas_cm_toko` (web/sesama_cm.py) di-@lru_cache PER PROSES —
+        dipanggil ulang oleh test lain di modul ini terhadap toko yang sama
+        akan membuat 2 query itu hilang dari hitungan (di-cache), bukan
+        krn perbaikan D1. clear_cm_cache() dulu supaya angka ini stabil
+        berapa pun urutan test dijalankan."""
+        from web.sesama_cm import clear_cm_cache
+        clear_cm_cache()
+        up = self._seed_rolling(300, "N", "n1.csv", "n2.csv")
+        with self.assertNumQueries(18):
+            r = self.client.get(reverse("bank_mutations"), {"upload": up.id})
+        self.assertEqual(r.status_code, 200)
+
+    def test_keluaran_persis_sama_dgn_dup_banyak(self):
+        """Isi baris, urutan kronologis, dan banner 'utuh' tak berubah walau
+        dup_ids kini lewat subquery. N di sini sengaja muat 1 halaman (< 50)
+        supaya tes ini fokus ke KEBENARAN isi, bukan mekanika paginator.
+        Bukti untuk N besar (300/800/1000, termasuk kombinasi filter
+        flow+tanggal dan fallback tanpa-link) sudah diverifikasi manual
+        byte-demi-byte lama vs baru — lihat laporan D1
+        (.superpowers/sdd/prompt-eksekusi-perbaikan-2026-09-04/3a-report.md)."""
+        up = self._seed_rolling(10, "SKALA", "s1.csv", "s2.csv")
+        r = self.client.get(reverse("bank_mutations"), {"upload": up.id})
+        html = r.content.decode()
+        self.assertContains(r, "SKALA-BARU")
+        self.assertContains(r, "SKALA-DULU-0")
+        self.assertContains(r, "SKALA-DULU-9")
+        self.assertContains(r, "utuh")
+        # kronologis: seluruh DULU (dt lebih awal) mendahului BARU (dt lebih akhir)
+        self.assertLess(html.index("SKALA-DULU-0"), html.index("SKALA-BARU"))

@@ -2331,13 +2331,23 @@ def bank_mutations(request):
         # cari di daftar ter-scope src → ganti sumber otomatis mereset pilihan file
         sel_upload = next((u for u in uploads if u.id == int(upload_id)), None)
         if sel_upload:  # id upload toko lain / sumber lain diabaikan (RBAC + konsistensi)
-            dup_ids = list(sel_upload.duplicate_transactions.values_list("id", flat=True))
-            if dup_ids:
+            dup_qs = sel_upload.duplicate_transactions.values_list("id", flat=True)
+            if dup_qs.exists():
                 # ISI FILE UTUH: baris milik file + baris yang di-skip dedup
                 # (tercatat di upload terdahulu). Urut waktu — posisi asli baris
                 # duplikat di file tak tersimpan, dan ekspor bank kronologis.
-                # id__in list terbatas (≤ isi file), BUKAN OR lintas-join.
-                qs = qs.filter(Q(upload=sel_upload) | Q(id__in=dup_ids)).order_by(
+                # SUBQUERY, BUKAN list Python (D1 — 46 dtk dingin, TAK membaik
+                # panas): ekspor bank rolling bisa punya puluhan ribu
+                # duplicate_transactions per upload. `list(...)` lama menarik
+                # semua id ke Python lalu mengirimnya balik sbg literal
+                # IN (...) raksasa — dan qs yang sama dipakai count paginator,
+                # SELECT halaman, DAN agregat fee, jadi literal itu terkirim
+                # 3x per render. id__in atas queryset (bukan list) dikompilasi
+                # jadi IN (SELECT transaction_id FROM through WHERE upload_id=
+                # sel_upload.id) — id tak pernah keluar dari DB, indeks
+                # upload_id pada tabel through (lihat migrasi 0009) yang
+                # menjawabnya, ukurannya tetap sama berapa pun dup_qs.
+                qs = qs.filter(Q(upload=sel_upload) | Q(id__in=dup_qs)).order_by(
                     "occurred_at", "id"
                 )
             else:
