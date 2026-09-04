@@ -69,7 +69,7 @@ Yang perlu diketahui sebelum menekan tombol:
 - **Semua pengguna akan logout.** Sesi lama ditandatangani kunci lama dan menjadi tidak sah.
 - **Tautan reset sandi yang belum dipakai akan mati.** Kalau ada yang sedang menunggu, minta mereka
   meminta ulang setelah rotasi.
-- `truth_auditor/security.py` membuat `SECRET_KEY` tanpa env **gagal-keras saat boot** ketika
+- `truth_auditor/settings.py` (guard di bagian atas berkas, dipin `core/tests_settings_guard.py`; BUKAN `security.py`, yang hanya berisi `configure_sentry`) membuat `SECRET_KEY` tanpa env **gagal-keras saat boot** ketika
   `DEBUG=False`. Itu perilaku yang benar — tapi artinya salah ketik pada nilai barunya akan
   menahan port tertutup, bukan menghasilkan halaman error. Tempel dengan hati-hati.
 
@@ -143,6 +143,6 @@ Periksa juga:
 ## Yang belum pernah diuji
 
 Prosedur ini **belum pernah dijalankan di produksi**. Langkah 1, 3, dan 4 diturunkan dari perilaku
-yang sudah diverifikasi (`security.py` gagal-keras, skrip cadangan membaca `.pgpass`, berkas status
+yang sudah diverifikasi (guard `SECRET_KEY` di `settings.py` gagal-keras, skrip cadangan membaca `.pgpass`, berkas status
 menulis `verdict`/`terakhir_ok`). Langkah 2 bergantung pada bentuk dashboard Railway saat kamu
 menjalankannya, dan itu di luar kendali dokumen ini.
