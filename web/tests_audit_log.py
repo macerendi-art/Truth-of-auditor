@@ -163,6 +163,36 @@ class KelolaLogPageTests(TestCase):
         self.assertNotContains(r, reverse("kelola_log"))
 
 
+class AksiLabelAutentikasiTests(TestCase):
+    """`AKSI_LABELS` (web/templatetags/web_extras.py) harus mengenal ketiga kode
+    aksi autentikasi yang ditulis `web/signals.py` (C6): `login`/`logout`/
+    `login_gagal`. Tanpa entri di dict, filter `aksi_label` jatuh ke fallback
+    "kode apa adanya" dan halaman /kelola/log/ menampilkan kode mentah alih-
+    alih label rapih — inilah yang diuji di sini, langsung lewat filter DAN
+    lewat rendering halaman sungguhan."""
+
+    def test_filter_aksi_label_mengenal_ketiga_kode(self):
+        from web.templatetags.web_extras import aksi_label, aksi_tone
+
+        self.assertEqual(aksi_label("login"), "Login")
+        self.assertEqual(aksi_label("logout"), "Logout")
+        self.assertEqual(aksi_label("login_gagal"), "Login gagal")
+        # login_gagal harus beda nada dari login sukses — bukan cuma beda label.
+        self.assertNotEqual(aksi_tone("login"), aksi_tone("login_gagal"))
+
+    def test_halaman_kelola_log_tampilkan_label_bukan_kode_mentah(self):
+        adm = User.objects.create_user("admlbl", password="Adm-Kuat#88", role="admin")
+        catat(adm, "login", "admlbl")
+        catat(None, "login_gagal", "siapa")
+        catat(adm, "logout", "admlbl")
+        self.client.login(username="admlbl", password="Adm-Kuat#88")
+        r = self.client.get(reverse("kelola_log"))
+        self.assertContains(r, "Login gagal")
+        self.assertContains(r, "Logout")
+        # "Login" bisa jadi substring "Login gagal", jadi diperiksa lewat badge utuh.
+        self.assertContains(r, ">Login<")
+
+
 class IPUserAgentTests(TestCase):
     """C5: `catat(request=...)` merekam IP klien + user-agent di kolom asli
     (bukan `detail`) memakai ULANG resolver anti-spoof `web.middleware`

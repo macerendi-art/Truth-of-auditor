@@ -76,6 +76,10 @@ def alasan_review_label(code):
 # Peta kode aksi AuditLog → (label rapih, nada badge). Kode lama tetap di sini
 # supaya baris historis tetap terbaca.
 AKSI_LABELS = {
+    # autentikasi (C6, web/signals.py catat_login/catat_logout/catat_login_gagal)
+    "login":               ("Login",                 "ok"),
+    "logout":              ("Logout",                "src"),
+    "login_gagal":         ("Login gagal",           "warn"),
     # alur rekonsiliasi
     "reconcile":           ("Jalankan rekonsiliasi", "ok"),
     "review":              ("Review hasil",          "src"),
