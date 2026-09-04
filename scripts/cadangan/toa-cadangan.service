@@ -11,4 +11,11 @@ Group=toa
 ExecStart=/home/toa/cadangan/backup-harian.sh
 # Timeout longgar: dump 1,4 GB terukur ±12 menit (gladi 2026-09-01); produksi
 # terus tumbuh, beri ruang jauh di atas itu sebelum systemd membunuhnya.
-TimeoutStartSec=3600
+# Dinaikkan 3600 -> 14400 pada 04-09-2026. Jalan pukul 17:14 (jam sepi) selesai 13m36d;
+# jalan pukul 21:14 (jam sibuk operator) MENEMBUS satu jam dan dibunuh SIGTERM di tengah,
+# meninggalkan direktori dump yang rusak dan status.json yang masih mengaku "OK".
+# Jadwal normalnya 03:00 memang sepi, tapi batas 1 jam terlalu rapat untuk (a) jalan manual
+# kapan saja, (b) hari dengan produksi sibuk, dan (c) dump yang terus tumbuh (~500 rb
+# baris/hari). Batas ini tetap ADA supaya jalan yang benar-benar menggantung tidak abadi --
+# hanya saja tidak lagi memotong jalan yang sah.
+TimeoutStartSec=14400

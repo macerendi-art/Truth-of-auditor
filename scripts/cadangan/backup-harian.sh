@@ -122,6 +122,13 @@ gagal() {
   exit 1
 }
 
+# Tanpa trap ini, dibunuhnya skrip (systemd TimeoutStartSec, reboot, `systemctl stop`)
+# membuat baris `tulis_status` di bawah TIDAK PERNAH tercapai -- sehingga status.json
+# tetap memuat verdict "OK" dari jalan SEBELUMNYA dan pemantauan melaporkan cadangan
+# sehat padahal barusan gagal. Terjadi sungguhan 04-09-2026: jalan 21:14 kena
+# TimeoutStartSec 1 jam, dibunuh SIGTERM, dan status.json masih mengaku OK sejak 17:28.
+trap 'gagal "dihentikan sinyal (SIGTERM/SIGINT) -- kemungkinan TimeoutStartSec systemd terlampaui, atau mesin dimatikan"' TERM INT
+
 [ -r "$PROD_URL_FILE" ] || gagal "berkas $PROD_URL_FILE tidak terbaca"
 PROD_URL="$(cat "$PROD_URL_FILE")"
 

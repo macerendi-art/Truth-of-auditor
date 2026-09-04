@@ -1,6 +1,12 @@
 [Unit]
-Description=Alarm kegagalan cadangan toa (dicatat ke journal prioritas err)
+Description=Alarm kegagalan cadangan toa (lewat kirim-alarm.sh, TITIK TUNGGAL)
+# Diperbaiki 04-09-2026. Versi lama memanggil `logger -p user.err` POLOS -- tanpa tag,
+# sebagai root, dan MELEWATI kirim-alarm.sh. Akibatnya: saat cadangan harian gagal,
+# webhook/email yang dipasang pemilik TIDAK PERNAH berbunyi, dan pesannya mendarat di
+# journal bertag `root` yang tak ada yang memantau. Terbukti 04-09-2026 pukul 22:14 --
+# unit ini benar-benar jalan setelah cadangan kena TimeoutStartSec, tapi tak satu pun
+# baris `toa-alarm` muncul. Unit probe sudah benar sejak awal; unit inilah yang menyimpang.
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'logger -p user.err "cadangan toa GAGAL -- cek: journalctl -u toa-cadangan.service -n 100  |  cat /home/toa/cadangan/status.json"'
+ExecStart=/home/toa/pemantauan/kirim-alarm.sh "CADANGAN toa GAGAL -- cek: journalctl -u toa-cadangan.service -n 100  |  cat /home/toa/cadangan/status.json"
