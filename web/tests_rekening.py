@@ -472,3 +472,85 @@ class RekeningViewTests(_MoneyData):
         self.assertEqual(data["count"], 0)  # 1 hari di tahun 9999: kosong
         data = rekening_breakdown(self.toko, date(2026, 6, 28), date(9999, 12, 31))
         self.assertEqual(data["count"], 1)
+
+
+class LatestBadgeTests(_MoneyData):
+    """D6 — `web/views.py::rekening_breakdown` (VIEW, bukan modul di berkas
+    ini): badge "data terbaru s/d tanggal X" kini memakai `Max("occurred_at")`
+    lalu `.date()` di PYTHON, bukan `Max("occurred_at__date")` — `__date`
+    membungkus kolomnya (`(occurred_at)::date` di Postgres) sehingga bagian
+    tanggal index `tx_toko_src_occurred_idx` mati, persis jebakan yang
+    dicatat `transactions/models.py` dan yang modul `rekening_breakdown` di
+    berkas ini sendiri hindari lewat rentang datetime setengah-terbuka
+    (`test_batas_tengah_malam_ikut_terhitung` di atas). `.date()` monoton
+    tak-turun jadi hasilnya WAJIB identik dgn cara lama — dibuktikan di sini
+    lewat data sungguhan pada batas tengah malam, bukan cuma argumen.
+    Lihat docs/riset-toko-pasif-2026-09-04.md (D6) — manfaat KECEPATANNYA
+    belum diverifikasi lewat EXPLAIN Postgres produksi; ini memperbaiki
+    KONSISTENSI pola, bukan menjanjikan percepatan terukur."""
+
+    def setUp(self):
+        super().setUp()
+        User = get_user_model()
+        User.objects.create_user("audlatest", "b@b.co", "pw12345", role="supervisor")
+        self.client.login(username="audlatest", password="pw12345")
+        self.client.post(reverse("set_toko"), {"toko_id": self.toko.id})
+
+    def test_batas_tengah_malam_latest_ikut_maju(self):
+        """Baris tepat 23:59:59 vs baris 00:00:00 keesokan harinya — badge
+        `latest` (muncul di state KOSONG, `web/rekening.html` baris 29, sbg
+        pranala "Lihat tanggal terakhir yang ada datanya →") harus maju begitu
+        baris yang lebih baru (walau cuma selisih 1 detik, melewati batas
+        hari) benar-benar ada. Rentang yang DIMINTA sengaja dibuat KOSONG
+        (01 Jul) supaya badge-nya yang terlihat, bukan tabel isi."""
+        kosong = {"dari": "2026-07-01", "sampai": "2026-07-01"}
+        self.mv(self.bank, "BCA", "HENDI", "500000", None,
+                jam=23, menit=59, detik=59, tanggal=date(2026, 6, 28))
+        r = self.client.get(reverse("rekening_breakdown"), kosong)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("28 Jun 2026", r.content.decode())
+
+        # satu baris lagi tepat tengah malam keesokan harinya — latest wajib maju.
+        self.mv(self.gw, "NXPAY", "-", "10000", None,
+                jam=0, menit=0, detik=0, tanggal=date(2026, 6, 29))
+        r = self.client.get(reverse("rekening_breakdown"), kosong)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("29 Jun 2026", r.content.decode())
+        self.assertNotIn("28 Jun 2026", r.content.decode())
+
+    def test_keluaran_lama_vs_baru_identik(self):
+        """Bandingkan langsung `Max("occurred_at__date")` (lama) vs
+        `Max("occurred_at").date()` (baru, dipakai view sekarang) pada data
+        SAMA — USE_TZ=False jadi keduanya wajib setara persis, termasuk pada
+        batas tengah malam."""
+        from django.db.models import Max
+
+        self.mv(self.bank, "BCA", "HENDI", "500000", None,
+                jam=23, menit=59, detik=59, tanggal=date(2026, 6, 28))
+        self.mv(self.gw, "NXPAY", "-", "10000", None,
+                jam=0, menit=0, detik=0, tanggal=date(2026, 6, 29))
+        self.mv(self.bank, "BRI", "PANCA", "700000", None,
+                jam=12, tanggal=date(2026, 6, 20))  # baris lama, tak boleh menang
+
+        qs = Transaction.objects.filter(
+            toko=self.toko, source_type__key__in=("bank", "gateway")
+        )
+        lama = qs.aggregate(m=Max("occurred_at__date"))["m"]
+        baru_dt = qs.aggregate(m=Max("occurred_at"))["m"]
+        baru = baru_dt.date() if baru_dt else None
+        self.assertEqual(lama, baru)
+        self.assertEqual(baru, date(2026, 6, 29))
+
+    def test_tanpa_baris_latest_none_di_kedua_cara(self):
+        """Toko tanpa baris bank/gateway sama sekali — `latest` tetap `None`
+        (bukan melempar `AttributeError` saat `.date()` dipanggil di `None`)."""
+        from django.db.models import Max
+
+        qs = Transaction.objects.filter(
+            toko=self.toko, source_type__key__in=("bank", "gateway")
+        )
+        lama = qs.aggregate(m=Max("occurred_at__date"))["m"]
+        baru_dt = qs.aggregate(m=Max("occurred_at"))["m"]
+        baru = baru_dt.date() if baru_dt else None
+        self.assertIsNone(lama)
+        self.assertIsNone(baru)

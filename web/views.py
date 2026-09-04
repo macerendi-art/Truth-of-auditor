@@ -2992,9 +2992,20 @@ def rekening_breakdown(request):
     active = _active_toko(request)
     if active is None:
         return render(request, "web/no_toko.html")
-    latest = Transaction.objects.filter(
+    # `Max("occurred_at")` lalu `.date()` di Python, BUKAN `Max("occurred_at__date")`:
+    # `__date` membungkus kolomnya (`(occurred_at)::date` di Postgres) sehingga bagian
+    # tanggal index `tx_toko_src_occurred_idx` (toko, source_type, occurred_at) mati —
+    # persis jebakan yang dicatat di transactions/models.py dan yang `web/rekening.py`
+    # sendiri hindari lewat rentang datetime setengah-terbuka. Setara persis karena
+    # USE_TZ=False dan `.date()` monoton tak-turun: elemen yang mencapai max(occurred_at)
+    # juga mencapai max(occurred_at.date()) — lihat docs/riset-toko-pasif-2026-09-04.md
+    # (D6) utk pembuktian & CATATAN JUJUR: manfaat kecepatannya BELUM diverifikasi lewat
+    # EXPLAIN Postgres produksi (query ini tetap melewati JOIN sources_sourcetype) —
+    # perbaikan ini dilandasi konsistensi pola repo, bukan janji percepatan terukur.
+    latest_dt = Transaction.objects.filter(
         toko=active, source_type__key__in=("bank", "gateway")
-    ).aggregate(m=Max("occurred_at__date"))["m"]
+    ).aggregate(m=Max("occurred_at"))["m"]
+    latest = latest_dt.date() if latest_dt else None
     lama = _parse_date(request.GET.get("date", ""))  # ?date= lama = rentang 1 hari
     sampai = _parse_date(request.GET.get("sampai", "")) or lama or latest or date_cls.today()
     dari = _parse_date(request.GET.get("dari", "")) or lama or sampai
