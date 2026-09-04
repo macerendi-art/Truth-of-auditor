@@ -10,7 +10,8 @@ perbedaan itu merah di lokal, jauh sebelum produksi.
 from io import StringIO
 
 from django.core.management import call_command
-from django.test import SimpleTestCase
+from django.db import connection
+from django.test import SimpleTestCase, TestCase
 
 from transactions.models import Transaction
 
@@ -31,6 +32,50 @@ class IndexKomposisiTests(SimpleTestCase):
                 "tx_toko_src_occurred_idx": ["toko", "source_type", "occurred_at"],
             },
         )
+
+
+class IndexUsernameReferenceDibuangTests(TestCase):
+    """G5 (04-09-2026): `username`/`reference` TANPA index — 719 MB dibuang.
+
+    Satu-satunya pemakaian dua kolom ini sebagai KUERI di seluruh basis kode
+    adalah `icontains` (`web/views.py::transactions`, `search_fields` di
+    `transactions/admin.py` tanpa awalan `^`), yang tak pernah dilayani btree
+    biasa maupun `_like`. `reconciliation/engine.py` memakainya sebagai kunci
+    JOIN tapi selalu di atas list Python yang sudah dimuat (`sides()`), tak
+    pernah lewat `.filter(username=...)`/`.filter(reference=...)` queryset.
+    Lihat migrasi 0011 untuk penyisiran lengkapnya.
+
+    Tes ini gagal SEBELUM migrasi 0011 (index masih ada di skema) dan lulus
+    SESUDAHNYA — bukan cuma memeriksa `Meta`, tapi skema DB NYATA lewat
+    introspeksi, supaya migrasi yang lupa dijalankan/lupa ditulis juga
+    tertangkap (`MigrasiTertinggalTests` di bawah menjaga sisi migrasinya).
+    """
+
+    def _kolom_terindeks(self, kolom):
+        """{indeks yang HANYA menyentuh satu `kolom`} dari skema DB nyata."""
+        with connection.cursor() as cursor:
+            constraints = connection.introspection.get_constraints(
+                cursor, Transaction._meta.db_table
+            )
+        return {
+            nama for nama, info in constraints.items()
+            if info.get("index") and info.get("columns") == [kolom]
+        }
+
+    def test_username_tidak_lagi_berindeks_di_skema(self):
+        self.assertEqual(self._kolom_terindeks("username"), set())
+
+    def test_reference_tidak_lagi_berindeks_di_skema(self):
+        self.assertEqual(self._kolom_terindeks("reference"), set())
+
+    def test_field_db_index_false(self):
+        self.assertFalse(Transaction._meta.get_field("username").db_index)
+        self.assertFalse(Transaction._meta.get_field("reference").db_index)
+
+    def test_ticket_no_tetap_berindeks(self):
+        """Guard: migrasi ini TIDAK boleh ikut membuang index `ticket_no`."""
+        self.assertTrue(Transaction._meta.get_field("ticket_no").db_index)
+        self.assertNotEqual(self._kolom_terindeks("ticket_no"), set())
 
 
 class MigrasiTertinggalTests(SimpleTestCase):

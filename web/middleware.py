@@ -139,6 +139,25 @@ def _real_client_ip(request, via_cf):
     return _client_ip(request)
 
 
+def resolve_client_ip(request):
+    """IP klien "nyata" untuk `request` — SATU-SATUNYA definisi "IP klien"
+    dipakai ulang di sini (bukan diduplikasi): peer via XFF paling kiri
+    (`_client_ip`), lalu `CF-Connecting-IP` bila peer terbukti edge Cloudflare
+    (`_via_cloudflare` + `_real_client_ip`) — identik dengan yang dipakai
+    GeoBlockMiddleware/IPAllowlistMiddleware untuk memutuskan blokir.
+
+    Dipakai `core.audit.catat()` (impor LOKAL di sana, hindari siklus impor —
+    modul ini mengimpor `core.audit.catat`) untuk merekam IP di AuditLog.
+    Kembalikan string kosong bila peer tak terbaca sama sekali (bukan None,
+    supaya pemanggil bisa langsung `or None` tanpa cek tambahan).
+    """
+    peer = _client_ip(request)
+    if not peer:
+        return ""
+    via_cf = _via_cloudflare(peer)
+    return _real_client_ip(request, via_cf)
+
+
 class GeoBlockMiddleware:
     """Kunci wilayah: saat menyala, hanya IP dari negara di
     GEO_BLOCK_COUNTRIES yang boleh mengakses app; sisanya dapat 403 halaman
@@ -315,7 +334,7 @@ class IPAllowlistMiddleware:
         # dua kali), tiap IP baru dicatat sebagai baris audit sendiri, bukan
         # dibungkam gara-gara "sudah pernah log sekali di sesi ini".
         if request.session.get(_SESSION_FLAG) != ip[:45]:
-            catat(user, "ip_blokir", ip)
+            catat(user, "ip_blokir", ip, request=request)
             # [:45] = panjang maks representasi IPv6 — jangan simpan header
             # X-Forwarded-For mentah sepanjang apa pun ke baris sesi.
             request.session[_SESSION_FLAG] = ip[:45]

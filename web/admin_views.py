@@ -107,6 +107,7 @@ def kelola_toko(request):
                 request.user, "buat_toko", t.name, toko=t,
                 panel=PANEL_LABELS[panel],
                 kepemilikan=KEPEMILIKAN_LABELS[kepemilikan],
+                request=request,
             )
             messages.success(request, f"Toko {kode.upper()} ditambahkan.")
         return redirect("kelola_toko")
@@ -119,7 +120,7 @@ def kelola_toko(request):
         t.is_active = not t.is_active
         t.save(update_fields=["is_active"])
         catat(request.user, "aktifkan_toko" if t.is_active else "nonaktifkan_toko",
-              t.name, toko=t)
+              t.name, toko=t, request=request)
         messages.success(request, f"Toko {t.name} {'diaktifkan' if t.is_active else 'dinonaktifkan'}.")
         return redirect("kelola_toko")
     if request.method == "POST" and request.POST.get("action") == "rename":
@@ -137,7 +138,7 @@ def kelola_toko(request):
             t.name = nama_baru
             t.save(update_fields=["name"])
             catat(request.user, "ubah_nama_toko", f"{nama_lama} → {nama_baru}",
-                  toko=t, nama_lama=nama_lama, nama_baru=nama_baru)
+                  toko=t, nama_lama=nama_lama, nama_baru=nama_baru, request=request)
             messages.success(request, f"Nama toko {nama_lama} diganti menjadi {nama_baru}.")
         return redirect("kelola_toko")
     if request.method == "POST" and request.POST.get("action") == "panel":
@@ -155,7 +156,7 @@ def kelola_toko(request):
             t.panel = panel_baru
             t.save(update_fields=["panel"])
             catat(request.user, "ubah_panel_toko",
-                  f"{t.name}: {PANEL_LABELS[panel_lama]} → {PANEL_LABELS[panel_baru]}", toko=t)
+                  f"{t.name}: {PANEL_LABELS[panel_lama]} → {PANEL_LABELS[panel_baru]}", toko=t, request=request)
             messages.success(
                 request, f"Panel toko {t.name} diganti menjadi {PANEL_LABELS[panel_baru]}.")
         return redirect("kelola_toko")
@@ -177,6 +178,7 @@ def kelola_toko(request):
                 request.user, "ubah_kepemilikan_toko",
                 f"{t.name}: {KEPEMILIKAN_LABELS[kep_lama]} → {KEPEMILIKAN_LABELS[kep_baru]}",
                 toko=t,
+                request=request,
             )
             messages.success(
                 request,
@@ -284,7 +286,7 @@ def kelola_user(request):
             )
             if role == "auditor":
                 u.allowed_tokos.set(Toko.objects.filter(id__in=toko_ids, is_active=True))
-            catat(request.user, "buat_user", username, role=role)
+            catat(request.user, "buat_user", username, role=role, request=request)
             messages.success(request, f"User {username} ({role}) dibuat.")
         return redirect("kelola_user")
     users = User.objects.prefetch_related("allowed_tokos").order_by("username")
@@ -319,7 +321,7 @@ def kelola_user_edit(request, pk):
             target.allowed_tokos.set(
                 Toko.objects.filter(id__in=toko_ids, is_active=True) if role == "auditor" else []
             )
-            catat(request.user, "ubah_user", target.username, role=role)
+            catat(request.user, "ubah_user", target.username, role=role, request=request)
             messages.success(request, f"User {target.username} diperbarui.")
             return redirect("kelola_user")
     elif action == "reset_password":
@@ -335,7 +337,7 @@ def kelola_user_edit(request, pk):
             target.save()
             if target == request.user:
                 update_session_auth_hash(request, target)
-            catat(request.user, "reset_password", target.username)
+            catat(request.user, "reset_password", target.username, request=request)
             messages.success(request, f"Password {target.username} di-reset.")
             return redirect("kelola_user")
     elif action == "toggle":
@@ -346,7 +348,7 @@ def kelola_user_edit(request, pk):
             target.save(update_fields=["is_active"])
             catat(request.user,
                   "aktifkan_user" if target.is_active else "nonaktifkan_user",
-                  target.username)
+                  target.username, request=request)
             messages.success(
                 request,
                 f"User {target.username} {'diaktifkan' if target.is_active else 'dinonaktifkan'}.",
@@ -424,7 +426,7 @@ def delete_upload(request, pk):
         if up.file:
             up.file.delete(save=False)
         up.delete()
-        catat(request.user, "hapus_upload", name, toko=toko, upload_pk=pk, n_tx=n_tx)
+        catat(request.user, "hapus_upload", name, toko=toko, upload_pk=pk, n_tx=n_tx, request=request)
         messages.success(request, f"{name} dihapus — {n_tx} transaksi ikut terhapus.")
     return redirect("upload")
 
@@ -455,7 +457,7 @@ def bulk_delete_uploads(request):
         if n_file:
             catat(request.user, "hapus_upload_massal", f"{n_file} file",
                   toko=active, n_file=n_file, n_tx=n_tx,
-                  files=", ".join(terhapus)[:1000])
+                  files=", ".join(terhapus)[:1000], request=request)
             messages.success(request, f"{n_file} file dihapus — {n_tx} transaksi ikut terhapus.")
         if dilewati:
             messages.error(
@@ -508,7 +510,7 @@ def delete_batch(request, pk):
               batch_pk=pk, n_runs=n_runs, recon_date=recon_date,
               cocok=buckets.get("cocok"), tinjau=buckets.get("perlu_tinjau"),
               tidak_cocok=buckets.get("tidak_cocok"),
-              n_review=n_review + n_override)
+              n_review=n_review + n_override, request=request)
         msg = f"Batch #{no} dihapus — {n_runs} run ikut terhapus. Transaksi tetap utuh."
         if n_reverted:
             msg += f" {n_reverted} settle terlambat dikembalikan ke tidak cocok."
@@ -560,6 +562,7 @@ def bulk_delete_batches(request):
                 toko=active, n_batch=n_batch, n_runs=n_runs,
                 n_review=n_review_hilang,
                 batches=", ".join(labels)[:1000],
+                request=request,
             )
             msg = (
                 f"{n_batch} batch dihapus — {n_runs} run ikut terhapus. "
@@ -601,7 +604,7 @@ def delete_toko(request, pk):
             Upload.objects.filter(toko=t).delete()
             Transaction.objects.filter(toko=t).delete()
             t.delete()
-        catat(request.user, "hapus_toko", name, n_tx=n_tx, n_up=n_up, n_batch=n_batch)
+        catat(request.user, "hapus_toko", name, n_tx=n_tx, n_up=n_up, n_batch=n_batch, request=request)
         messages.success(
             request,
             f"Toko {name} dihapus permanen — {n_tx} transaksi, {n_up} upload, {n_batch} batch ikut terhapus.",
@@ -619,7 +622,7 @@ def delete_user(request, pk):
         else:
             username = target.username
             target.delete()
-            catat(request.user, "hapus_user", username)
+            catat(request.user, "hapus_user", username, request=request)
             messages.success(request, f"Pengguna {username} dihapus permanen.")
     return redirect("kelola_user")
 
@@ -661,7 +664,7 @@ def kelola_ip(request):
                         )
                     else:
                         entri = AllowedIP.objects.create(label=label, cidr=cidr, dibuat_oleh=request.user)
-                        catat(request.user, "buat_ip_allow", entri.label, label=label, cidr=cidr)
+                        catat(request.user, "buat_ip_allow", entri.label, label=label, cidr=cidr, request=request)
                         messages.success(request, f"IP {cidr} ({label}) ditambahkan ke allowlist.")
         return redirect("kelola_ip")
     if request.method == "POST" and request.POST.get("action") == "toggle":
@@ -673,7 +676,7 @@ def kelola_ip(request):
         entri.aktif = not entri.aktif
         entri.save(update_fields=["aktif"])
         catat(request.user, "toggle_ip_allow", entri.label, label=entri.label, cidr=entri.cidr,
-              aktif=entri.aktif)
+              aktif=entri.aktif, request=request)
         messages.success(
             request, f"IP {entri.cidr} ({entri.label}) {'diaktifkan' if entri.aktif else 'dinonaktifkan'}.")
         return redirect("kelola_ip")
@@ -685,7 +688,7 @@ def kelola_ip(request):
         entri = get_object_or_404(AllowedIP, pk=eid)
         label, cidr = entri.label, entri.cidr
         entri.delete()
-        catat(request.user, "hapus_ip_allow", label, label=label, cidr=cidr)
+        catat(request.user, "hapus_ip_allow", label, label=label, cidr=cidr, request=request)
         messages.success(request, f"IP {cidr} ({label}) dihapus dari allowlist.")
         return redirect("kelola_ip")
     entries = AllowedIP.objects.select_related("dibuat_oleh").order_by("-aktif", "label")

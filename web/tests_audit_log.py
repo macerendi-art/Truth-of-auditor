@@ -1,6 +1,6 @@
 """Log Audit admin: snapshot username, pencatatan aksi kelola, halaman /kelola/log/."""
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
 from core.audit import catat
@@ -161,3 +161,62 @@ class KelolaLogPageTests(TestCase):
         self.client.login(username="spv", password="Spv-Kuat#88")
         r = self.client.get(reverse("dashboard"))
         self.assertNotContains(r, reverse("kelola_log"))
+
+
+class IPUserAgentTests(TestCase):
+    """C5: `catat(request=...)` merekam IP klien + user-agent di kolom asli
+    (bukan `detail`) memakai ULANG resolver anti-spoof `web.middleware`
+    (`_client_ip` → XFF paling kiri → `_via_cloudflare` → `_real_client_ip`)."""
+
+    def setUp(self):
+        self.adm = User.objects.create_user("admip", password="Adm-Kuat#88", role="admin")
+
+    def test_catat_tanpa_request_tetap_bekerja(self):
+        """Kompatibilitas mundur — 48 titik panggil lama tanpa `request` tak boleh pecah."""
+        catat(self.adm, "buat_user", "tanpa_request")
+        log = AuditLog.objects.filter(aksi="buat_user", objek="tanpa_request").latest("id")
+        self.assertIsNone(log.ip)
+        self.assertEqual(log.user_agent, "")
+
+    def test_catat_dengan_request_merekam_ip_dan_user_agent(self):
+        req = RequestFactory().post(
+            "/", REMOTE_ADDR="198.51.100.9", HTTP_USER_AGENT="pytest-agent/1.0",
+        )
+        catat(self.adm, "buat_user", "dengan_request", request=req)
+        log = AuditLog.objects.filter(aksi="buat_user", objek="dengan_request").latest("id")
+        self.assertEqual(log.ip, "198.51.100.9")
+        self.assertEqual(log.user_agent, "pytest-agent/1.0")
+
+    def test_xff_paling_kiri_dipakai_bukan_remote_addr(self):
+        # Sama seperti GeoBlockMiddleware/IPAllowlistMiddleware: XFF disanitasi
+        # Railway → elemen PALING KIRI = peer asli, bukan REMOTE_ADDR (hop
+        # internal) atau elemen kanan XFF.
+        req = RequestFactory().post(
+            "/", REMOTE_ADDR="10.0.0.5",
+            HTTP_X_FORWARDED_FOR="203.0.113.55, 10.0.0.5",
+        )
+        catat(self.adm, "buat_user", "via_xff", request=req)
+        log = AuditLog.objects.filter(aksi="buat_user", objek="via_xff").latest("id")
+        self.assertEqual(log.ip, "203.0.113.55")
+
+    def test_ip_tercatat_untuk_aksi_nyata_lewat_test_client(self):
+        """Definisi selesai C5: IP tercatat untuk satu aksi nyata lewat test client."""
+        self.client.login(username="admip", password="Adm-Kuat#88")
+        self.client.post(
+            reverse("ganti_password"),
+            {
+                "old_password": "Adm-Kuat#88",
+                "new_password1": "Adm-Baru#99", "new_password2": "Adm-Baru#99",
+            },
+            REMOTE_ADDR="203.0.113.7", HTTP_USER_AGENT="pytest-client/1.0",
+        )
+        log = AuditLog.objects.filter(aksi="ganti_password").latest("id")
+        self.assertEqual(log.ip, "203.0.113.7")
+        self.assertEqual(log.user_agent, "pytest-client/1.0")
+
+    def test_kolom_ip_tampil_di_halaman_kelola_log(self):
+        req = RequestFactory().post("/", REMOTE_ADDR="198.51.100.42")
+        catat(self.adm, "buat_user", "punya_ip", request=req)
+        self.client.login(username="admip", password="Adm-Kuat#88")
+        r = self.client.get(reverse("kelola_log"))
+        self.assertContains(r, "198.51.100.42")

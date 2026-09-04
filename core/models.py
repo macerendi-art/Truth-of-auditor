@@ -32,6 +32,11 @@ class AuditLog(TimeStampedModel):
     aksi = models.CharField(max_length=40)
     objek = models.CharField(max_length=200, blank=True)
     detail = models.JSONField(default=dict, blank=True)
+    # C5: IP klien + user-agent, kolom asli (bukan di dalam `detail`) supaya
+    # bisa di-index/difilter. Diisi hanya bila `catat()` menerima `request`
+    # (mis. dipanggil dari CLI tanpa request → tetap None, bukan error).
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         ordering = ["-id"]

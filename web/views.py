@@ -241,7 +241,7 @@ def ganti_password(request):
             user.must_change_password = False
             user.save(update_fields=["must_change_password"])
             update_session_auth_hash(request, user)  # jaga sesi, jangan ter-logout
-            catat(user, "ganti_password", user.username)
+            catat(user, "ganti_password", user.username, request=request)
             messages.success(request, "Password berhasil diganti. Selamat bekerja!")
             return redirect("dashboard")
     else:
@@ -1573,7 +1573,7 @@ def reconcile(request):
         batches, skipped = res["batches"], res["skipped_existing"]
         for b in batches:
             no = ReconBatch.objects.filter(toko=active, id__lte=b.id).count()
-            catat(request.user, "reconcile", f"Batch #{no}", toko=active, batch_pk=b.pk)
+            catat(request.user, "reconcile", f"Batch #{no}", toko=active, batch_pk=b.pk, request=request)
         if len(batches) == 1 and not skipped:
             no = ReconBatch.objects.filter(toko=active).count()
             messages.success(request, f"Rekonsiliasi selesai (Batch #{no}).")
@@ -2482,7 +2482,7 @@ def export_breakdown(request):
     wb.save(buf)
     buf.seek(0)
 
-    catat(request.user, "export_breakdown", f"{active.name} {dari.isoformat()}..{sampai.isoformat()}")
+    catat(request.user, "export_breakdown", f"{active.name} {dari.isoformat()}..{sampai.isoformat()}", request=request)
     resp = HttpResponse(buf.read(), content_type=XLSX_CT)
     resp["Content-Disposition"] = (
         f'attachment; filename="breakdown_{safe_name(active.name)}_'
@@ -2584,7 +2584,7 @@ def fr_koreksi_simpan(request):
             toko=active, tanggal=tanggal, account=account, kolom=kolom).delete()
         catat(request.user, "fr_koreksi_hapus", f"{account} [{kolom}]", toko=active,
               tanggal=str(tanggal), account=account, kolom=kolom,
-              nilai_asli=str(asli) if asli is not None else "")
+              nilai_asli=str(asli) if asli is not None else "", request=request)
     else:
         mentah = (request.POST.get("nilai") or "").strip().replace(" ", "")
         try:
@@ -2613,7 +2613,7 @@ def fr_koreksi_simpan(request):
         catat(request.user, "fr_koreksi", f"{account} [{kolom}]", toko=active,
               tanggal=str(tanggal), account=account, kolom=kolom,
               nilai_asli=str(asli) if asli is not None else "",
-              nilai_baru=str(nilai), alasan=alasan)
+              nilai_baru=str(nilai), alasan=alasan, request=request)
 
     data = hitung_bracket_breakdown(active, tanggal)
     html = render_to_string("web/_fr_control_table.html",
@@ -2778,7 +2778,7 @@ def hutang_manual_simpan(request):
         n = qs.count()
         qs.delete()
         catat(request.user, "hutang_manual_hapus", f"{active.key} {sel_bulan}",
-              toko=active, periode=sel_bulan, hapus=sebelum, jumlah=n)
+              toko=active, periode=sel_bulan, hapus=sebelum, jumlah=n, request=request)
         messages.success(request, f"Override manual {sel_bulan} dihapus.")
         return redirect(tujuan)
 
@@ -2817,7 +2817,7 @@ def hutang_manual_simpan(request):
         catat(request.user, "hutang_manual", f"{active.key} {field} {sel_bulan}",
               toko=active, periode=sel_bulan, field=field,
               nilai_asli=nilai_asli, nilai_baru=str(obj.nilai),
-              tanggal=tanggal.isoformat(), catatan=catatan)
+              tanggal=tanggal.isoformat(), catatan=catatan, request=request)
         tersimpan.append(field)
 
     if not tersimpan:
@@ -2921,7 +2921,7 @@ def export_bonus(request):
 
     catat(request.user, "export_bonus",
           f"{active.name} {dari.isoformat()}..{sampai.isoformat()}"
-          + (f" [{kategori}]" if kategori else ""))
+          + (f" [{kategori}]" if kategori else ""), request=request)
     resp = HttpResponse(buf.read(), content_type=XLSX_CT)
     resp["Content-Disposition"] = (
         f'attachment; filename="bonus_{safe_name(active.name)}_'
@@ -3150,7 +3150,7 @@ def rekap_edit_simpan(request):
             existing.delete()
         catat(request.user, "rekap_manual_hapus", f"{f.slug} {sel_bulan}", toko=active,
               periode=sel_bulan, field=f.slug,
-              nilai_asli=str(nilai_asli) if nilai_asli is not None else "")
+              nilai_asli=str(nilai_asli) if nilai_asli is not None else "", request=request)
     else:
         nilai, gagal = _rekap_nilai_form(request)
         if gagal is not None:
@@ -3163,7 +3163,7 @@ def rekap_edit_simpan(request):
         catat(request.user, "rekap_manual", f"{f.slug} {sel_bulan}", toko=active,
               periode=sel_bulan, field=f.slug,
               nilai_asli=str(nilai_asli) if nilai_asli is not None else "",
-              nilai_baru=str(nilai))
+              nilai_baru=str(nilai), request=request)
 
     # Sama `data` (fresh, dihitung ULANG sesudah simpan/hapus) yang memberi
     # #rekap-sections di bawah juga memberi `petunjuk` (kunci carry) —
@@ -3205,7 +3205,7 @@ def rekap_penyebab_simpan(request):
         label, nilai = obj.label, obj.nilai
         obj.delete()
         catat(request.user, "rekap_penyebab_hapus", f"{label} {sel_bulan}", toko=active,
-              periode=sel_bulan, label=label, nilai=str(nilai))
+              periode=sel_bulan, label=label, nilai=str(nilai), request=request)
     else:
         label = (request.POST.get("label") or "").strip()[:100]
         if not label:
@@ -3218,7 +3218,7 @@ def rekap_penyebab_simpan(request):
         RekapPenyebab.objects.create(
             toko=active, periode=periode, label=label, nilai=nilai, urutan=urutan)
         catat(request.user, "rekap_penyebab", f"{label} {sel_bulan}", toko=active,
-              periode=sel_bulan, label=label, nilai=str(nilai))
+              periode=sel_bulan, label=label, nilai=str(nilai), request=request)
 
     return redirect(tujuan)
 
@@ -3347,7 +3347,7 @@ def bulk_review(request, pk):
     if rows:
         catat(request.user, "review_massal", f"{len(rows)} hasil",
               toko=run.batch.toko if run.batch else None,
-              run_pk=run.pk, n=len(rows), action=action, alasan=alasan)
+              run_pk=run.pk, n=len(rows), action=action, alasan=alasan, request=request)
         if run.batch:  # kartu Cocok/Tinjau run & batch jangan basi terhadap chip live
             refresh_batch_summary(run.batch)
     messages.success(request, f"{len(rows)} hasil diperbarui.")
@@ -3392,7 +3392,7 @@ def bulk_review_queue(request):
     if rows:
         catat(request.user, "review_massal", f"{len(rows)} hasil (Area Pengecekan)",
               toko=rows[0].run.batch.toko if rows[0].run.batch else None,
-              n=len(rows), action=action, alasan=alasan)
+              n=len(rows), action=action, alasan=alasan, request=request)
         for b in batches.values():  # kartu run & batch jangan basi
             refresh_batch_summary(b)
     messages.success(request, f"{len(rows)} hasil diperbarui.")
@@ -3449,7 +3449,7 @@ def review(request, pk):
     )
     catat(request.user, "review", f"Result #{r.pk}",
           toko=r.run.batch.toko if r.run.batch else None, result_pk=r.pk, action=action,
-          alasan=alasan)
+          alasan=alasan, request=request)
     if r.run.batch:  # kartu Cocok/Tinjau run & batch jangan basi terhadap chip live
         refresh_batch_summary(r.run.batch)
     show_run_col = request.POST.get("show_run_col") == "1"
@@ -3602,7 +3602,7 @@ def export_center(request):
             return redirect("export_center")
 
         tag = f"{year:04d}-{month:02d}"
-        catat(request.user, "export_bulanan", f"{len(packs)} toko · {tag} ({scope_label})")
+        catat(request.user, "export_bulanan", f"{len(packs)} toko · {tag} ({scope_label})", request=request)
 
         if len(packs) == 1:
             t, data = packs[0]
@@ -3664,7 +3664,7 @@ def export_center(request):
     def batch_no(b):
         return ReconBatch.objects.filter(toko=b.toko, id__lte=b.id).count()
 
-    catat(request.user, "export_batch", f"{n} batch ({scope_label})")
+    catat(request.user, "export_batch", f"{n} batch ({scope_label})", request=request)
 
     if n == 1:
         b = batches[0]
