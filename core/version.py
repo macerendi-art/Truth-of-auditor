@@ -119,6 +119,51 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.25.0",
+        tanggal=_dt.date(2026, 9, 4),
+        nama="Cadangan, Alarm, dan Staging — Otomasi di Sekeliling Aplikasi",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**Basis data produksi kini punya cadangan harian — sebelumnya tidak "
+            "punya sama sekali.** Berjalan otomatis tiap pukul 03:00 di server "
+            "terpisah, dan bukan sekadar menyalin: tiap cadangan diperiksa "
+            "keutuhannya, dan satu di antaranya sudah benar-benar dipulihkan "
+            "ulang ke basis data kosong untuk membuktikan isinya cocok sampai "
+            "angka terakhir. Yang perlu diketahui apa adanya: cadangan ini "
+            "disimpan di server yang juga direncanakan menjadi tempat aplikasi "
+            "berikutnya, jadi kalau server itu hilang, keduanya hilang bersamaan.",
+            "**Sekarang ada yang berjaga.** Sebelum rilis ini tidak satu pun "
+            "alarm berbunyi kalau ingest berhenti, cadangan gagal, atau layanan "
+            "mati — semuanya bergantung pada orang yang kebetulan membuka "
+            "halaman yang tepat. Kini pemeriksaan kesehatan berjalan tiap pagi "
+            "dan layanan diperiksa tiap lima menit. Pada jalan pertamanya, "
+            "pemeriksaan itu langsung menemukan satu toko yang sudah sembilan "
+            "hari tidak menghasilkan batch tanpa ada yang menyadarinya.",
+            "**Ada tempat mencoba sebelum menyentuh yang asli.** Salinan penuh "
+            "aplikasi kini berjalan di server terpisah dengan data nyata, hanya "
+            "bisa dibuka dari jaringan internal, dan secara struktural tidak "
+            "bisa menulis apa pun ke data produksi.",
+            "**Pengetatan keamanan.** Percobaan login yang gagal berulang kini "
+            "dibatasi, dan apa pun yang diketik di kolom nama pengguna tidak "
+            "pernah disimpan apa adanya — supaya kata sandi yang salah kolom "
+            "tidak ikut tercatat. Sesi login yang tadinya berlaku dua minggu "
+            "kini delapan jam. Setiap tindakan penting tercatat beserta alamat "
+            "IP pelakunya, termasuk login, logout, dan login yang gagal, yang "
+            "sebelumnya tidak tercatat sama sekali.",
+            "**Halaman yang paling lambat dipercepat.** Halaman Mutasi Bank "
+            "per-berkas yang tadinya butuh 46 detik kini tidak lagi melambat "
+            "mengikuti besar berkasnya. Beberapa halaman lain yang diam-diam "
+            "membebani basis data ikut dirapikan, dan 719 MB indeks yang "
+            "ternyata tidak pernah bisa dipakai dibuang.",
+            "**Beberapa angka yang selama ini dipercaya ternyata meleset, dan "
+            "sudah dikoreksi.** Data tumbuh sekitar 500 ribu baris per hari, "
+            "bukan 185 ribu seperti yang tercatat. Sebagian masalah di daftar "
+            "audit ternyata sudah selesai sejak lama, dan satu di antaranya "
+            "menggambarkan gejala yang keliru.",
+        ),
+    ),
+    Rilis(
         versi="1.24.0",
         tanggal=_dt.date(2026, 9, 2),
         nama="Supervisor Setara Admin untuk Menghapus Data Kerja",

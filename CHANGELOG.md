@@ -3,11 +3,21 @@
 > Berkas ini **dibuat otomatis** dari `core/version.py`. Jangan diedit langsung:
 > ubah daftar `RILIS` di sana lalu jalankan `python manage.py changelog`.
 
-Versi berjalan: **v1.24.0** · 41 rilis (1 besar, 24 fitur, 12 perbaikan, 4 pra-rilis).
+Versi berjalan: **v1.25.0** · 42 rilis (1 besar, 25 fitur, 12 perbaikan, 4 pra-rilis).
 
 Penomoran MAYOR.MINOR.PATCH: **MAYOR** bila cara kerja aplikasi berubah mendasar,
 **MINOR** bila ada kemampuan baru, **PATCH** bila isinya murni perbaikan.
 Versi 0.x = tahap pra-rilis, sebelum aplikasi dipakai produksi.
+
+## v1.25.0 — Cadangan, Alarm, dan Staging — Otomasi di Sekeliling Aplikasi
+*Rilis fitur · 4 September 2026*
+
+- **Basis data produksi kini punya cadangan harian — sebelumnya tidak punya sama sekali.** Berjalan otomatis tiap pukul 03:00 di server terpisah, dan bukan sekadar menyalin: tiap cadangan diperiksa keutuhannya, dan satu di antaranya sudah benar-benar dipulihkan ulang ke basis data kosong untuk membuktikan isinya cocok sampai angka terakhir. Yang perlu diketahui apa adanya: cadangan ini disimpan di server yang juga direncanakan menjadi tempat aplikasi berikutnya, jadi kalau server itu hilang, keduanya hilang bersamaan.
+- **Sekarang ada yang berjaga.** Sebelum rilis ini tidak satu pun alarm berbunyi kalau ingest berhenti, cadangan gagal, atau layanan mati — semuanya bergantung pada orang yang kebetulan membuka halaman yang tepat. Kini pemeriksaan kesehatan berjalan tiap pagi dan layanan diperiksa tiap lima menit. Pada jalan pertamanya, pemeriksaan itu langsung menemukan satu toko yang sudah sembilan hari tidak menghasilkan batch tanpa ada yang menyadarinya.
+- **Ada tempat mencoba sebelum menyentuh yang asli.** Salinan penuh aplikasi kini berjalan di server terpisah dengan data nyata, hanya bisa dibuka dari jaringan internal, dan secara struktural tidak bisa menulis apa pun ke data produksi.
+- **Pengetatan keamanan.** Percobaan login yang gagal berulang kini dibatasi, dan apa pun yang diketik di kolom nama pengguna tidak pernah disimpan apa adanya — supaya kata sandi yang salah kolom tidak ikut tercatat. Sesi login yang tadinya berlaku dua minggu kini delapan jam. Setiap tindakan penting tercatat beserta alamat IP pelakunya, termasuk login, logout, dan login yang gagal, yang sebelumnya tidak tercatat sama sekali.
+- **Halaman yang paling lambat dipercepat.** Halaman Mutasi Bank per-berkas yang tadinya butuh 46 detik kini tidak lagi melambat mengikuti besar berkasnya. Beberapa halaman lain yang diam-diam membebani basis data ikut dirapikan, dan 719 MB indeks yang ternyata tidak pernah bisa dipakai dibuang.
+- **Beberapa angka yang selama ini dipercaya ternyata meleset, dan sudah dikoreksi.** Data tumbuh sekitar 500 ribu baris per hari, bukan 185 ribu seperti yang tercatat. Sebagian masalah di daftar audit ternyata sudah selesai sejak lama, dan satu di antaranya menggambarkan gejala yang keliru.
 
 ## v1.24.0 — Supervisor Setara Admin untuk Menghapus Data Kerja
 *Rilis fitur · 2 September 2026*
