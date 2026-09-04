@@ -36,6 +36,11 @@ TS_MULAI="$(date -Is)"
 DUMPDIR="$BACKUP_DIR/dump-$STAMP"
 TOC_FILE="$BACKUP_DIR/toc-$STAMP.txt"
 SHA_FILE="$BACKUP_DIR/dump-$STAMP.sha256"
+# Direktori KERJA: dump ditulis ke sini dulu, baru ditukar ke $DUMPDIR setelah
+# TOC-nya terbukti terbaca. Lihat blok "Tukar-setelah-terbukti" di bawah untuk
+# alasannya. Diawali titik supaya TIDAK ikut terjaring pola retensi `dump-*`.
+DUMPDIR_KERJA="$BACKUP_DIR/.dump-$STAMP.partial"
+TOC_KERJA="$TOC_FILE.partial"
 
 log() {
   printf '[%s] %s\n' "$(date '+%F %T %Z')" "$*" | tee -a "$LOG_FILE" >&2
@@ -107,6 +112,12 @@ tulis_status() {
 gagal() {
   local pesan="$1"
   log "GAGAL: $pesan"
+  # Buang hasil kerja setengah jadi; JANGAN sentuh $DUMPDIR — justru saat gagal
+  # itulah salinan bagus kemarin paling dibutuhkan.
+  rm -rf "$DUMPDIR_KERJA" "$TOC_KERJA" 2>/dev/null || true
+  if [ -d "$DUMPDIR" ]; then
+    log "salinan terverifikasi sebelumnya TETAP UTUH di $DUMPDIR"
+  fi
   tulis_status "GAGAL" "$pesan" 1
   exit 1
 }
@@ -137,18 +148,42 @@ fi
 log "gerbang J4 lolos: tidak ada index invalid di produksi"
 
 # --- Dump ---------------------------------------------------------------
-rm -rf "$DUMPDIR"
+# Hanya sisa kerja setengah jadi yang dibuang di sini. Versi lama melakukan
+# `rm -rf "$DUMPDIR"` di titik ini: menjalankan skrip dua kali dalam SATU hari
+# (nama berbasis tanggal) menghancurkan salinan bagus SEBELUM penggantinya ada,
+# sehingga dump yang gagal di tengah meninggalkan hari itu tanpa cadangan sama
+# sekali. Terlihat langsung 04-09-2026 saat menjalankan ulang secara manual.
+rm -rf "$DUMPDIR_KERJA"
 if ! pg_dump -d "$PROD_URL" --format=directory --jobs=4 --statistics \
-      --compress=zstd:3 --file="$DUMPDIR" 2>>"$LOG_FILE"; then
+      --compress=zstd:3 --file="$DUMPDIR_KERJA" 2>>"$LOG_FILE"; then
   gagal "pg_dump gagal (lihat $LOG_FILE)"
 fi
-log "pg_dump selesai -> $DUMPDIR ($(du -sh "$DUMPDIR" 2>/dev/null | cut -f1))"
+log "pg_dump selesai -> $DUMPDIR_KERJA ($(du -sh "$DUMPDIR_KERJA" 2>/dev/null | cut -f1))"
 
 # --- Bukti arsip tidak rusak: TOC harus terbaca --------------------------
-if ! pg_restore -l "$DUMPDIR" > "$TOC_FILE" 2>>"$LOG_FILE"; then
+if ! pg_restore -l "$DUMPDIR_KERJA" > "$TOC_KERJA" 2>>"$LOG_FILE"; then
   gagal "pg_restore -l gagal membaca TOC -> arsip dump kemungkinan rusak"
 fi
-log "TOC terbaca: $(wc -l < "$TOC_FILE") baris -> $TOC_FILE"
+log "TOC terbaca: $(wc -l < "$TOC_KERJA") baris"
+
+# --- Tukar-setelah-terbukti ----------------------------------------------
+# Baru DI SINI salinan lama diganti: arsipnya sudah terbukti bisa dibaca
+# (pg_restore -l lolos). Sampai baris ini, kegagalan apa pun meninggalkan
+# salinan terverifikasi sebelumnya tetap utuh.
+#
+# `mv` di dalam filesystem yang sama = rename(2), atomik: tidak ada saat di mana
+# $DUMPDIR ada tapi setengah terisi. Sesaat memang butuh ruang untuk DUA dump
+# (~3,2 GB pada ukuran hari ini) — dari 262 GB kosong itu tidak berarti apa-apa.
+#
+# Manifest sha256 sengaja dibuat SESUDAH penukaran, bukan sebelum: ia merekam
+# jalur relatif `dump-$STAMP/...`, jadi membuatnya dari direktori kerja akan
+# menghasilkan jalur yang tidak cocok saat diverifikasi dengan `sha256sum -c`.
+rm -rf "$DUMPDIR"
+if ! mv "$DUMPDIR_KERJA" "$DUMPDIR"; then
+  gagal "gagal menukar $DUMPDIR_KERJA -> $DUMPDIR"
+fi
+mv "$TOC_KERJA" "$TOC_FILE"
+log "dump terverifikasi ditukar -> $DUMPDIR; TOC -> $TOC_FILE"
 
 # --- Checksum atas ISI dump (format=directory = banyak berkas, bukan satu) ---
 if ! ( cd "$BACKUP_DIR" && find "dump-$STAMP" -type f -print0 | sort -z | xargs -0 sha256sum ) > "$SHA_FILE" 2>>"$LOG_FILE"; then
@@ -179,6 +214,10 @@ find "$BACKUP_DIR" -maxdepth 1 -name 'toc-*.txt' -mtime +7 -print -delete >> "$L
   || log "PERINGATAN: retensi toc-*.txt lama mengalami kendala (lihat log)"
 find "$BACKUP_DIR" -maxdepth 1 -name 'dump-*.sha256' -mtime +7 -print -delete >> "$LOG_FILE" 2>&1 \
   || log "PERINGATAN: retensi dump-*.sha256 lama mengalami kendala (lihat log)"
+# Sisa direktori kerja dari run yang mati di tengah (mis. mesin reboot). `+1`
+# cukup aman: dump yang sedang berjalan berumur menit, bukan hari.
+find "$BACKUP_DIR" -maxdepth 1 -name '.dump-*.partial' -mtime +1 -print -exec rm -rf {} + >> "$LOG_FILE" 2>&1 \
+  || log "PERINGATAN: pembersihan sisa .partial mengalami kendala (lihat log)"
 
 tulis_status "OK" "cadangan berhasil" 0
 log "=== SELESAI OK ==="
