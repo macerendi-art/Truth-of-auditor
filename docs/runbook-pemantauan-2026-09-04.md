@@ -78,16 +78,34 @@ VPS (disk produksi, lihat di bawah).** Bukti sebelum memutuskan:
    menduplikasi logika `periksa_index`" — ini generalisasinya: jangan duplikasi
    `periksa_kesehatan` juga). Karena (A) terbukti murah dan bekerja, tidak ada alasan menempuh
    (B) untuk bagian itu.
-6. **Kenapa (B) TETAP dipakai untuk SATU hal — sisa disk produksi:** bagian "Ruang disk"
-   `periksa_kesehatan` SENGAJA mengukur direktori tempat PERINTAH itu sendiri berjalan (lihat
-   docstring-nya) — dari VPS ini itu berarti disk VPS, BUKAN volume Postgres produksi di
-   Railway (dua mesin berbeda). Jadi bagian itu tetap dijalankan (informatif, disk VPS) dan disk
-   PRODUKSI diukur terpisah lewat SQL murni: `current_user` di produksi lewat proxy TERBUKTI
-   `rolsuper=true`, jadi `COPY dfout FROM PROGRAM 'df -kP <data_directory>'` bisa membaca disk
-   NYATA tempat data Postgres produksi hidup — satu-satunya cara melakukan itu tanpa akses shell
-   ke host Postgres itu sendiri. Ini TIDAK menduplikasi logika `periksa_index`/`periksa_kesehatan`
-   (tak ada satu pun bagian keduanya yang mengukur disk produksi — mereka secara eksplisit TAK
-   BISA dari luar Railway), jadi tidak melanggar aturan "jangan duplikasi" di atas.
+6. **⚠️ DICABUT 04-09-2026 (VETO PEMILIK) — bagian ini mendokumentasikan keputusan yang
+   TIDAK LAGI berlaku, dibiarkan utuh sebagai riwayat.** Keputusan ASLI: "Kenapa (B) TETAP
+   dipakai untuk SATU hal — sisa disk produksi" — bagian "Ruang disk" `periksa_kesehatan`
+   SENGAJA mengukur direktori tempat PERINTAH itu sendiri berjalan (lihat docstring-nya) — dari
+   VPS ini itu berarti disk VPS, BUKAN volume Postgres produksi di Railway (dua mesin berbeda).
+   Jadi bagian itu tetap dijalankan (informatif, disk VPS) dan disk PRODUKSI diukur terpisah
+   lewat SQL murni: `current_user` di produksi lewat proxy TERBUKTI `rolsuper=true`, jadi
+   `COPY dfout FROM PROGRAM 'df -kP <data_directory>'` bisa membaca disk NYATA tempat data
+   Postgres produksi hidup — satu-satunya cara melakukan itu tanpa akses shell ke host Postgres
+   itu sendiri.
+   **Kenapa dicabut:** agen yang memasangnya sendiri mengajukannya sebagai keputusan yang bisa
+   di-veto (lihat butir 6 di "Yang tertahan pada pemilik" di bawah, ditulis di sesi yang sama) —
+   **pemilik memveto.** `COPY ... FROM PROGRAM` adalah primitif eksekusi-KODE permanen terhadap
+   host database produksi (superuser bisa menjalankan perintah shell APA PUN), dipasang di dalam
+   skrip yang berjalan HARIAN lewat systemd timer — permukaan yang tidak dapat diterima terlepas
+   dari seberapa "baca-saja" isinya hari ini. Pengganti: `SELECT pg_database_size
+   (current_database())`, satu SELECT biasa yang TIDAK butuh superuser dan TIDAK menjalankan apa
+   pun di host — bukan disk NYATA (persen sisa), melainkan UKURAN basis data + laju tumbuh (yang
+   sudah tersedia lewat bagian 4, `periksa_kesehatan` Django). Sisa disk produksi SESUNGGUHNYA
+   kini harus dicek lewat metrik volume Postgres di dashboard Railway — presisi turun,
+   dinyatakan terang-terangan, bukan dipura-purakan setara. Ukuran DB memang SUDAH dilaporkan
+   ulang bagian 4 (`periksa_kesehatan` Django, `_ukuran_db`/laju tumbuh) — SATU `SELECT` tunggal
+   di bagian 3 bukan duplikasi LOGIKA (tidak ada algoritma/ambang yang ditulis ulang, cuma satu
+   fungsi bawaan Postgres), dan sengaja tetap dijalankan lewat SQL murni yang TIDAK bergantung
+   app Django `/opt/toa` — kalau app itu rusak/belum ter-migrasi, bagian 3 tetap memberi angka
+   ukuran DB walau bagian 4 gagal total; pola yang sama dengan alasan `periksa_index` (bagian 2)
+   sengaja dijalankan terpisah dari `periksa_kesehatan` (bagian 4), lihat butir 2 di kepala
+   `periksa-kesehatan-terjadwal.sh`.
 7. **(C) Railway cron** dicatat sebagai pelengkap yang TIDAK dikerjakan di sini — butuh tindakan
    pemilik di dashboard Railway, dan tugas ini eksplisit dilarang menjalankan `railway` apa pun.
    Lihat "Yang tertahan pada pemilik" di bawah.
@@ -105,11 +123,16 @@ yang sama dengan aturan #1 di docstring `periksa_kesehatan.py`):
    bagian "Bukti" di bawah — ini teruji dengan sengaja, bukan cuma diklaim.
 2. **Index F6** — `manage.py periksa_index` terhadap produksi (bersih hari ini: 24 index di DB,
    7 diwajibkan model, nol temuan).
-3. **Sisa disk produksi (persen)** — lewat `COPY FROM PROGRAM df` (lihat keputusan #6 di atas).
-   Ambang **10% BAHAYA / 20% PERHATIAN** — SENGAJA sama dengan `DISK_BAHAYA`/`DISK_PERHATIAN` di
-   `core/management/commands/periksa_kesehatan.py`. Kalau salah satu berubah, ubah juga yang
-   lain — pola yang sama dengan catatan gerbang J4 soal `periksa_index` di
-   `scripts/cadangan/backup-harian.sh`: dua tempat, satu keputusan, harus seiring manual.
+3. **Ukuran basis data produksi** ⚠️ **REVISI 04-09-2026 (veto pemilik) — lihat keputusan #6 di
+   atas untuk sejarahnya.** Awalnya "sisa disk produksi (persen)" lewat `COPY FROM PROGRAM df`;
+   dicabut karena itu primitif eksekusi-shell permanen terhadap host database produksi. Sekarang:
+   satu `SELECT pg_database_size(current_database())` — TANPA superuser, TANPA eksekusi apa pun
+   di host. Selalu **INFO** (tanpa ambang BAHAYA/PERHATIAN sendiri — tak ada kapasitas volume
+   yang bisa dipakai menilainya dari sini, pola yang sama dengan "laju tumbuh tak punya ambang"
+   di `core/management/commands/periksa_kesehatan.py`), kecuali gagal dibaca sama sekali →
+   PERHATIAN. Laju tumbuh dibaca dari bagian 4 (tidak diduplikasi). **Sisa disk produksi
+   SESUNGGUHNYA (persen/GB) TIDAK BISA lagi dijawab bagian ini** — cek metrik volume Postgres di
+   dashboard Railway. Presisi turun, dinyatakan apa adanya.
 4. **`manage.py periksa_kesehatan`** terhadap produksi — mencakup lagi index F6 (redundan dengan
    #2 secara SENGAJA: `periksa_index` sendirian memberi status F6 yang bersih tanpa mengurai
    teks keluaran `periksa_kesehatan`, biayanya satu kueri SQL murah), plus umur batch per toko,
@@ -167,11 +190,15 @@ perlu banding, sengaja ditiru bukan dirancang ulang.
   "cadangan": {"status": "OK", "pesan": "…", "verdict_run_terakhir": "OK",
                "terakhir_ok": "2026-09-04T17:28:38+07:00", "umur_jam": 0.5},
   "index_f6": {"status": "OK", "pesan": "Bersih — tak ada index hilang/invalid."},
-  "disk_produksi": {"status": "OK", "pesan": "sisa 91.0% …", "persen_bebas": 91.0},
+  "ukuran_db_produksi": {"status": "INFO", "pesan": "ukuran basis data produksi: 1.40 GB …", "bytes": 1503238553},
   "periksa_kesehatan_django": {"status": "BAHAYA", "kode_keluar": 1, "ringkasan": "1 BAHAYA · 0 PERHATIAN · 34 OK · 9 INFO"},
   "log_file": "/home/toa/kesehatan/kesehatan.log"
 }
 ```
+
+⚠️ **Field berubah 04-09-2026**: bagian ini dulu bernama `disk_produksi` dengan `persen_bebas`
+(lewat `COPY FROM PROGRAM`, lihat keputusan #6 di atas — DICABUT). Snapshot `status.json` yang
+ditulis SEBELUM revisi ini masih memakai nama lama; itu bukan bug, cuma jejak sebelum rilis.
 
 `verdict` di puncak = status TERBURUK dari keempat bagian. Rincian lengkap (termasuk daftar
 toko/index/sequence per baris) ada di `log_file`, bukan di JSON ini — JSON sengaja ringkas untuk
@@ -295,7 +322,11 @@ cadangan A1.
   Skrip keluar 1 → `systemctl start` melaporkan "failed" (BENAR, itu maksudnya) →
   `OnFailure=toa-kesehatan-gagal.service` **terbukti berbunyi**: `journalctl -p err` →
   `toa[…]: ALARM toa: kesehatan toa BAHAYA -- cek: …`. **Temuan ini nyata dan belum
-  ditindaklanjuti** — lihat "Yang tertahan pada pemilik".
+  ditindaklanjuti** — lihat "Yang tertahan pada pemilik". (Baris `disk_produksi.status=OK` di
+  atas mendahului revisi 04-09-2026 — lewat `COPY FROM PROGRAM`, sejak dicabut/veto pemilik.
+  Dibiarkan apa adanya sebagai bukti historis; bagian yang sama sekarang bernama
+  `ukuran_db_produksi` dan tidak lagi melaporkan persen sisa disk, lihat keputusan #6 & bukti
+  jalan ulang di laporan `fix1-report.md`.)
   (Bug yang diperbaiki di antara dua jalan ini: `psql -Atc` dengan tiga pernyataan tergabung
   mencetak tag status `CREATE TABLE`/`COPY 1` ikut ke `$DF_LINE`, kebetulan masih terparse benar
   karena `awk` melompati whitespace di depan angka — bukan disengaja. Diganti `-qtAc`, dibuktikan
@@ -383,24 +414,23 @@ cadangan A1.
    berubah — alarm sendirian tidak cukup begitu ada temuan berdiri lama yang belum
    ditindaklanjuti. Menindaklanjuti `mmk` bukan cuma soal data toko itu — itu yang membuat
    alarm ini kembali punya daya beda (discriminating) besok pagi.
-5. **Ketergantungan pada akses superuser Postgres lewat proxy publik** (dipakai untuk cek disk
-   produksi #6 di atas) berasal dari kredensial `~/.pgpass` yang disiapkan untuk gladi migrasi
-   Contabo — kalau kredensial itu diputar/dicabut atau hak superuser dicabut sesudah migrasi
-   selesai, bagian "Sisa disk produksi" akan gagal terbaca (dilaporkan `PERHATIAN`, BUKAN
-   BAHAYA — skrip tidak berpura-pura tahu angka yang tak terbaca, tapi juga tidak mengalarm
-   keras untuk kegagalan infrastruktur kredensial yang di luar kendalinya). Ini titik rapuh yang
-   perlu diingat saat migrasi Contabo berjalan (lihat
-   `docs/rencana-migrasi-contabo-2026-08-31.md`).
-6. **`COPY ... FROM PROGRAM 'df ...'` mengeksekusi perintah SHELL di host Postgres produksi lewat
-   SQL superuser — ini LEBIH dari sekadar `SELECT`, walau efeknya sendiri tidak berbahaya
-   (`df` baca-saja, tabelnya sementara-sesi) dan brief menyebut "kamu hanya membaca".** Teknik
-   ini dipakai secara sadar karena satu-satunya cara membaca disk NYATA produksi tanpa akses
-   shell langsung ke host Postgres (lihat keputusan #6 di bagian jalur di atas), tapi itu
-   keputusan TEKNIS yang diambil pekerjaan ini, bukan sesuatu yang otomatis disetujui pemilik
-   hanya karena "membaca". Kalau pemilik tidak nyaman dengan `COPY FROM PROGRAM` berjalan
-   terjadwal terhadap produksi (mis. karena kebijakan keamanan internal, atau karena mengizinkan
-   eksekusi program lewat SQL adalah permukaan yang sebisa mungkin dihindari terlepas dari
-   isinya), bagian "Sisa disk produksi" di `periksa-kesehatan-terjadwal.sh` bisa dinonaktifkan
-   sendirian (variabel `DISK_STATUS` tetap tercatat di `status.json` sebagai
-   `"PERHATIAN"`/dilewati) tanpa mempengaruhi tiga gerbang lain — ini satu blok kode yang jelas
-   batasnya, disengaja begitu supaya mudah dicabut kalau pemilik keberatan.
+5. **✅ RESOLVED 04-09-2026 sebagai efek samping butir 6 (di bawah).** Ketergantungan pada akses
+   SUPERUSER Postgres lewat proxy publik dulu ada karena `COPY FROM PROGRAM` (butir 6) butuh
+   `rolsuper=true`. Sejak `COPY FROM PROGRAM` dicabut, bagian 3 (`ukuran_db_produksi`) memakai
+   `SELECT pg_database_size(current_database())` — fungsi biasa, tidak butuh hak superuser sama
+   sekali. Risiko "kalau hak superuser dicabut pasca-migrasi, bagian disk gagal terbaca" **tidak
+   lagi berlaku** untuk bagian ini. (Kredensial `~/.pgpass` itu sendiri tetap dipakai untuk
+   koneksi produksi secara umum — itu bukan soal superuser, dan tetap perlu diperhatikan saat
+   migrasi Contabo, lihat `docs/rencana-migrasi-contabo-2026-08-31.md`.)
+6. **⚠️ DICABUT 04-09-2026 (VETO PEMILIK) — dibiarkan utuh sebagai riwayat butir yang memang
+   ditulis untuk bisa di-veto.** Isi asli: "`COPY ... FROM PROGRAM 'df ...'` mengeksekusi
+   perintah SHELL di host Postgres produksi lewat SQL superuser — ini LEBIH dari sekadar
+   `SELECT`, walau efeknya sendiri tidak berbahaya (`df` baca-saja, tabelnya sementara-sesi) dan
+   brief menyebut 'kamu hanya membaca'. Teknik ini dipakai secara sadar karena satu-satunya cara
+   membaca disk NYATA produksi tanpa akses shell langsung ke host Postgres (lihat keputusan #6
+   di bagian jalur di atas), tapi itu keputusan TEKNIS yang diambil pekerjaan ini, bukan sesuatu
+   yang otomatis disetujui pemilik hanya karena 'membaca'." **Pemilik memveto persis seperti yang
+   diantisipasi butir ini.** Dicabut di kode (`scripts/pemantauan/periksa-kesehatan-terjadwal.sh`
+   DAN salinan VPS yang berjalan) dan diganti `pg_database_size` — lihat revisi keputusan #6 di
+   bagian jalur di atas untuk rinciannya. Bukti eksekusi ulang (verdict tetap waras) ada di
+   `.superpowers/sdd/prompt-eksekusi-perbaikan-2026-09-04/fix1-report.md`.

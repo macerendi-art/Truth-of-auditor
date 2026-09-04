@@ -18,22 +18,30 @@
 #      `periksa_kesehatan`, dengan biaya satu kueri SQL tambahan yang murah. Logikanya TIDAK
 #      diduplikasi di sini -- keduanya memanggil `core.management.commands.periksa_index`
 #      apa adanya.
-#   3. Sisa disk PRODUKSI, dalam PERSEN -- bukan gigabyte (volume pernah 500 MB, lalu 5 GB;
-#      insiden DiskFull 2026-07-04 dan 13-08-2026). `periksa_kesehatan` sendiri TIDAK bisa
-#      menjawab ini kalau dijalankan dari VPS: bagian "Ruang disk"-nya SENGAJA mengukur direktori
-#      tempat PERINTAH itu berjalan (lihat docstring-nya) -- dari sini itu disk VPS, BUKAN volume
-#      Postgres produksi di Railway. Jadi bagian itu tetap tampil di laporan (sebagai info disk
-#      VPS) dan disk PRODUKSI diukur TERPISAH di sini lewat superuser Postgres:
-#        COPY dfout FROM PROGRAM 'df -kP <data_directory>'
-#      -- satu-satunya cara membaca disk NYATA tempat data Postgres produksi hidup dari proxy TCP
-#      publik, tanpa akses shell ke host Postgres itu sendiri (dibuktikan: `current_user` lewat
-#      proxy produksi punya `rolsuper=true`). Baris ini TIDAK menulis apa pun yang bertahan --
-#      `CREATE TEMP TABLE` hidup selama SESI psql ini saja, hilang otomatis saat koneksi ditutup.
-#      Ambang PERSEN-nya SENGAJA angka yang SAMA dengan `DISK_BAHAYA`/`DISK_PERHATIAN` di
-#      core/management/commands/periksa_kesehatan.py (10% / 20%) -- kalau salah satu berubah,
-#      ubah juga yang lain; keduanya harus tetap seiring (pola yang sama dengan catatan gerbang
-#      J4 di scripts/cadangan/backup-harian.sh soal `periksa_index`: SQL langsung karena Django
-#      tak selalu murah/perlu di jalur itu, tapi logika/ambangnya WAJIB seiring).
+#   3. Ukuran basis data PRODUKSI (byte/MB/GB) -- BUKAN sisa disk. `periksa_kesehatan` sendiri
+#      TIDAK bisa menjawab sisa disk produksi kalau dijalankan dari VPS: bagian "Ruang disk"-nya
+#      SENGAJA mengukur direktori tempat PERINTAH itu berjalan (lihat docstring-nya) -- dari sini
+#      itu disk VPS, BUKAN volume Postgres produksi di Railway. Bagian itu tetap tampil di laporan
+#      (info disk VPS, bagian 4) tapi tidak pernah menjawab sisa disk produksi.
+#
+#      ⚠️ REVISI 04-09-2026 (VETO PEMILIK, wajib): versi sebelumnya mengukur sisa disk NYATA lewat
+#      `COPY dfout FROM PROGRAM 'df -kP <data_directory>'` -- superuser Postgres produksi
+#      (`current_user` punya `rolsuper=true` lewat proxy) bisa menjalankan PERINTAH SHELL apa pun
+#      di host database lewat jalur itu. Itu primitif eksekusi-kode PERMANEN terhadap produksi di
+#      dalam skrip pemantauan HARIAN -- tidak dapat diterima terlepas dari status kredensial mana
+#      pun (rotasi kunci A3 tetap berjalan terpisah). Pemilik MEMVETO; dicabut di SINI dan di
+#      salinan VPS yang sedang berjalan -- tidak boleh ada satu pun yang tertinggal.
+#
+#      Pendekatan pengganti, TANPA eksekusi apa pun di host produksi: satu SELECT biasa,
+#      `pg_database_size(current_database())` -- bukan superuser, bukan COPY, bukan PROGRAM.
+#      Laju tumbuh SUDAH dipantau bagian 4 (`periksa_kesehatan` Django, baris "Laju tumbuh: ..."
+#      dari potret media/kesehatan.json) -- TIDAK diduplikasi di sini. Sisa disk PRODUKSI
+#      SESUNGGUHNYA (persen/GB) TIDAK BISA lagi dijawab skrip ini -- itu keputusan SADAR, bukan
+#      lupa: cek metrik volume Postgres di dashboard Railway (Project -> service Postgres ->
+#      Metrics) untuk angka itu; lihat juga opsi (C) Railway cron di
+#      docs/runbook-pemantauan-2026-09-04.md. **Presisi turun dari "persen sisa disk terukur" ke
+#      "ukuran DB + laju tumbuh saja" -- dinyatakan terang-terangan di sini, bukan dipura-purakan
+#      setara.**
 #   4. (B6, hidup/mati layanan) SENGAJA TIDAK di sini -- lihat probe-layanan.sh: jadwalnya jauh
 #      lebih sering (tiap 5 menit vs harian di sini) dan tak butuh DB sama sekali. Menyatukannya
 #      dengan cek berat (Django + SQL, jadwal harian) di sini akan memaksa salah satu jadi salah
@@ -50,8 +58,9 @@
 #
 # Skrip ini HANYA MEMBACA -- tidak ada satu query pun di sini yang menulis ke produksi:
 # `periksa_kesehatan`/`periksa_index` cuma SELECT (dibaca dari sumbernya, tak diubah di sini),
-# potretnya sendiri ditulis LOKAL ke media/kesehatan.json (VPS, bukan produksi), dan
-# `COPY ... FROM PROGRAM` di atas hidup selama sesi.
+# potretnya sendiri ditulis LOKAL ke media/kesehatan.json (VPS, bukan produksi), dan bagian 3 di
+# atas kini juga cuma SELECT (`pg_database_size`) -- tidak ada lagi eksekusi shell di host
+# produksi sama sekali (lihat revisi 04-09-2026 di bagian 3).
 #
 # App Django yang dipakai adalah checkout gladi migrasi 2026-09-01 di /opt/toa (dipasang oleh
 # ~/migrasi/fase3-app.sh) -- SUDAH ADA, tidak dibangun ulang di sini. `periksa_index.py` di sana
@@ -75,10 +84,11 @@ STATUS_FILE="$STATE_DIR/status.json"
 
 # Ambang. AMBANG_CADANGAN_JAM: lihat docs/runbook-cadangan-2026-09-04.md (jadwal 03:00 harian +
 # jitter 5 menit -- 26 jam memberi sedikit slack di atas siklus 24 jam sebelum dianggap basi).
-# DISK_BAHAYA/DISK_PERHATIAN: HARUS seiring core/management/commands/periksa_kesehatan.py.
+# (DISK_BAHAYA/DISK_PERHATIAN dulu ada di sini untuk ambang persen sisa disk -- dicabut bersama
+# COPY FROM PROGRAM, lihat revisi bagian 3 di atas; bagian 3 sekarang tak punya ambang BAHAYA/
+# PERHATIAN sendiri, cuma INFO, persis pola "laju tumbuh tak punya ambang" di
+# core/management/commands/periksa_kesehatan.py.)
 AMBANG_CADANGAN_JAM="${AMBANG_CADANGAN_JAM:-26}"
-DISK_BAHAYA="${DISK_BAHAYA:-10}"
-DISK_PERHATIAN="${DISK_PERHATIAN:-20}"
 
 mkdir -p "$STATE_DIR"
 
@@ -165,47 +175,37 @@ fi
 log "$INDEX_STATUS: $INDEX_PESAN"
 naikkan "$INDEX_STATUS"
 
-# --- 3. Sisa disk PRODUKSI dalam persen --------------------------------------
-log "--- 3. Sisa disk produksi (COPY FROM PROGRAM df, superuser) ---"
-DISK_STATUS="PERHATIAN"
-DISK_PESAN="tak bisa membaca disk produksi"
-PERSEN_BEBAS=""
+# --- 3. Ukuran basis data PRODUKSI (pg_database_size, TANPA eksekusi shell) --
+# COPY FROM PROGRAM DICABUT 04-09-2026 (veto pemilik) -- lihat penjelasan panjang di kepala
+# berkas ini. Pengganti: satu SELECT biasa, tak butuh superuser, tak menjalankan apa pun di host.
+# Ini TIDAK menjawab sisa disk produksi (persen/GB) -- itu keputusan sadar, presisi turun,
+# dinyatakan di sini apa adanya. Laju tumbuh ada di bagian 4 (periksa_kesehatan Django), tak
+# diulang di sini. Tanpa ambang BAHAYA/PERHATIAN sendiri (tak ada kapasitas yang bisa dipakai
+# menilainya dari sini) -- selalu INFO kecuali gagal dibaca sama sekali, pola yang sama dengan
+# "laju tumbuh tak punya ambang" di core/management/commands/periksa_kesehatan.py.
+log "--- 3. Ukuran basis data produksi (pg_database_size, BUKAN sisa disk asli) ---"
+DBSIZE_STATUS="INFO"
+DBSIZE_PESAN="tak bisa membaca ukuran basis data produksi"
+DBSIZE_BYTES=""
 
-DATADIR="$(psql "$PROD_URL" -qtAc 'SHOW data_directory;' 2>>"$LOG_FILE")" || DATADIR=""
-if [ -z "$DATADIR" ]; then
-  DISK_PESAN="gagal membaca data_directory produksi (lihat $LOG_FILE)"
+DBSIZE_RAW="$(psql "$PROD_URL" -qtAc 'SELECT pg_database_size(current_database());' 2>>"$LOG_FILE")" || DBSIZE_RAW=""
+DBSIZE_RAW="$(echo "$DBSIZE_RAW" | tr -d '[:space:]')"
+if ! echo "$DBSIZE_RAW" | grep -qE '^[0-9]+$'; then
+  DBSIZE_STATUS="PERHATIAN"
+  DBSIZE_PESAN="gagal membaca ukuran basis data produksi lewat pg_database_size (lihat $LOG_FILE)"
 else
-  # -q (quiet) WAJIB di sini: tanpa itu psql mencetak tag status "CREATE TABLE"/"COPY 1" untuk
-  # dua pernyataan pertama, ikut masuk ke $DF_LINE dan mengotori baris df yang mau diparse.
-  # Dibuktikan sebelum baris ini ditulis: -Atc saja meloloskan "CREATE TABLE\nCOPY 1\n<df>" dan
-  # kebetulan masih terparse benar (awk men-skip whitespace di depan angka) -- tapi itu untung
-  # implementasi, bukan desain; -q membuat DF_LINE cuma satu baris seperti seharusnya.
-  DF_LINE="$(psql "$PROD_URL" -qtAc "
-CREATE TEMP TABLE dfout(line text);
-COPY dfout FROM PROGRAM 'df -kP ${DATADIR} 2>&1 | tail -1';
-SELECT line FROM dfout;
-" 2>>"$LOG_FILE")" || DF_LINE=""
-  if [ -z "$DF_LINE" ]; then
-    DISK_PESAN="gagal menjalankan 'df' di host produksi lewat COPY FROM PROGRAM (lihat $LOG_FILE)"
-  else
-    PERSEN_DIPAKAI="$(echo "$DF_LINE" | awk '{gsub("%","",$5); print $5}')"
-    if ! echo "$PERSEN_DIPAKAI" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
-      DISK_PESAN="keluaran 'df' tak terbaca: '$DF_LINE'"
-    else
-      PERSEN_BEBAS="$(awk -v p="$PERSEN_DIPAKAI" 'BEGIN{printf "%.1f", 100-p}')"
-      if awk -v p="$PERSEN_BEBAS" -v a="$DISK_BAHAYA" 'BEGIN{exit !(p<a)}'; then
-        DISK_STATUS="BAHAYA"
-      elif awk -v p="$PERSEN_BEBAS" -v a="$DISK_PERHATIAN" 'BEGIN{exit !(p<a)}'; then
-        DISK_STATUS="PERHATIAN"
-      else
-        DISK_STATUS="OK"
-      fi
-      DISK_PESAN="sisa ${PERSEN_BEBAS}% di volume data produksi ('$DF_LINE')"
-    fi
-  fi
+  DBSIZE_BYTES="$DBSIZE_RAW"
+  # GB dengan 2 desimal kalau >=1 GB (lebih enak dipindai manusia di log harian utk DB berukuran
+  # produksi); MB dengan 1 desimal di bawah itu.
+  DBSIZE_MANUSIA="$(awk -v b="$DBSIZE_BYTES" 'BEGIN{
+    gb = b/1024/1024/1024;
+    if (gb >= 1) printf "%.2f GB", gb;
+    else printf "%.1f MB", b/1024/1024;
+  }')"
+  DBSIZE_PESAN="ukuran basis data produksi: ${DBSIZE_MANUSIA} (pg_database_size, BUKAN sisa disk -- cek metrik volume Postgres di dashboard Railway utk sisa disk sesungguhnya; laju tumbuh: lihat bagian 4 di bawah)"
 fi
-log "$DISK_STATUS: $DISK_PESAN"
-naikkan "$DISK_STATUS"
+log "$DBSIZE_STATUS: $DBSIZE_PESAN"
+naikkan "$DBSIZE_STATUS"
 
 # --- 4. periksa_kesehatan Django (mencakup index F6 lagi + batch + sequence +
 #        tabel referensi + kueri patokan; lihat catatan di kepala berkas) -------
@@ -225,7 +225,7 @@ naikkan "$KES_STATUS"
 # --- Berkas status konsolidasi ------------------------------------------------
 TS_SELESAI="$(date -Is)"
 CAD_UMUR_JAM_JSON="${CAD_UMUR_JAM:-null}"
-PERSEN_BEBAS_JSON="${PERSEN_BEBAS:-null}"
+DBSIZE_BYTES_JSON="${DBSIZE_BYTES:-null}"
 
 jq -n \
   --arg tanggal "$STAMP" --arg mulai "$TS_MULAI" --arg selesai "$TS_SELESAI" \
@@ -234,8 +234,8 @@ jq -n \
   --arg cad_verdict "$CAD_VERDICT" --arg cad_terakhir_ok "$CAD_TERAKHIR_OK" \
   --argjson cad_umur_jam "$CAD_UMUR_JAM_JSON" \
   --arg index_status "$INDEX_STATUS" --arg index_pesan "$INDEX_PESAN" \
-  --arg disk_status "$DISK_STATUS" --arg disk_pesan "$DISK_PESAN" \
-  --argjson disk_persen_bebas "$PERSEN_BEBAS_JSON" \
+  --arg dbsize_status "$DBSIZE_STATUS" --arg dbsize_pesan "$DBSIZE_PESAN" \
+  --argjson dbsize_bytes "$DBSIZE_BYTES_JSON" \
   --arg kes_status "$KES_STATUS" --argjson kes_kode "$KES_KODE" \
   --arg kes_ringkasan "${RINGKASAN_KES:-}" \
   --arg log_file "$LOG_FILE" \
@@ -250,7 +250,7 @@ jq -n \
        umur_jam: $cad_umur_jam
      },
      index_f6: { status: $index_status, pesan: $index_pesan },
-     disk_produksi: { status: $disk_status, pesan: $disk_pesan, persen_bebas: $disk_persen_bebas },
+     ukuran_db_produksi: { status: $dbsize_status, pesan: $dbsize_pesan, bytes: $dbsize_bytes },
      periksa_kesehatan_django: { status: $kes_status, kode_keluar: $kes_kode, ringkasan: $kes_ringkasan },
      log_file: $log_file
    }' > "$STATUS_FILE.tmp"
