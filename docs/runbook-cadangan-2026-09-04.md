@@ -272,6 +272,19 @@ sungguhan, bukan skrip dijalankan tangan)
 - **Retensi terbukti bekerja pada percobaan pertama**: dump gladi migrasi lama (`dump-2026-09-01`,
   3 hari) otomatis terhapus oleh langkah retensi `-mtime +1` pada run ini — bukti retensi bukan
   cuma kode mati.
+- **Jalur `OnFailure` diuji sungguhan** (bukan dengan merusak unit asli): unit sekali-pakai
+  `toa-cadangan-uji-gagal.service` dipasang sementara (`ExecStart=/bin/false`,
+  `OnFailure=toa-cadangan-gagal.service` — sama seperti unit asli), dijalankan lewat
+  `sudo systemctl start` → gagal seperti yang diharapkan (`Active: failed (Result: exit-code)`).
+  Journal membuktikan alarm benar-benar terpicu, bukan cuma terpasang: `toa-cadangan-gagal.service`
+  tercatat `Starting…`/`Finished…` pada detik yang sama, dan pesan aslinya muncul di journal —
+  `root[...]: cadangan toa GAGAL -- cek: journalctl -u toa-cadangan.service -n 100 | cat
+  /home/toa/cadangan/status.json`. Unit uji dihapus + `daemon-reload` sesudahnya; `toa-cadangan.service`
+  (asli) tetap `inactive (dead)` (bukan `failed`), dan `toa-cadangan.timer` tetap `active`/`enabled`
+  dengan `NEXT` nyata (`Sat 2026-09-05 03:03:22 WIB` — bergeser sedikit dari jitter
+  `RandomizedDelaySec` karena `daemon-reload`, bukan indikasi masalah). Tidak ada unit lain yang
+  masuk status `failed` akibat pengujian ini (`systemctl --failed` hanya menunjukkan dua unit boot
+  bawaan VPS yang tak berkaitan, `cloud-init.service` dan `systemd-networkd-wait-online.service`).
 
 Detail lengkap (transkrip perintah, angka mentah): lihat
 `.superpowers/sdd/prompt-eksekusi-perbaikan-2026-09-04/A1-report.md`.
