@@ -5,7 +5,15 @@ import re
 from datetime import timedelta
 from decimal import Decimal
 
-from .base import BaseParser, parse_decimal, parse_dt, read_xlsx_grid, read_xlsx_rows, row_hash
+from .base import (
+    BaseParser,
+    extract_ticket,
+    parse_decimal,
+    parse_dt,
+    read_xlsx_grid,
+    read_xlsx_rows,
+    row_hash,
+)
 
 
 def _money(amount, flow):
@@ -87,18 +95,22 @@ class NXPayParser(BaseParser):
 
 
 class QRFlyerParser(BaseParser):
-    """QR FLYER — EMPAT bentuk header, dipetakan lewat daftar alias ternormalkan.
+    """QR FLYER — lima bentuk header, dipetakan lewat daftar alias ternormalkan.
 
     Vendornya mengganti penamaan kolom berulang kali sejak Agustus 2026, jadi
     kolom dikenali dari DAFTAR nama yang mungkin, bukan cabang mati per bentuk:
 
         tiket panel  : TXN ID | transaction_id | Transaction Id
         referensi    : Client Reference | client_reference | Client Reff
+                       | Client Ref / Transaction ID (bentuk kelima WD CSV)
         pemain       : Customer ID / User Account | username | Username
         nominal      : Transaction Value | total_amount | Amount
         waktu buat   : Transaction Date | trans_date_time | Created At | date
+                       | Request Date
         waktu settle : Settlement Time | bot_success_time | Callback
-        biaya        : Fee | charges
+                       | Processed Date
+        biaya        : Fee | charges | Charge Fee
+        penerima     : Account Name (bentuk WD kelima, opsional)
 
     **Pencocokan kolom dinormalkan** (huruf kecil, spasi/garis bawah/tanda baca
     dibuang) lalu dibandingkan PERSIS. Normalisasi itu meredam satu kelas
@@ -108,11 +120,17 @@ class QRFlyerParser(BaseParser):
     tak pernah tertukar dengan `amount`. Kalau tertukar, tiap baris meleset
     sebesar fee dan pass 0 gagal tanpa satu pun pesan error.
 
-    Keempat bentuk memakai jam WIB — dibuktikan pada bentuk ketiga (HKW
+    Keempat bentuk DP memakai jam WIB — dibuktikan pada bentuk ketiga (HKW
     01-08-2026: panel menyetujui median 4 detik setelah `Callback`) dan diuji
     ulang mandiri pada bentuk keempat (LTN 12-08-2026: 339 baris, median +3
     detik, p10/p90 +2/+6, NOL selisih negatif). Tak ada geseran, tidak seperti
-    ZPay.
+    ZPay. Bentuk kelima (WD CSV 03-09-2026) sama: Request/Processed Date WIB.
+
+    **Bentuk kelima (WD CSV, 03-09-2026):** header
+    `Request Date` + `Client Ref / Transaction ID` + `Settlement Amount` +
+    `Charge Fee`. Tiket panel `W…`/`D…` **tersemat** di Client Ref
+    (`…||W3323863` atau spasi), bukan kolom TXN ID. Nominal bertanda `Rp` +
+    pemisah ribuan ID (`Rp52.000`). Parser baca CSV maupun XLSX.
 
     **Penjaga header — tiga bidang, dan bidang ketiganya ditambahkan mahal.**
     Bila kolom tiket, nominal, ATAU seluruh kolom waktu tak ditemukan, parser
@@ -129,6 +147,8 @@ class QRFlyerParser(BaseParser):
       jendela tanggal mana pun, sehingga 339 baris panel LTN berhenti di
       "Belum ada uang masuk" padahal uangnya sudah ada di database. 1.705 baris
       di dua toko (LTN 339, BSW 1.366) hilang begitu sebelum ini ketahuan.
+    * Bentuk kelima: tiket boleh absen di header bila `ref` memuat token
+      `W…`/`D…` (diekstrak per baris).
 
     Gerbang waktunya "salah satu", bukan `created`: `posted_date` diturunkan
     dari `(settled or created)`, jadi berkas yang hanya membawa waktu
@@ -146,20 +166,31 @@ class QRFlyerParser(BaseParser):
     #: spasi-vs-garis-bawah TIDAK perlu entri sendiri.
     _ALIAS = {
         "ticket": ("TXN ID", "transaction_id", "Transaction Id"),
-        "ref": ("Client Reference", "Client Reff"),
+        "ref": (
+            "Client Reference", "Client Reff", "client_reference",
+            "Client Ref / Transaction ID", "Client Ref",
+        ),
         "username": ("Customer ID / User Account", "username", "Username"),
         "amount": ("Transaction Value", "total_amount", "Amount"),
         # `date` paling belakang: nama paling umum, jadi paling gampang salah
         # rebut kalau berkasnya kebetulan punya kolom waktu yang lebih spesifik.
-        "created": ("Transaction Date", "trans_date_time", "Created At", "date"),
-        "settled": ("Settlement Time", "bot_success_time", "Callback"),
-        "status": ("Payment Status", "status"),
-        "fee": ("Fee", "charges"),
+        "created": (
+            "Transaction Date", "trans_date_time", "Created At", "Request Date",
+            "date",
+        ),
+        "settled": (
+            "Settlement Time", "bot_success_time", "Callback", "Processed Date",
+        ),
+        "status": ("Payment Status", "status", "Status"),
+        "fee": ("Fee", "charges", "Charge Fee"),
+        "account_name": ("Account Name",),
     }
     #: tanpa ketiganya berkasnya bukan laporan Flyer yang bisa dipercaya
     _WAJIB = ("ticket", "amount")
     #: minimal SALAH SATU harus ada — tanpa waktu, barisnya mustahil dicocokkan
     _WAJIB_WAKTU = ("created", "settled")
+    #: status lolos (bentuk kelima menulis "Success"; lama "1" / SUCCESS)
+    _STATUS_OK = frozenset({"", "1", "success", "paid", "settled", "ok"})
 
     @staticmethod
     def _norm(nama):
@@ -177,10 +208,67 @@ class QRFlyerParser(BaseParser):
                               if k in ada), None)
                 for bidang, nama in cls._ALIAS.items()}
 
+    @staticmethod
+    def _baca(path):
+        """(header, rows-as-dicts) — XLSX bentuk 1–4 ATAU CSV bentuk kelima."""
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".csv":
+            with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+                reader = csv.DictReader(f)
+                header = list(reader.fieldnames or [])
+                rows = [{(k if k is not None else ""): ("" if v is None else v)
+                         for k, v in r.items()} for r in reader]
+            return header, rows
+        return read_xlsx_rows(path, header_row=1)
+
+    @staticmethod
+    def _nominal(value):
+        """Angka Flyer: `Rp52.000` (ID) ATAU `100000.00` (intl)."""
+        s = str(value or "")
+        # Tanda Rp + titik ribuan (tanpa koma desimal) = format ID.
+        if "Rp" in s or "rp" in s.lower():
+            return abs(parse_decimal(value, number_format="id"))
+        if re.search(r"\d\.\d{3}\b", s) and "," not in s:
+            return abs(parse_decimal(value, number_format="id"))
+        return abs(parse_decimal(value))
+
+    @staticmethod
+    def _tiket_dan_ref(ticket_cell, ref_cell):
+        """Pisah tiket panel D…/W… dari blob Client Ref bentuk kelima.
+
+        Contoh: ``260903MP11930000095A||W3323863`` → ref, W3323863.
+        Varian spasi: ``260903MP1193 0000083A W3323760``.
+        """
+        ticket = str(ticket_cell or "").strip()
+        ref = str(ref_cell or "").strip()
+        blob = " ".join(x for x in (ticket, ref) if x)
+        if not ticket or not re.match(r"^[DWdw]\d{6,9}$", ticket):
+            t2 = extract_ticket(blob)
+            if t2:
+                ticket = t2
+        if not ref:
+            ref = blob
+        if "||" in ref:
+            kiri, kanan = ref.split("||", 1)
+            if extract_ticket(kanan) and not extract_ticket(kiri):
+                ref = kiri.strip()
+            elif extract_ticket(kiri) and not extract_ticket(kanan):
+                ref = kanan.strip()
+            else:
+                ref = kiri.strip() or ref
+        # rapikan sisa spasi di tengah kode MP (varian export)
+        if ticket and ticket in ref:
+            ref = ref.replace(ticket, " ")
+        ref = re.sub(r"\s+", "", ref).strip(" |")
+        return ticket, ref
+
     def parse(self, path, flow=""):
-        header, rows = read_xlsx_rows(path, header_row=1)
+        header, rows = self._baca(path)
         peta = self._petakan(header)
         hilang = [b for b in self._WAJIB if not peta[b]]
+        # Bentuk kelima WD: tiket panel di dalam Client Ref, bukan kolom TXN ID.
+        if "ticket" in hilang and peta.get("ref"):
+            hilang = [b for b in hilang if b != "ticket"]
         if not any(peta[b] for b in self._WAJIB_WAKTU):
             hilang.append("waktu (%s)" % "/".join(self._WAJIB_WAKTU))
         if hilang:
@@ -197,29 +285,40 @@ class QRFlyerParser(BaseParser):
         kol = lambda bidang: peta[bidang] or "\x00"  # noqa: E731 - kolom absen = selalu None
         out = []
         for r in rows:
-            amt = abs(parse_decimal(r.get(kol("amount"))))
+            status_raw = str(r.get(kol("status"), "") or "").strip()
+            if status_raw and status_raw.casefold() not in self._STATUS_OK:
+                continue
+            amt = self._nominal(r.get(kol("amount")))
             occurred = parse_dt(r.get(kol("created")))
             settle = parse_dt(r.get(kol("settled")))
-            ticket = str(r.get(kol("ticket"), "") or "").strip()
-            ref = str(r.get(kol("ref"), "") or "").strip()
+            ticket_raw = str(r.get(kol("ticket"), "") or "").strip()
+            ref_raw = str(r.get(kol("ref"), "") or "").strip()
+            ticket, ref = self._tiket_dan_ref(ticket_raw, ref_raw)
             if not ticket and not ref:  # skip footer/total
                 continue
+            # flow file menang; bila kosong & tiket W… → WD (bentuk kelima)
+            arah = flow
+            if not arah and ticket.upper().startswith("W"):
+                arah = "wd"
+            elif not arah and ticket.upper().startswith("D"):
+                arah = "dp"
+            cp = str(r.get(kol("account_name"), "") or "").strip()
             row = {
                 "source_type": "gateway",
                 "occurred_at": occurred,
                 "posted_date": (settle or occurred).date() if (settle or occurred) else None,
-                "jenis": "wd" if flow == "wd" else "depo",
+                "jenis": "wd" if arah == "wd" else "depo",
                 "amount": amt,
                 "credit_delta": Decimal("0"),
-                "money_delta": _money(amt, flow),
-                "fee": parse_decimal(r.get(kol("fee"))),
+                "money_delta": _money(amt, "wd" if arah == "wd" else "dp"),
+                "fee": self._nominal(r.get(kol("fee"))) if peta.get("fee") else parse_decimal(r.get(kol("fee"))),
                 "bonus": Decimal("0"),
                 "balance_after": None,
                 "ticket_no": ticket,
                 "username": str(r.get(kol("username"), "") or "").strip(),
                 "reference": ref,
-                "counterparty": "",
-                "description": f"QRFLYER {r.get(kol('status'), '')}".strip(),
+                "counterparty": cp,
+                "description": f"QRFLYER {status_raw}".strip(),
                 "raw": {k: ("" if v is None else str(v)) for k, v in r.items()},
             }
             row["row_hash"] = row_hash("qrflyer", [ticket, ref, amt])

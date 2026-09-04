@@ -129,6 +129,14 @@ def detect_source(path, filename=""):
         # atas. Sebelum ini bentuk keempat cuma lolos lewat nama file (0,85).
         if _has(t, "client reff") and (_has(t, "total_amount") or _has(t, "net_amount")):
             add("qrflyer", 0.95)
+        # QR FLYER bentuk kelima WD (CSV/XLSX 03-09-2026): Request Date +
+        # Client Ref / Transaction ID (tiket W… di dalam) + Settlement Amount.
+        if (
+            _has(t, "request date")
+            and (_has(t, "client ref / transaction id") or _has(t, "client ref"))
+            and (_has(t, "settlement amount") or _has(t, "charge fee"))
+        ):
+            add("qrflyer", 0.95)
         # Jangan sandingkan filename qrflyer member di atas tampung
         if "tampung" not in fn and (
             _has(t, "qris") or _has(t, "qr flyer") or "qrflyer" in fn or "qris" in fn or "qr flyer" in fn
@@ -204,6 +212,22 @@ def detect_source(path, filename=""):
             add("qhoki", 0.95)  # sebagian brand ekspor laporan QRIS-HOKI sbg CSV
         if "tiket number" in c and ("status settled" in c or "confirmed bot at" in c):
             add("zpay", 0.95)  # QRIS ZPay/ZETPAY ("Tiket" memang ejaan aslinya)
+        # QR FLYER bentuk kelima WD CSV (03-09-2026): Request Date + Client Ref
+        # / Transaction ID + Settlement/Charge Fee. Bukan tampung (beneficiary
+        # payout) dan bukan ELITE (record value).
+        if (
+            "request date" in c
+            and "client ref / transaction id" in c
+            and ("settlement amount" in c or "charge fee" in c)
+        ):
+            add("qrflyer", 0.95)
+        elif "tampung" not in fn and (
+            "qrflyer" in fn or "qr flyer" in fn
+            or ("qris" in fn and "flyer" in fn)
+        ):
+            # Nama file member Flyer CSV — sebelum ini CSV Flyer cuma lolos
+            # manual (header lama XLSX-only di detect).
+            add("qrflyer", 0.85)
         # KINGSPAY: header snakeCase unik (platformTrxId + merchantTrxId +
         # biayaPlatform). Bukan subset ELITE/ZPay/RPay/Hoki.
         if ("platformtrxid" in c and "merchanttrxid" in c
