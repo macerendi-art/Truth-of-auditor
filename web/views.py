@@ -1693,7 +1693,18 @@ def reconcile(request):
 @login_required
 def batch_detail(request, pk):
     batch = get_object_or_404(ReconBatch, pk=pk, toko__in=tokos_for(request.user))
-    batch_no = ReconBatch.objects.filter(toko=batch.toko, id__lte=batch.id).count()
+    # Nomor batch — konvensi bisect yg sama dgn dashboard (web/views.py sekitar
+    # baris 827: "bisect_right(terurut, x) === COUNT(id <= x)"). SATU query
+    # mengambil semua id batch toko ini, dipakai utk batch_no DAN r.home_no
+    # tiap baris resolved_here (D3): sebelumnya 1 COUNT query PER BARIS
+    # resolved_here — batch dgn banyak settlement terlambat = banyak query
+    # N+1 (226 query terukur pada satu batch produksi). toko=batch.toko
+    # dipertahankan persis spt query lama (bukan toko milik home batch)
+    # supaya angkanya identik di kasus tepi mana pun.
+    semua_batch_id = sorted(
+        ReconBatch.objects.filter(toko=batch.toko).values_list("id", flat=True)
+    )
+    batch_no = bisect.bisect_right(semua_batch_id, batch.id)
     # Settle terlambat dua arah — dari queryset LIVE (bukan summary JSON) supaya
     # otomatis kosong bila batch pasangannya sudah dihapus.
     resolved_here = list(
@@ -1701,9 +1712,7 @@ def batch_detail(request, pk):
         .select_related("left", "right", "run__batch")
     )
     for r in resolved_here:  # nomor batch asal (konvensi nomor per-toko)
-        r.home_no = ReconBatch.objects.filter(
-            toko=batch.toko, id__lte=r.run.batch_id
-        ).count()
+        r.home_no = bisect.bisect_right(semua_batch_id, r.run.batch_id)
     settled_elsewhere = list(
         MatchResult.objects.filter(run__batch=batch, resolved_by_batch__isnull=False)
         .select_related("resolved_by_batch", "left", "right")
