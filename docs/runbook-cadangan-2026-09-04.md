@@ -112,6 +112,11 @@ dijalankan begitu mesin hidup lagi; cron biasa tidak punya ini).
   toa-cadangan.service` (ini unit `Type=oneshot`, `systemctl start` menunggu sampai selesai).
 - Matikan sementara: `sudo systemctl stop toa-cadangan.timer` (jangan `disable` kalau cuma mau
   jeda singkat — `disable` melepas dari boot).
+- **Jendela 03:00–03:30 WIB terlarang untuk deploy dan DDL psql** (P1/P2, 04-09-2026). `pg_dump`
+  memegang transaksi 13+ menit; `DROP INDEX` non-concurrent yang mengantre di belakangnya
+  membekukan seluruh akses ke `transactions_transaction` (semantik antrean lock Postgres), dan
+  `CREATE INDEX CONCURRENTLY` menunggu transaksi lama selesai. Rinciannya di
+  `docs/runbook-rollback-2026-09-04.md` bagian "Urutan deploy wajib & jendela terlarang".
 
 ## Cara membaca `status.json`
 

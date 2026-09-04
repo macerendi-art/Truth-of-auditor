@@ -99,51 +99,72 @@ alasan bawah — DILARANG oleh brief tugas ini, jadi migrasi ini memakai
 `migrations.AlterField` polos, `atomic` default (True; `DROP INDEX` biasa,
 BEDA dari `DROP INDEX CONCURRENTLY`, sah di dalam transaksi).
 
-RISIKO YANG TERSISA, DAN PERKIRAAN DURASI
-===========================================
-`DROP INDEX` (tanpa CONCURRENTLY) tetap perlu lock `ACCESS EXCLUSIVE` pada
-TABEL `transactions_transaction` untuk sesaat memegangnya — beda dari
-`CREATE INDEX` biasa, bukan karena PROSESNYA lama, tapi karena Postgres
-mewajibkan `ACCESS EXCLUSIVE` untuk mengubah katalog index tabel apa pun
-alasannya. Lock itu sendiri didapat SEGERA kalau tabel sedang tidak dipegang
-transaksi lain; kalau ADA (mis. deploy Railway rolling — instance LAMA masih
-melayani trafik saat `migrate` instance BARU berjalan, dan sedang di tengah
-`_persist_rows`' `atomic()` satu file ingest, atau query laporan yang
-panjang), `DROP INDEX` mengantre di belakangnya. Begitu didapat, pekerjaan
-NYATANYA (hapus baris katalog + unlink berkas, x4 index) selesai dalam
-orde milidetik lalu lock dilepas. Jadi total durasi ≈ waktu MENGANTRE lock,
-dibatasi oleh transaksi TERPANJANG yang sedang menyentuh tabel ini saat itu
-— pada aplikasi ini biasanya satu request/satu ingest, orde detik, BUKAN
-orde menit seperti risiko `CREATE INDEX CONCURRENTLY` yang coba dihindari
-0008-0010. Selama mengantre, gunicorn instance baru belum membuka port
-(sama seperti index besar 0008-0010) — jendela tunggu ini memperpanjang
-boot beberapa detik dalam skenario terburuk, bukan menggantungkannya.
+RISIKO YANG TERSISA — DIKOREKSI TINJAUAN AKHIR (P1, 04-09-2026)
+================================================================
+Analisis awal di bagian ini benar sampai satu titik dan MEREMEHKAN
+durasinya. `DROP INDEX` (tanpa CONCURRENTLY) butuh `ACCESS EXCLUSIVE` pada
+TABEL `transactions_transaction`. Yang tidak disebut: begitu permintaan lock
+itu MENGANTRE di belakang transaksi yang sedang berjalan, SEMUA permintaan
+lock baru pada tabel itu — termasuk `ACCESS SHARE` dari SELECT biasa — ikut
+mengantre di belakangnya (semantik antrean lock Postgres). Jadi selama
+`migrate` instance baru menunggu, instance LAMA yang masih melayani trafik
+ikut MEMBEKU pada tabel inti. Durasinya = transaksi TERPANJANG yang sedang
+memegang tabel saat itu, dan di aplikasi ini itu bukan "satu request biasa":
 
-OPSI MANUAL (kalau pemilik ingin lock instan/nol-tunggu sama sekali)
-======================================================================
+* `pg_dump` cadangan harian (scripts/cadangan/backup-harian.sh) memegang
+  `ACCESS SHARE` pada semua tabel selama 13+ menit, 03:00–03:20 WIB.
+  Deploy di jendela itu = aplikasi beku sampai dump selesai; boot Railway
+  melewati batas health-check → restart ×3 (`restartPolicyMaxRetries`) →
+  Railway menyerah: tidak ada instance yang naik, sementara dump tetap jalan.
+* `run_batch` 22–29 dtk (hari ELITE) di dalam `transaction.atomic()`;
+  ingest berkas besar di `_persist_rows` atomic.
+
+Kerja nyata DROP-nya memang orde milidetik; yang mahal adalah MENUNGGU, dan
+yang ikut menunggu adalah seluruh aplikasi.
+
+LANGKAH WAJIB PRA-DEPLOY (bukan lagi "opsi manual")
+====================================================
+Jalankan keempat `DROP INDEX CONCURRENTLY` lewat psql SEBELUM `railway up`,
+di LUAR 03:00–03:30 WIB dan tidak sedang ada rekonsiliasi/ingest besar.
+`CONCURRENTLY` tidak pernah butuh `ACCESS EXCLUSIVE`, jadi tidak ada antrean
+yang membekukan siapa pun; `migrate` saat boot kemudian menemukan katalog
+sudah kosong → no-op (idempotensi bawaan Django yang dijelaskan di atas).
+
 Nama index dihitung DETERMINISTIK dari algoritma penamaan Django
 (`names_digest(table, kolom, length=8)` atas `transactions_transaction` +
 nama kolom — stabil sejak migrasi 0001, kolom tak pernah berganti nama) —
-BUKAN ditebak, dihitung memakai fungsi Django yang sama persis. Verifikasi
-lebih dulu lewat `\\d transactions_transaction` di psql sebelum menjalankan,
-sesuai gaya runbook 0008-0010:
+BUKAN ditebak. Verifikasi lebih dulu lewat `\\d transactions_transaction`
+di psql sebelum menjalankan:
 
     DROP INDEX CONCURRENTLY IF EXISTS transactions_transaction_username_6b02bd12;
     DROP INDEX CONCURRENTLY IF EXISTS transactions_transaction_username_6b02bd12_like;
     DROP INDEX CONCURRENTLY IF EXISTS transactions_transaction_reference_65ce6e73;
     DROP INDEX CONCURRENTLY IF EXISTS transactions_transaction_reference_65ce6e73_like;
 
-Kalau dijalankan lebih dulu, `migrate` di atas menemukan katalog sudah bersih
-(lihat penjelasan idempotensi di atas) dan tidak melakukan apa-apa untuk
-kolom yang sudah dibuang manual. Kalau TIDAK dijalankan lebih dulu, `migrate`
-sendiri yang membuang keempatnya lewat `DROP INDEX IF EXISTS` biasa —
-aman, hanya berbeda di siapa yang menunggu lock (psql interaktif vs proses
-`migrate` saat boot) dan seberapa singkat jendela tunggunya (`CONCURRENTLY`
-tidak pernah butuh `ACCESS EXCLUSIVE`).
+Sesudahnya: `SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid;`
+harus KOSONG (`DROP INDEX CONCURRENTLY` yang terputus meninggalkan index
+INVALID — gerbang J4 cadangan menolak dump bila ada), dan
+`\\d transactions_transaction` tidak lagi menampilkan keempatnya.
 
-Setelah dijalankan (lewat jalur mana pun): `python manage.py periksa_index`
-untuk memastikan tak ada sisa index INVALID (mis. `DROP INDEX CONCURRENTLY`
-yang terputus di tengah jalan).
+Kalau langkah ini TERLEWAT, `migrate` tetap benar secara HASIL — hanya
+harganya yang berbeda: pembekuan tabel inti selama transaksi terpanjang
+saat itu. Urutan lengkap + jendela terlarang: docs/runbook-rollback-2026-09-04.md
+bagian "Urutan deploy wajib".
+
+JANGAN DIBALIK LEWAT `migrate` (P6)
+====================================
+`migrate transactions 0010` = AlterField kembali ke `db_index=True`, dan
+Django menjalankannya sebagai `CREATE INDEX` POLOS — non-concurrent, TANPA
+`IF NOT EXISTS` (`BaseDatabaseSchemaEditor._alter_field`,
+django/db/backends/base/schema.py ~1223, plus `_like` dari schema editor
+Postgres) — ×4 atas 10,3 juta baris, memegang lock yang memblokir semua
+TULIS selama build (menit), dari koneksi psql/Django di workstation lewat
+proxy publik yang bisa putus dan meninggalkan index INVALID. Dan bila index
+itu sudah dibangun manual lebih dulu, migrasi mundur justru GAGAL "already
+exists". Kalau index-nya benar-benar diperlukan lagi: bangun `CONCURRENTLY`
+lewat psql dengan nama persis di atas dan BIARKAN kode tetap di 0011 —
+index ekstra di DB yang tak dideklarasikan model tidak mengganggu apa pun
+(itulah keadaan sebelum migrasi ini).
 """
 
 from django.db import migrations, models

@@ -66,9 +66,17 @@
 # ~/migrasi/fase3-app.sh) -- SUDAH ADA, tidak dibangun ulang di sini. `periksa_index.py` di sana
 # identik byte-untuk-byte dengan repo (dibandingkan sebelum skrip ini ditulis);
 # `periksa_kesehatan.py` sempat berupa berkas belum ter-commit di checkout itu dari eksplorasi
-# sebelumnya, juga identik. Checkout itu boleh basi di commit lain (branch drill, bukan main) --
-# tidak masalah, kedua perintah ini murni membaca skema+data lewat Django ORM/SQL mentah, tidak
-# bergantung pada kode aplikasi lain yang mungkin sudah berubah.
+# sebelumnya, juga identik.
+#
+# ⚠️ KOREKSI 04-09-2026 (tinjauan akhir P2): kalimat lama "checkout itu boleh basi" hanya SEPARUH
+# benar. `periksa_index` membandingkan Transaction._meta.indexes dari KODE YANG BERJALAN dengan
+# pg_index: index INVALID terdeteksi dari kode mana pun (seluruh index tabel dibaca dari katalog),
+# tapi index HILANG hanya bisa dilaporkan kode yang mengenal namanya -- checkout basi melaporkan
+# "Bersih" untuk index baru yang tak pernah terbangun. Dua hal ditambahkan karena itu: revisi
+# /opt/toa (commit + branch) dicatat di log & status.json supaya drift TERLIHAT (memperbarui
+# checkout ke commit yang di-deploy = langkah pasca-deploy wajib, runbook rollback), dan bagian 2b
+# memeriksa index INVALID DB-wide lewat SQL langsung -- setara gerbang J4 cadangan, tak bergantung
+# checkout sama sekali (index HILANG memang tetap hanya terjawab kode terbaru; dinyatakan apa adanya).
 set -uo pipefail   # TANPA -e SENGAJA: prinsip "laporan selalu utuh" (periksa_kesehatan aturan
                    # #1 di docstring-nya) -- satu gerbang gagal tidak boleh membungkam gerbang
                    # lainnya. Tiap bagian di bawah menangkap kegagalannya sendiri.
@@ -161,7 +169,11 @@ log "$CAD_STATUS: $CAD_PESAN"
 naikkan "$CAD_STATUS"
 
 # --- 2. Index hilang/INVALID (F6), murni -------------------------------------
-log "--- 2. Index F6 (manage.py periksa_index, produksi) ---"
+# Revisi /opt/toa dicatat lebih dulu: hasil periksa_index hanya selengkap kode yang menjalankannya
+# (lihat KOREKSI di kepala berkas). Gagal membaca git = "?" -- bukan alasan menggagalkan laporan.
+REVISI_APP="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
+BRANCH_APP="$(git -C "$APP_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+log "--- 2. Index F6 (manage.py periksa_index, produksi; kode $APP_DIR @ $REVISI_APP [$BRANCH_APP]) ---"
 INDEX_OUT="$(jalankan_manage periksa_index 2>&1)"
 INDEX_KODE=$?
 { echo "### periksa_index ($TS_MULAI) ###"; echo "$INDEX_OUT"; } >> "$LOG_FILE"
@@ -174,6 +186,26 @@ else
 fi
 log "$INDEX_STATUS: $INDEX_PESAN"
 naikkan "$INDEX_STATUS"
+
+# --- 2b. Index INVALID DB-wide, SQL langsung (tak bergantung checkout) ------
+# Setara gerbang J4 di scripts/cadangan/backup-harian.sh: pg_dump membuang index invalid diam-diam
+# dan J4 membatalkan dump bila ada satu pun -- jadi yang sama harus terlihat di sini SEHARI
+# SEBELUM cadangan berhenti, dari kode mana pun. Satu SELECT atas pg_index, bukan superuser.
+log "--- 2b. Index INVALID DB-wide (SELECT pg_index, produksi) ---"
+INVALID_DBWIDE="$(psql "$PROD_URL" -qtAc "SELECT i.indexrelid::regclass || ' on ' || i.indrelid::regclass FROM pg_index i WHERE NOT i.indisvalid;" 2>>"$LOG_FILE")"
+INVALID_KODE=$?
+if [ "$INVALID_KODE" -ne 0 ]; then
+  INVALID_STATUS="PERHATIAN"
+  INVALID_PESAN="query pg_index ke produksi gagal (lihat $LOG_FILE)"
+elif [ -n "$(echo "$INVALID_DBWIDE" | tr -d '[:space:]')" ]; then
+  INVALID_STATUS="BAHAYA"
+  INVALID_PESAN="index INVALID di produksi (cadangan besok akan DIBATALKAN gerbang J4): $(echo "$INVALID_DBWIDE" | tr '\n' ';')"
+else
+  INVALID_STATUS="OK"
+  INVALID_PESAN="tidak ada index invalid di seluruh basis data produksi"
+fi
+log "$INVALID_STATUS: $INVALID_PESAN"
+naikkan "$INVALID_STATUS"
 
 # --- 3. Ukuran basis data PRODUKSI (pg_database_size, TANPA eksekusi shell) --
 # COPY FROM PROGRAM DICABUT 04-09-2026 (veto pemilik) -- lihat penjelasan panjang di kepala
@@ -234,6 +266,8 @@ jq -n \
   --arg cad_verdict "$CAD_VERDICT" --arg cad_terakhir_ok "$CAD_TERAKHIR_OK" \
   --argjson cad_umur_jam "$CAD_UMUR_JAM_JSON" \
   --arg index_status "$INDEX_STATUS" --arg index_pesan "$INDEX_PESAN" \
+  --arg app_dir "$APP_DIR" --arg revisi_app "$REVISI_APP" --arg branch_app "$BRANCH_APP" \
+  --arg invalid_status "$INVALID_STATUS" --arg invalid_pesan "$INVALID_PESAN" \
   --arg dbsize_status "$DBSIZE_STATUS" --arg dbsize_pesan "$DBSIZE_PESAN" \
   --argjson dbsize_bytes "$DBSIZE_BYTES_JSON" \
   --arg kes_status "$KES_STATUS" --argjson kes_kode "$KES_KODE" \
@@ -249,7 +283,9 @@ jq -n \
        terakhir_ok: (if ($cad_terakhir_ok|length) > 0 then $cad_terakhir_ok else null end),
        umur_jam: $cad_umur_jam
      },
-     index_f6: { status: $index_status, pesan: $index_pesan },
+     index_f6: { status: $index_status, pesan: $index_pesan,
+                 kode_app: { dir: $app_dir, revisi: $revisi_app, branch: $branch_app } },
+     index_invalid_dbwide: { status: $invalid_status, pesan: $invalid_pesan },
      ukuran_db_produksi: { status: $dbsize_status, pesan: $dbsize_pesan, bytes: $dbsize_bytes },
      periksa_kesehatan_django: { status: $kes_status, kode_keluar: $kes_kode, ringkasan: $kes_ringkasan },
      log_file: $log_file

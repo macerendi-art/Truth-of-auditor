@@ -1,10 +1,16 @@
 # Runbook — Rollback aplikasi dan basis data produksi (G2, 2026-09-04)
 
 Status sebelum ini: **prosedur rollback tak terdokumentasi.** Aplikasi hidup di Railway dengan
-migrasi basis data yang berjalan otomatis di setiap deploy. Riwayat migrasnya aditif saja
+migrasi basis data yang berjalan otomatis di setiap deploy. Riwayat migrasnya dulu aditif saja
 (nol `RemoveField`/`DeleteModel`), jadi rollback aman **secara kebetulan, bukan karena tooling** —
 dan kebetulan itu hanya berlaku sementara data terus bertumbuh. Dokumen ini menutup celah itu:
 prosedur yang jelas, bisa dieksekusi, dan jujur tentang apa yang sudah/belum pernah diuji.
+
+> ⚠️ **Amandemen 04-09-2026 (tinjauan akhir P1/P2/P6).** Sejak `transactions/0011` klaim "semua
+> migrasi aditif" **tidak lagi benar**: 0011 MEMBUANG empat index. Bagian baru
+> [Urutan deploy wajib & jendela terlarang](#urutan-deploy-wajib--jendela-terlarang-p1p2-04-09-2026)
+> dan [Migrasi yang tidak boleh dibalik](#migrasi-yang-tidak-boleh-dibalik-lewat-migrate-p6)
+> mengoreksi contoh `migrate transactions 0009` yang dulu ada di dokumen ini.
 
 Sumber tugas: `docs/daftar-perbaikan-2026-09-03.md` butir G2.
 
@@ -50,6 +56,62 @@ Keduanya adalah read-only:
   false`).
 
 Angka dan status apa pun yang terlihat, catat untuk laporan insiden.
+
+---
+
+## Urutan deploy wajib & jendela terlarang (P1/P2, 04-09-2026)
+
+Start command Railway menjalankan `migrate` **sebelum** gunicorn membuka port, dan instance lama
+masih melayani trafik selama itu. Dua migrasi di cabang v1.25.0 membuat urutan ini **wajib**, bukan
+opsional — rinciannya ada di docstring masing-masing migrasi, ini ringkasannya yang dieksekusi:
+
+**Jendela terlarang: 03:00–03:30 WIB** (jangan `railway up`, jangan DDL psql). `pg_dump` cadangan
+harian (`scripts/cadangan/backup-harian.sh`, `toa-cadangan.timer` 03:00 + jitter 5 menit) memegang
+transaksi 13+ menit. Dua akibatnya:
+- `DROP INDEX` non-concurrent (0011 lewat `migrate`) minta `ACCESS EXCLUSIVE` pada
+  `transactions_transaction`; begitu permintaan itu **mengantre** di belakang `pg_dump`, semua lock
+  baru pada tabel itu — termasuk `ACCESS SHARE` dari SELECT biasa — ikut mengantre. Instance lama
+  **membeku** pada tabel inti sampai dump selesai; boot baru melewati health-check → restart ×3 →
+  Railway menyerah, tidak ada instance yang naik.
+- `CREATE INDEX CONCURRENTLY` (0012 di boot bila psql terlewat) **menunggu** semua transaksi yang
+  lebih tua selesai sebelum fase keduanya — tertahan selama dump walau tanpa lock eksklusif.
+Jam sepi *terasa* aman; justru itu jam cadangan.
+
+**Sebelum `railway up`** (psql produksi, di luar jendela di atas, tidak sedang ada rekonsiliasi/ingest besar):
+
+```sql
+-- P1: 0011 -- nama dihitung dari names_digest Django, verifikasi dulu lewat \d transactions_transaction
+DROP INDEX CONCURRENTLY IF EXISTS transactions_transaction_username_6b02bd12;
+DROP INDEX CONCURRENTLY IF EXISTS transactions_transaction_username_6b02bd12_like;
+DROP INDEX CONCURRENTLY IF EXISTS transactions_transaction_reference_65ce6e73;
+DROP INDEX CONCURRENTLY IF EXISTS transactions_transaction_reference_65ce6e73_like;
+-- P2: 0012 -- DDL persis dari docstring migrasi
+CREATE INDEX CONCURRENTLY "tx_hutang_piutang_idx"
+    ON "transactions_transaction" ("toko_id", "source_type_id", "posted_date")
+    WHERE ("raw" ->> 'Kategori') ~* '^\s*(hutang|piutang)\s*$';
+-- gerbang: HARUS kosong (CONCURRENTLY yang terputus meninggalkan index INVALID;
+-- gerbang J4 cadangan menolak dump bila ada satu pun)
+SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid;
+```
+
+Dengan itu `migrate` saat boot menemukan katalog sudah sesuai dan **no-op** untuk keduanya (0011:
+introspeksi Django tidak menemukan index untuk dibuang; 0012: `TambahIndexAman` melihat index ada &
+valid).
+
+**Sesudah naik**, dari **kode baru** (`railway ssh`):
+1. `python manage.py periksa_index` — harus "Bersih".
+2. `EXPLAIN (ANALYZE, BUFFERS)` fase-1 `/hutang-piutang/` (query di docstring 0012) — index parsial
+   harus dipakai; `predicate_implied_by` belum pernah dibuktikan di Postgres nyata.
+3. Buka `/kelola/log/`, pastikan baris `login` muncul dengan IP.
+4. **Perbarui `/opt/toa` di VPS ke commit yang di-deploy** (`git -C /opt/toa fetch origin && git -C
+   /opt/toa checkout <commit>`). Pemantauan harian (`toa-kesehatan.timer`) menjalankan
+   `periksa_index` dari checkout itu: index **INVALID** terdeteksi dari kode mana pun (seluruh
+   `pg_index` tabel dibaca), tapi index **HILANG** hanya bisa dilaporkan kode yang mengenal namanya.
+   Skrip kesehatan kini mencatat revisi `/opt/toa` di log dan `status.json` supaya drift terlihat.
+
+Kalau langkah psql **terlewat**, hasil akhirnya tetap benar — hanya harganya yang berbeda: 0011
+membekukan tabel inti selama transaksi terpanjang saat itu, 0012 membangun index di boot dan bisa
+terbunuh health-check (→ INVALID → cadangan berhenti, lihat P2 di docstring 0012).
 
 ---
 
@@ -110,22 +172,42 @@ tidak boleh dibatalkan begitu saja tanpa pemahaman penuh tentang apa yang dihapu
 
 ### Peringatan penting
 
-**Karena semua migrasi proyek ini bersifat aditif (nol `RemoveField`/`DeleteModel`), tidak ada
-satu pun yang pernah diuji untuk mundur.** Jika mundur diperlukan, hal itu adalah situasi
-luar biasa (data corruption yang diperkenalkan migrasi, atau migrasi yang mengeksekusi DML
-yang tidak dapat dipulihkan) — bukan operasi rutin.
+**Tidak ada satu pun migrasi proyek ini yang pernah diuji untuk mundur.** Sampai 03-09-2026
+semuanya aditif (nol `RemoveField`/`DeleteModel`); sejak `transactions/0011` (04-09-2026) ada satu
+yang **membuang** index — dan justru yang itu **tidak boleh dibalik lewat `migrate`** (lihat bagian
+khusus di bawah). Jika mundur diperlukan, hal itu adalah situasi luar biasa (data corruption yang
+diperkenalkan migrasi, atau migrasi yang mengeksekusi DML yang tidak dapat dipulihkan) — bukan
+operasi rutin.
 
-Urutan mundur migrasi:
+Urutan mundur migrasi (untuk migrasi yang memang aman dibalik):
 
 ```bash
 # Dari workstation lokal (dengan DATABASE_URL menunjuk ke produksi atau staging):
 python manage.py migrate <APP> <NOMOR_SEBELUMNYA>
 
-# Contoh: jika deployment terbaru menjalankan migrasi 0010, mundur ke 0009:
-python manage.py migrate transactions 0009
+# Contoh yang AMAN: membalik 0012 (index parsial) — database_backwards-nya
+# remove_index(concurrently=True), tidak memblokir apa pun:
+python manage.py migrate transactions 0011
+
+# JANGAN: `migrate transactions 0010` atau lebih rendah — itu MEMBALIK 0011 (lihat bagian
+# "Migrasi yang tidak boleh dibalik").
 
 # Setelah itu, langsung redeploy dari commit lama (lihat di atas).
 ```
+
+### Migrasi yang tidak boleh dibalik lewat `migrate` (P6)
+
+**`transactions/0011_buang_index_username_reference`.** Membaliknya = `AlterField` kembali ke
+`db_index=True`, dan Django menjalankannya sebagai `CREATE INDEX` **polos** — non-concurrent, tanpa
+`IF NOT EXISTS` (`django/db/backends/base/schema.py` `_alter_field`, plus `_like` dari schema editor
+Postgres) — ×4 atas 10,3 juta baris (719 MB), memegang lock yang memblokir **semua tulis** ke
+`transactions_transaction` selama build (menit), dari koneksi psql/Django di laptop lewat proxy
+publik yang bisa putus di tengah dan meninggalkan index INVALID (→ gerbang J4 menghentikan cadangan).
+Bila index itu sudah dibangun manual lebih dulu, migrasi mundurnya malah **gagal "already exists"**.
+
+Kalau keempat index itu benar-benar diperlukan lagi: bangun `CONCURRENTLY` lewat psql dengan nama
+persis di docstring 0011, dan **biarkan kode tetap di 0011** — index ekstra di DB yang tidak
+dideklarasikan model tidak mengganggu apa pun (itulah keadaan sebelum 0011).
 
 ### Kapan mundur migrasi boleh dipertimbangkan
 
@@ -297,10 +379,11 @@ dieksekusi di produksi nyata. Catat ini sebelum mengandalkan prosedur ini di sit
 ### Tidak diuji
 
 1. **Rollback migrasi basis data** (`python manage.py migrate <APP> <NOMOR>`)
-   - Kode yang mendukung itu ada dan seharusnya berfungsi, tapi migrasi proyek ini semua aditif
-     (nol `RemoveField`) sehingga tidak pernah ada alasan nyata untuk mundur.
-   - **Kalau perlu dijalankan:** siapkan staging lokal dengan dump backup yang sama, uji mundur
-     di sana DULU sebelum produksi.
+   - Kode yang mendukung itu ada dan seharusnya berfungsi, tapi tidak pernah ada alasan nyata
+     untuk mundur — dan 0011 **tidak boleh** dibalik lewat jalur ini sama sekali (lihat bagian
+     "Migrasi yang tidak boleh dibalik").
+   - **Kalau perlu dijalankan:** siapkan staging (`docs/runbook-staging-2026-09-04.md`,
+     `toa_staging` di VPS) dengan dump backup yang sama, uji mundur di sana DULU sebelum produksi.
 
 2. **Mundur migrasi yang memodifikasi data (RunPython dengan logika DML)**
    - Beberapa migrasi memiliki operasi forward-only yang memodifikasi data. Mundur tidak akan
@@ -334,8 +417,10 @@ dieksekusi di produksi nyata. Catat ini sebelum mengandalkan prosedur ini di sit
    manual).
 2. Restore uji dari backup terakhir ke database sekali-pakai di `toa`, verifikasi count/sums.
 3. Di staging Railway: deploy versi commit lama tujuan rollback, verifikasi aplikasi naik.
-4. Jalankan migrasi mundur `python manage.py migrate transactions 0009` di DB lokal dengan dump
-   backup, pastikan lolos tanpa error.
+4. Jalankan migrasi mundur yang **aman** — `python manage.py migrate transactions 0011` (membalik
+   0012, `remove_index(concurrently=True)`) — di **staging** `toa_staging` dengan dump backup,
+   pastikan lolos tanpa error dan `periksa_index` sesudahnya bersih. **Jangan** menguji
+   `migrate transactions 0010`/`0009`: itu membalik 0011 (`CREATE INDEX` blokir-tulis ×4).
 
 ---
 

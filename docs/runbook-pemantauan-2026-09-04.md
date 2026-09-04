@@ -55,9 +55,20 @@ VPS (disk produksi, lihat di bawah).** Bukti sebelum memutuskan:
    tepat seperti dugaan brief.
 2. `core/management/commands/periksa_index.py` di checkout itu **identik byte-untuk-byte**
    dengan repo (dibandingkan lewat `diff` sebelum dipakai). `periksa_kesehatan.py` ada sebagai
-   berkas belum ter-commit di checkout itu (sisa eksplorasi sebelumnya) — juga identik. Checkout
-   itu sendiri boleh basi di commit lain (cabang gladi, bukan `main`) karena kedua perintah ini
-   murni membaca skema+data lewat Django ORM/SQL mentah, tidak bergantung kode aplikasi lain.
+   berkas belum ter-commit di checkout itu (sisa eksplorasi sebelumnya) — juga identik.
+   **Koreksi 04-09-2026 (tinjauan akhir P2):** kalimat lama "checkout itu boleh basi" hanya
+   **separuh benar**. `periksa_index` membandingkan `Transaction._meta.indexes` dari **kode yang
+   berjalan** dengan `pg_index`: index **INVALID** terdeteksi dari kode mana pun (seluruh index
+   tabel dibaca dari katalog), tapi index **HILANG** hanya bisa dilaporkan kode yang mengenal
+   namanya — dari checkout `claude/test-fabbe0` (e414de5, 01-09-2026), `tx_hutang_piutang_idx`
+   (migrasi 0012) yang tak pernah terbangun akan dilaporkan "Bersih". Karena itu: (a) memperbarui
+   `/opt/toa` ke commit yang di-deploy adalah **langkah pasca-deploy wajib** (runbook rollback,
+   "Urutan deploy wajib"); (b) skrip kesehatan kini mencatat revisi `/opt/toa` (commit + branch)
+   di log dan `status.json` supaya drift-nya terlihat, dan menambah pemeriksaan index INVALID
+   **DB-wide lewat SQL langsung** (bagian 2b, setara gerbang J4 cadangan) yang tidak bergantung
+   pada checkout sama sekali. `/opt/toa` **sengaja belum diperbarui** saat ini ditulis: produksi
+   belum menjalankan v1.25.0, jadi kode baru akan mengalarm `tx_hutang_piutang_idx` HILANG setiap
+   pagi sebelum pemilik memutuskan deploy — perbarui setelah deploy, bukan sebelum.
 3. `DATABASE_URL` di `/etc/toa.env` menunjuk basis data **gladi migrasi lokal `toa`** di VPS ini
    (pembanding cutover Contabo, beku di titik snapshotnya) — **bukan** produksi. Memeriksa
    kesehatan DB itu tidak berguna (tak mencerminkan insiden produksi nyata: batch, sequence,

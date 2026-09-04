@@ -82,6 +82,37 @@ dulu `pg_stat_statements`/teks kueri aktual: apakah regexnya benar tersubstitusi
 literal — itulah kegagalan implikasi yang paling mungkin, BUKAN index yang
 salah bentuk.
 
+URUTAN DEPLOY WAJIB (P2, tinjauan akhir 04-09-2026) — bukan saran
+=================================================================
+1. psql produksi, DI LUAR 03:00–03:30 WIB: `CREATE INDEX CONCURRENTLY
+   "tx_hutang_piutang_idx" …` (DDL di bawah), lalu
+   `SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid;` → KOSONG.
+   Jendela itu terlarang karena `pg_dump` cadangan harian memegang transaksi
+   13+ menit, dan `CREATE INDEX CONCURRENTLY` MENUNGGU semua transaksi yang
+   lebih tua selesai sebelum fase keduanya — walau tak memegang lock
+   eksklusif, ia tetap tertahan selama dump berjalan.
+2. BARU `railway up`. `TambahIndexAman` menemukan index ada & valid → no-op.
+3. Sesudah naik, DARI KODE BARU (`railway ssh`): `python manage.py
+   periksa_index`, lalu `EXPLAIN (ANALYZE, BUFFERS)` fase-1 `/hutang-piutang/`
+   (query di bawah) — `predicate_implied_by` belum dibuktikan di Postgres
+   nyata (lihat ⚠️ di atas).
+4. Perbarui checkout `/opt/toa` di VPS ke commit yang di-deploy (pemantauan
+   harian menjalankan `periksa_index` dari sana; lihat alasan di bawah).
+
+Kalau langkah 1 TERLEWAT: `TambahIndexAman` membangun index INI saat boot,
+atas 10,3 juta baris, mengevaluasi regex `raw->>'Kategori'` per baris — port
+belum terbuka selama itu. Health-check Railway membunuh container di tengah
+build → index tertinggal `indisvalid=false`, migrasi TERCATAT selesai
+(core/db_ops.py). Besok 03:00 gerbang J4 cadangan menemukan index invalid →
+dump DIBATALKAN (alarm hanya ke journal). Yang menangkapnya kemudian:
+`periksa_index` — INVALID dideteksi LINTAS-KODE (SELURUH index tabel dibaca
+dari pg_index, tak bergantung daftar `Transaction._meta.indexes` kode yang
+berjalan) — dan bagian 1 skrip kesehatan (verdict cadangan GAGAL). Yang
+TIDAK tertangkap dari checkout basi: index HILANG (CONCURRENTLY gagal total,
+migrasi tercatat selesai, nama index tak pernah ada di pg_index) — hanya
+kode yang mengenal `tx_hutang_piutang_idx` yang bisa melaporkannya. Itulah
+alasan langkah 4, dan alasan skrip kesehatan kini mencatat revisi `/opt/toa`.
+
 `atomic = False` + `TambahIndexAman`: di produksi index dibangun lebih dulu
 lewat psql (CREATE INDEX CONCURRENTLY) supaya migrasi tidak menahan boot;
 di SQLite (tes & dev) turun ke AddIndex biasa. Lihat core/db_ops.py.
