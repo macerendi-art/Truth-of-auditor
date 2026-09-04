@@ -13,6 +13,7 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
 from core.models import AuditLog
+from loginguard.models import LoginAttempt
 
 User = get_user_model()
 
@@ -50,13 +51,44 @@ class LoginLogoutAuditTests(TestCase):
         self.assertNotIn("salah-total-99", log.objek)
         self.assertNotIn("salah-total-99", str(log.detail))
 
-    def test_login_gagal_username_tak_dikenal_tetap_tercatat(self):
+    def test_login_gagal_username_tak_dikenal_tetap_tercatat_tanpa_ketikan(self):
+        # P4: username yang tidak cocok user mana pun TIDAK disimpan — bisa
+        # saja itu kata sandi yang salah kolom. Yang tercatat: placeholder +
+        # panjang ketikan (cukup untuk membedakan "typo" dari "acak").
         self.client.post(
             reverse("login"), {"username": "tidak-terdaftar", "password": "apa-saja"}
         )
         log = AuditLog.objects.filter(aksi="login_gagal").latest("id")
-        self.assertEqual(log.objek, "tidak-terdaftar")
+        self.assertEqual(log.objek, "(username tidak dikenal)")
+        self.assertEqual(log.detail, {"panjang": len("tidak-terdaftar")})
         self.assertIsNone(log.user)
+
+    def test_login_gagal_salah_kapital_tetap_menunjuk_akun_kanonik(self):
+        self.client.post(
+            reverse("login"), {"username": "PEMAKAI", "password": "salah"}
+        )
+        log = AuditLog.objects.filter(aksi="login_gagal").latest("id")
+        self.assertEqual(log.objek, "pemakai")   # nilai DB, bukan ketikan
+        self.assertEqual(log.detail, {})
+
+    def test_sandi_yang_diketik_di_kolom_username_tidak_mendarat_di_tabel_mana_pun(self):
+        # Skenario P4: supervisor mengetik sandinya di kolom username, Enter.
+        # Tidak boleh ada di AuditLog (kolom mana pun) MAUPUN LoginAttempt
+        # (C4 menyimpan kunci per username) — keduanya tampil ke admin dan
+        # ikut cadangan/staging.
+        rahasia = "Spv-Kuat#88"
+        self.client.post(
+            reverse("login"), {"username": rahasia, "password": "x"},
+            REMOTE_ADDR="203.0.113.77",
+        )
+        log = AuditLog.objects.filter(aksi="login_gagal").latest("id")
+        self.assertEqual(log.objek, "(username tidak dikenal)")
+        for log in AuditLog.objects.all():
+            for kolom in (log.objek, log.username, log.user_agent, str(log.detail)):
+                self.assertNotIn(rahasia.lower(), kolom.lower())
+        self.assertTrue(LoginAttempt.objects.exists())  # penguncian tetap mencatat
+        for baris in LoginAttempt.objects.all():
+            self.assertNotIn(rahasia.lower(), baris.username.lower())
 
     def test_login_gagal_merekam_ip(self):
         self.client.post(
@@ -80,7 +112,8 @@ class SignalEdgeCaseTests(TestCase):
             credentials={"username": "siapa", "password": "rahasia123"},
         )
         log = AuditLog.objects.filter(aksi="login_gagal").latest("id")
-        self.assertEqual(log.objek, "siapa")
+        self.assertEqual(log.objek, "(username tidak dikenal)")  # "siapa" bukan user (P4)
+        self.assertNotIn("siapa", log.objek)
         self.assertIsNone(log.ip)
         self.assertNotIn("rahasia123", str(log.detail))
         self.assertNotIn("rahasia123", log.objek)

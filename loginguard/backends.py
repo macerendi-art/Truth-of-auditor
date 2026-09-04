@@ -32,6 +32,14 @@ terkirim oleh `authenticate()` SENDIRI baik lewat jalur `break` (PermissionDenie
 maupun exhaustion loop biasa (kode sumbernya mengirim sinyal itu TANPA
 syarat setelah loop, apa pun sebab loop berhenti) — jadi TIDAK ada duplikasi
 pencatatan audit di sini; modul ini murni MEMBLOKIR, bukan mencatat.
+
+SANDI SALAH JUGA MELEMPAR `PermissionDenied` (P5(a), tinjauan akhir
+04-09-2026): bukan hanya saat terkunci. Alasannya di komentar dalam
+`authenticate()` — sandi sudah di-hash sekali oleh super(); membiarkan loop
+lanjut ke `ModelBackend` kedua meng-hash-nya lagi tanpa hasil berbeda.
+`ModelBackend` di daftar kini HANYA melayani `get_user()` sesi lama (alasan
+dua-backend di atas), tidak pernah lagi `authenticate()` untuk
+username+password. Dikunci tes `HashSekaliTests` (loginguard/tests.py).
 """
 from django.contrib.auth import get_user_model
 from django.contrib.auth.backends import ModelBackend
@@ -73,4 +81,18 @@ class LockoutBackend(ModelBackend):
             return user
 
         register_failure(username, ip)
-        return None
+        # P5(a): sandi SUDAH diperiksa (PBKDF2 ratusan ms) oleh ModelBackend
+        # lewat super() di atas. Mengembalikan None membuat authenticate()
+        # LANJUT ke `ModelBackend` berikutnya di AUTHENTICATION_BACKENDS,
+        # yang meng-hash sandi yang sama SEKALI LAGI (termasuk dummy hash
+        # untuk username tak dikenal) — dua kali biaya CPU per percobaan
+        # gagal, dari pihak yang belum login. PermissionDenied menghentikan
+        # loop di sini; hasilnya identik (None + satu sinyal
+        # user_login_failed) karena ModelBackend kedua adalah logika yang
+        # PERSIS sama dengan super() yang baru saja menolak. Konsekuensi
+        # yang diterima sadar: backend apa pun SESUDAH LockoutBackend tak
+        # pernah tercapai untuk pasangan username+password — kalau kelak ada
+        # backend lain (LDAP dsb.), ia harus diletakkan DI DEPAN, atau
+        # keputusan ini ditinjau ulang. Dilempar juga saat kill switch
+        # mati: soal hash ganda tak ada hubungannya dengan penguncian.
+        raise PermissionDenied

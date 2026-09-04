@@ -9,7 +9,11 @@ class LoginAttemptAdmin(admin.ModelAdmin):
 
     Aksi "Buka kunci" = jalan pulih HTTP TAMBAHAN untuk admin yang masih bisa
     login — `manage.py buka_kunci_login` tetap jalan pulih UTAMA (non-HTTP,
-    dipakai bila admin sendiri ikut terkunci)."""
+    dipakai bila admin sendiri ikut terkunci).
+
+    Baris ber-`username` berawalan `?` = percobaan pada username yang TIDAK
+    dikenal, disimpan sebagai hash (P4) — ketikan aslinya sengaja tidak ada
+    di mana pun (bisa saja itu kata sandi yang salah kolom)."""
 
     list_display = ("username", "ip", "fail_count", "locked_until", "updated_at")
     list_filter = ("locked_until",)

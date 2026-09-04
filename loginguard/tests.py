@@ -10,6 +10,7 @@ pesan, dan kompatibilitas sesi lama (dua-backend, bukan satu).
 """
 from datetime import timedelta
 from io import StringIO
+from unittest import mock
 
 from django.contrib.auth import authenticate, get_user_model
 from django.core.management import call_command
@@ -18,7 +19,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .models import LoginAttempt
-from .throttle import buka_kunci, is_locked, register_failure, register_success
+from .throttle import (
+    RETENSI_BARIS, bersihkan_kedaluwarsa, buka_kunci, is_locked, kunci_username,
+    register_failure, register_success,
+)
 
 User = get_user_model()
 
@@ -28,7 +32,92 @@ def _req(ip="203.0.113.9"):
 
 
 class ThrottleUnitTests(TestCase):
-    """Unit langsung atas `loginguard.throttle` — tanpa HTTP, tanpa backend."""
+    """Unit langsung atas `loginguard.throttle` — tanpa HTTP, tanpa backend.
+
+    `pemakai`/`lain` dibuat sebagai User sungguhan supaya kunci barisnya
+    tetap terbaca ("pemakai"); username lain di tes ini (x/y/z/a/b/...) TIDAK
+    punya User dan sengaja dibiarkan lewat jalur hash `?...` (P4) — asersinya
+    lewat `is_locked`, bukan `LoginAttempt.objects.get(username=...)`."""
+
+    def setUp(self):
+        User.objects.create_user("pemakai", password="Pw-Kuat#88", role="auditor")
+        User.objects.create_user("lain", password="Pw-Kuat#88", role="auditor")
+
+    # ---- P4: ketikan kolom username tak pernah mendarat di tabel ----------
+
+    def test_username_dikenal_disimpan_kanonik_lowercase(self):
+        self.assertEqual(kunci_username("  PemakaI "), "pemakai")
+
+    def test_username_tak_dikenal_disimpan_sebagai_hash_bukan_ketikan(self):
+        # Skenario nyata: kata sandi diketik di kolom username. Penguncian
+        # harus tetap bekerja (non-leak), tapi string-nya tak boleh ada di
+        # kolom mana pun.
+        salah_kolom = "Spv-Kuat#88"
+        for _ in range(5):
+            register_failure(salah_kolom, "203.0.113.9")
+        self.assertTrue(is_locked(salah_kolom, "203.0.113.9"))
+        self.assertTrue(is_locked(" spv-kuat#88 ", "203.0.113.9"))  # normalisasi sama
+        for baris in LoginAttempt.objects.all():
+            self.assertNotIn("spv-kuat", baris.username.lower())
+            self.assertTrue(baris.username.startswith("?"), baris.username)
+        self.assertEqual(LoginAttempt.objects.count(), 1)
+
+    def test_kunci_username_deterministik_dan_tak_idempoten(self):
+        k1 = kunci_username("tidak-ada")
+        self.assertEqual(k1, kunci_username("TIDAK-ADA"))
+        self.assertTrue(k1.startswith("?"))
+        # Kunci yang sudah dipetakan BUKAN input yang sah untuk dipetakan lagi
+        # (docstring kunci_username) — dijaga supaya tak ada yang "menghemat
+        # query" dengan meneruskan kunci alih-alih username mentah.
+        self.assertNotEqual(kunci_username(k1), k1)
+
+    def test_buka_kunci_username_tak_dikenal_lewat_pemetaan_yang_sama(self):
+        for _ in range(5):
+            register_failure("tidak-ada", "1.1.1.1")
+        self.assertTrue(is_locked("tidak-ada", "1.1.1.1"))
+        self.assertEqual(buka_kunci(username="Tidak-Ada"), 1)
+        self.assertFalse(is_locked("tidak-ada", "1.1.1.1"))
+
+    # ---- P5(b): purge baris mati -------------------------------------------
+
+    def test_bersihkan_kedaluwarsa_buang_baris_basi_simpan_kunci_aktif(self):
+        now = timezone.now()
+        basi = now - RETENSI_BARIS - timedelta(minutes=1)
+        # updated_at auto_now: timpa lewat update() supaya nilainya masa lalu.
+        LoginAttempt.objects.create(username="?basi", ip="1.1.1.1", fail_count=2)
+        LoginAttempt.objects.create(
+            username="?basi-kunci-lewat", ip="1.1.1.1", fail_count=5,
+            locked_until=now - timedelta(hours=1),
+        )
+        LoginAttempt.objects.create(
+            username="?basi-tapi-masih-terkunci", ip="1.1.1.1", fail_count=5,
+            locked_until=now + timedelta(days=2),   # LOGIN_LOCKOUT_MINUTES besar
+        )
+        LoginAttempt.objects.create(username="?segar", ip="1.1.1.1", fail_count=1)
+        LoginAttempt.objects.filter(username__startswith="?basi").update(updated_at=basi)
+
+        jumlah = bersihkan_kedaluwarsa(now=now)
+
+        self.assertEqual(jumlah, 2)
+        sisa = set(LoginAttempt.objects.values_list("username", flat=True))
+        self.assertEqual(sisa, {"?basi-tapi-masih-terkunci", "?segar"})
+
+    def test_register_success_ikut_membersihkan_baris_basi(self):
+        LoginAttempt.objects.create(username="?basi", ip="9.9.9.9", fail_count=1)
+        LoginAttempt.objects.filter(username="?basi").update(
+            updated_at=timezone.now() - RETENSI_BARIS - timedelta(minutes=1)
+        )
+        register_failure("pemakai", "1.1.1.1")
+        register_success("pemakai", "1.1.1.1")
+        self.assertEqual(LoginAttempt.objects.count(), 0)
+
+    def test_register_success_tetap_sukses_bila_pembersihan_gagal(self):
+        register_failure("pemakai", "1.1.1.1")
+        with mock.patch(
+            "loginguard.throttle.bersihkan_kedaluwarsa", side_effect=RuntimeError("db")
+        ), self.assertLogs("loginguard.throttle", level="ERROR"):
+            register_success("pemakai", "1.1.1.1")   # tidak melempar, tapi BERSUARA
+        self.assertFalse(LoginAttempt.objects.filter(username="pemakai").exists())
 
     def test_belum_ada_baris_tidak_terkunci(self):
         self.assertFalse(is_locked("siapa", "203.0.113.9"))
@@ -207,6 +296,50 @@ class BackendTests(TestCase):
         finally:
             user_login_failed.disconnect(dispatch_uid="tes-dobel")
         self.assertEqual(len(panggilan), 1)
+
+
+class HashSekaliTests(TestCase):
+    """P5(a): sandi salah di-hash SATU kali, bukan dua.
+
+    Sebelum perbaikan, `LockoutBackend` mengembalikan None → `authenticate()`
+    lanjut ke `ModelBackend` kedua yang meng-hash sandi yang sama lagi
+    (user ada: `check_password`; user tak ada: dummy `make_password` untuk
+    menyamakan waktu). Keduanya dihitung lewat nama yang diimpor
+    `django.contrib.auth.base_user`, tempat `AbstractBaseUser` memanggilnya."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            "pemakai", password="Pw-Kuat#88", role="auditor"
+        )
+
+    def _hitung(self, nama, **cred):
+        target = f"django.contrib.auth.base_user.{nama}"
+        import django.contrib.auth.base_user as bu
+        asli = getattr(bu, nama)
+        with mock.patch(target, wraps=asli) as m:
+            hasil = authenticate(_req(), **cred)
+        return hasil, m.call_count
+
+    def test_sandi_salah_user_ada_hash_sekali(self):
+        hasil, n = self._hitung("check_password", username="pemakai", password="salah")
+        self.assertIsNone(hasil)
+        self.assertEqual(n, 1)
+
+    def test_username_tak_dikenal_dummy_hash_sekali(self):
+        hasil, n = self._hitung("make_password", username="tidak-ada", password="salah")
+        self.assertIsNone(hasil)
+        self.assertEqual(n, 1)
+
+    @override_settings(LOGIN_LOCKOUT_ENABLED=False)
+    def test_kill_switch_mati_tetap_hash_sekali(self):
+        hasil, n = self._hitung("check_password", username="pemakai", password="salah")
+        self.assertIsNone(hasil)
+        self.assertEqual(n, 1)
+
+    def test_sandi_benar_tetap_lolos_dan_hash_sekali(self):
+        hasil, n = self._hitung("check_password", username="pemakai", password="Pw-Kuat#88")
+        self.assertEqual(hasil, self.user)
+        self.assertEqual(n, 1)
 
 
 class HttpLoginTests(TestCase):

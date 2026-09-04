@@ -19,9 +19,14 @@ from core.models import TimeStampedModel
 class LoginAttempt(TimeStampedModel):
     """Penghitung kegagalan login berturut-turut untuk satu (username, IP).
 
-    `username` disimpan HASIL NORMALISASI (`strip().lower()`, lihat
-    `loginguard.throttle._norm_username`) — penguncian tidak boleh bisa
-    dihindari hanya dengan mengubah kapitalisasi. `ip` HASIL NORMALISASI
+    `username` BUKAN ketikan pengguna, melainkan KUNCI hasil
+    `loginguard.throttle.kunci_username` (P4): username kanonik lowercase
+    dari DB bila cocok user yang ada, selain itu `"?" + sha256[:40]` dari
+    ketikan ternormalisasi. Kolom username form login sering diisi kata
+    sandi (auto-fill meleset), dan tabel ini tampil di admin, ikut cadangan
+    dan staging — ketikan mentah tidak boleh pernah mendarat di sini.
+    Penguncian tetap tak bisa dihindari lewat kapitalisasi (kunci dipetakan
+    dari bentuk `strip().lower()`). `ip` HASIL NORMALISASI
     juga (dipotong 45 karakter, panjang maksimum representasi IPv6 — pola
     yang sama dipakai `web.middleware.IPAllowlistMiddleware`).
 
