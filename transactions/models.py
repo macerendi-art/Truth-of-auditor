@@ -165,8 +165,25 @@ class Transaction(TimeStampedModel):
 
     # Kunci pencocokan
     ticket_no = models.CharField(max_length=64, blank=True, db_index=True)
-    username = models.CharField(max_length=100, blank=True, db_index=True)
-    reference = models.CharField(max_length=128, blank=True, db_index=True)
+    # `username`/`reference` TANPA index (migrasi 0011, G5 audit 04-09-2026):
+    # disisir seluruh basis kode, satu-satunya pemakaian sebagai KUERI adalah
+    # `icontains` (pencarian global web/views.py::transactions + search_fields
+    # transactions/admin.py tanpa awalan `^`) — itu jadi `UPPER(kolom) LIKE
+    # UPPER('%q%')`, btree biasa mati karena kolom terbungkus fungsi dan
+    # `varchar_pattern_ops` (index `_like` yang menyertai `db_index=True` di
+    # Postgres) hanya melayani `LIKE 'awalan%'` case-sensitive — tak satu pun
+    # dipakai di sini. `reconciliation/engine.py` memakai kedua kolom ini
+    # sebagai kunci join, TAPI selalu pada list Python yang sudah dimuat lewat
+    # `sides()` (`list(qs.order_by("id"))`), tak pernah lewat `.filter(username=`
+    # /`.filter(reference=` pada queryset yang masih lazy. Pembanding
+    # `counterparty`/`description` sudah lama dicari `icontains` tanpa index
+    # apa pun dan tak ada yang mengeluh — dua kolom ini disamakan. Total 719 MB
+    # (base + `_like`, dua kolom) di produksi 8,8 juta baris. Lihat migrasi
+    # 0011 untuk cara buangnya (lewat `db_index=False`, BUKAN `DROP INDEX`
+    # manual) dan alasan kenapa itu TIDAK memakai pola `TambahIndexAman`
+    # (0008-0010) seperti index besar lainnya.
+    username = models.CharField(max_length=100, blank=True, db_index=False)
+    reference = models.CharField(max_length=128, blank=True, db_index=False)
     counterparty = models.CharField(
         max_length=200, blank=True, help_text="nama pengirim/penerima di bank"
     )
