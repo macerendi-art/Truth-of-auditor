@@ -122,13 +122,21 @@ sudo -u postgres vacuumdb -d "$TARGET_DB" --analyze-in-stages --jobs=4 >/dev/nul
 sudo -u postgres vacuumdb -d "$TARGET_DB" --analyze --jobs=4 >/dev/null
 
 log "--- migrate ke revisi kode yang SEDANG terpasang di $APP_DIR ---"
-( cd "$APP_DIR" && set -a && . "$ENV_FILE" && set +a && \
-  "$APP_DIR/.venv/bin/python" manage.py migrate --noinput )
+# WAJIB sudo -u toa_staging: $APP_DIR (0750) dan $ENV_FILE (0640, grup toa_staging) TIDAK bisa
+# dibaca user `toa` yang menjalankan skrip ini -- itu isolasi yang sengaja dibuat (lihat
+# bootstrap-vps.sh). Ditemukan gagal ("cd: /opt/toa-staging: Permission denied") saat
+# menjalankan skrip ini sungguhan untuk pertama kali; diperbaiki di sini, dijalankan ulang,
+# berhasil.
+sudo -u "$STAGING_ROLE" bash -c "
+  cd '$APP_DIR' && set -a && . '$ENV_FILE' && set +a && \
+  '$APP_DIR/.venv/bin/python' manage.py migrate --noinput
+"
 
 log "--- periksa_index (F6) atas $TARGET_DB pasca-migrate ---"
-( cd "$APP_DIR" && set -a && . "$ENV_FILE" && set +a && \
-  "$APP_DIR/.venv/bin/python" manage.py periksa_index ) || \
-  log "PERHATIAN: periksa_index melapor index hilang/invalid -- lihat keluaran di atas"
+sudo -u "$STAGING_ROLE" bash -c "
+  cd '$APP_DIR' && set -a && . '$ENV_FILE' && set +a && \
+  '$APP_DIR/.venv/bin/python' manage.py periksa_index
+" || log "PERHATIAN: periksa_index melapor index hilang/invalid -- lihat keluaran di atas"
 
 log "--- start $SERVICE ---"
 sudo systemctl start "$SERVICE"
