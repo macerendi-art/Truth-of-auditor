@@ -251,6 +251,14 @@ menyatakan itu dikalibrasi karena **Railway MENIMPA** XFF.
 **Satu-satunya benar:** `proxy_set_header X-Forwarded-For $remote_addr;` — **TIMPA**, jangan tambah.
 Jangan pakai `set_real_ip_from`/`real_ip_header`.
 
+> Tambahan 04-09-2026 (tinjauan akhir M8): sejak v1.25.0 **dua fitur lagi** bertumpu pada XFF yang
+> ditimpa, bukan hanya geo-block/IP allowlist — `loginguard` (kunci login per **(username, IP)**,
+> `loginguard/backends.py` → `web.middleware.resolve_client_ip`) dan kolom `AuditLog.ip` (C5).
+> Di belakang nginx yang *menambah* XFF, penyerang memilih "IP"-nya sendiri per request → kunci
+> (username, IP) tak pernah tercapai tanpa merotasi IP sungguhan, dan jejak audit merekam IP
+> karangan. Masukkan ke checklist GATE: `curl -H 'X-Forwarded-For: 1.2.3.4'` lalu pastikan
+> `AuditLog.ip` baris `login_gagal` = IP klien sebenarnya, bukan `1.2.3.4`.
+
 ### J3 — FASE 4 v1 me-restore ke database yang SUDAH BERISI 🔴
 Saat FASE 4, `toa` berisi data FASE 2 **plus** tulisan rekonsiliasi uji FASE 3 (`ReconBatch`,
 `MatchRun`, `MatchResult`, UPDATE `consumed_by_batch` di ribuan baris). Tanpa `--clean`:
