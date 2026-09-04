@@ -1,0 +1,40 @@
+# Unit systemd — aplikasi STAGING Truth of Auditor (gunicorn), F3 (2026-09-04).
+# Lihat docs/runbook-staging-2026-09-04.md.
+#
+# Sengaja TERPISAH TOTAL dari `toa.service` (gladi migrasi Contabo, /opt/toa, DB lokal `toa`):
+# checkout sendiri (/opt/toa-staging), OS user sendiri (toa_staging, tanpa akses ke rahasia
+# /home/toa), DB sendiri (toa_staging), port loopback sendiri (8001, BUKAN 8000).
+# Hanya dijangkau lewat `tailscale serve --https=443` yang mem-proxy dari antarmuka
+# tailnet ke 127.0.0.1:8001 -- proses ini sendiri TIDAK pernah mendengarkan di 0.0.0.0
+# atau IP tailnet secara langsung, jadi tak bisa diakses tanpa lewat tailnet.
+[Unit]
+Description=Truth of Auditor (STAGING, F3) — gunicorn
+After=network-online.target postgresql@18-main.service
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=toa_staging
+Group=toa_staging
+WorkingDirectory=/opt/toa-staging
+EnvironmentFile=/etc/toa-staging.env
+ExecStart=/opt/toa-staging/.venv/bin/gunicorn truth_auditor.wsgi:application \
+    --bind 127.0.0.1:8001 \
+    --workers 2 --threads 2 --worker-class gthread \
+    --worker-tmp-dir /dev/shm \
+    --timeout 120 --graceful-timeout 125 \
+    --max-requests 1000 --max-requests-jitter 100 \
+    --access-logfile - --error-logfile -
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=140
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/toa-staging /var/lib/toa-staging
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
