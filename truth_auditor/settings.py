@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     'reconciliation',
     'reports',
     'web',
+    'loginguard',
 ]
 
 MIDDLEWARE = [
@@ -198,6 +199,43 @@ MEDIA_ROOT = BASE_DIR / 'media'
 SESSION_COOKIE_AGE = 8 * 3600          # idle timeout 8 jam...
 SESSION_SAVE_EVERY_REQUEST = True      # ...digeser tiap request (rolling)
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
+# --- C4: pembatas percobaan login (lockout per username+IP) ---
+# Nol django-axes/ratelimit/lockout/MFA sebelumnya — aplikasi keuangan tanpa
+# pendaftaran publik, tapi juga tanpa apa pun yang memperlambat penebakan
+# sandi. `LockoutBackend` (loginguard/backends.py) DI DEPAN `ModelBackend`
+# bawaan — urutan ini SENGAJA: sesi yang sudah login memakai backend_path
+# lama tersimpan di session, mengganti TOTAL jadi satu backend baru akan
+# me-logout semua sesi aktif saat deploy (django.contrib.auth.get_user()
+# menolak sesi bila backend_path-nya tak lagi terdaftar) — menaruh backend
+# baru di depan yang lama menghindari itu.
+#
+# DB, bukan cache: tak ada CACHES di berkas ini → default Django LocMemCache,
+# PER PROSES. Produksi jalan `gunicorn --workers 4 --threads 8` (lihat
+# CLAUDE.md bagian Performa) — cache in-memory akan bocor 4× (satu hitungan
+# per worker). Tabel `loginguard.LoginAttempt` dibagi semua proses lewat
+# koneksi Postgres yang sama.
+#
+# Ambang default 5 percobaan / kunci 15 menit: auditor & supervisor SUDAH
+# digerbang IPAllowlistMiddleware ke IP kantor terdaftar (permukaan serangan
+# lebih sempit dari aplikasi publik), tapi admin/superuser TIDAK PERNAH
+# digerbang IP (break-glass) — jadi ambang tetap berlaku utk SEMUA peran
+# termasuk admin, bukan cuma yang tergerbang IP. 5/15 menit adalah default
+# umum yang menahan brute-force otomatis (dikombinasikan AUTH_PASSWORD_VALIDATORS
+# yang sudah ada) tanpa mengunci user yang salah ketik 1-2 kali.
+#
+# LOGIN_LOCKOUT_ENABLED = kill switch (pola sama GEO_BLOCK_ENABLED): matikan
+# lewat env TANPA deploy ulang bila fitur ini sendiri bermasalah di produksi.
+# Pemulihan admin yang TERKUNCI (tak butuh HTTP sama sekali):
+#   python manage.py buka_kunci_login <username>   # satu username
+#   python manage.py buka_kunci_login --semua       # darurat: semua kunci
+LOGIN_LOCKOUT_ENABLED = os.environ.get('LOGIN_LOCKOUT_ENABLED', 'True').lower() == 'true'
+LOGIN_LOCKOUT_THRESHOLD = int(os.environ.get('LOGIN_LOCKOUT_THRESHOLD', '5'))
+LOGIN_LOCKOUT_MINUTES = int(os.environ.get('LOGIN_LOCKOUT_MINUTES', '15'))
+AUTHENTICATION_BACKENDS = [
+    'loginguard.backends.LockoutBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
 
 # --- Produksi / Railway ---
 CSRF_TRUSTED_ORIGINS = []
