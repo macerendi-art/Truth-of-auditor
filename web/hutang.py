@@ -7,6 +7,24 @@ Overlay opsional: `web.models.HutangManual` menimpa **total per bulan**
 untuk toko tunggal. Satu bulan atau lintas bulan: tiap bulan yang punya
 override memakai nilai manual; bulan tanpa override memakai Σ FR auto.
 Baris FR di tabel tetap mentah.
+
+**Perf (D2, 2026-09-04): dua-fase, bukan "kurangi jumlah query".** Diukur
+lokal (lihat laporan) sebelum menyentuh apa pun: pada data bertingkat
+produksi (banyak baris bracket, sedikit yang berkategori hutang/piutang),
+biaya sebenarnya adalah SATU scan yang memaksa Postgres mengekstrak
+`raw->>'Kategori'` dan menjalankan regex per baris — tanpa index (index
+JSONB ada di `Bank`, bukan `Kategori`; menambah satu butuh migrasi di
+`transactions/`, di luar wewenang berkas ini). Memecah scan itu jadi
+count+aggregate+slice TERPISAH (pola lazy-QuerySet biasa) TERBUKTI lebih
+LAMBAT di sini — tiap query baru membayar ulang scan mahal yang sama.
+Yang benar-benar mengurangi kerja: satu scan itu tetap SATU kali, tapi
+kolom yang diekstraknya dipersempit ke yang perlu untuk filter+urutan+total
+(id, tanggal, nominal, kategori, jam — bukan Bank/Member/Username/Expense).
+Kolom "berat" itu ditunda ke query KEDUA yang di-PK (`id__in`) — indeks
+primer, jadi tak pernah mengulang scan mahal — dan hanya membayar untuk
+baris yang BENAR-BENAR dibaca (satu halaman lewat `Paginator`, atau semua
+baris kalau memang diiterasi penuh). `_HutangRows` di bawah adalah objek
+lazy itu.
 """
 from calendar import monthrange
 from collections import defaultdict
@@ -19,6 +37,10 @@ from transactions.models import Transaction
 from web.breakdown import _slug_kategori
 
 NOL = Decimal("0")
+
+# Kolom "berat": tiap satu berarti satu ekstraksi JSON tambahan per baris.
+# Hanya perlu utk baris yang benar-benar ditampilkan — lihat `_HutangRows`.
+_KOLOM_BERAT = ("Bank", "Member", "Username", "Expense")
 
 
 def _meta_manual(obj):
@@ -54,27 +76,15 @@ def _bulan_dalam_rentang(dari, sampai):
     return out
 
 
-def _auto_per_bulan(rows):
-    """Σ money_delta FR per (periode=tgl1, kategori) dari baris yang sudah difilter."""
-    by = defaultdict(lambda: {"hutang": NOL, "piutang": NOL})
-    for r in rows:
-        t = r.get("tanggal")
-        if not t:
-            continue
-        periode = date(t.year, t.month, 1)
-        slug = r.get("kategori") or ""
-        if slug == "hutang":
-            by[periode]["hutang"] += r.get("nominal") or NOL
-        elif slug == "piutang":
-            by[periode]["piutang"] += r.get("nominal") or NOL
-    return by
-
-
-def _overlay_total_bulanan(toko, dari, sampai, total_h, total_p, rows):
+def _overlay_total_bulanan(toko, dari, sampai, total_h, total_p, auto_bulan):
     """Timpa total per bulan bila ada HutangManual (satu atau multi bulan).
 
     Multi-toko (list) tidak di-overlay — form tulis single-toko saja.
     Tanpa dari/sampai: tidak di-overlay (tak ada kunci bulan).
+
+    `auto_bulan` sudah dihitung SEKALI di `hutang_piutang` (dari scan ringan
+    yang sama yang menghasilkan total_h/total_p) — fungsi ini tidak lagi
+    mengulang query atau iterasi baris apa pun.
 
     Per bulan M dalam rentang:
       - ada override field → pakai nilai manual (total bulan, tidak di-prorata)
@@ -113,7 +123,6 @@ def _overlay_total_bulanan(toko, dari, sampai, total_h, total_p, rows):
     for m in manuals:
         by_manual[(m.periode, m.field)] = m
 
-    auto_by = _auto_per_bulan(rows)
     out_h, out_p = NOL, NOL
     bulan_override = []
     # Meta field: pakai manual terbaru (periode terbesar) yang ter-apply — UI badge.
@@ -121,8 +130,8 @@ def _overlay_total_bulanan(toko, dari, sampai, total_h, total_p, rows):
     p_meta_obj = None
 
     for periode in bulan:
-        ah = auto_by.get(periode, {}).get("hutang", NOL)
-        ap = auto_by.get(periode, {}).get("piutang", NOL)
+        ah = auto_bulan.get(periode, {}).get("hutang", NOL)
+        ap = auto_bulan.get(periode, {}).get("piutang", NOL)
         mh = by_manual.get((periode, HutangManual.FIELD_HUTANG))
         mp = by_manual.get((periode, HutangManual.FIELD_PIUTANG))
         used = False
@@ -153,6 +162,83 @@ def _overlay_total_bulanan(toko, dari, sampai, total_h, total_p, rows):
     }
 
 
+class _HutangRows:
+    """Sequence lazy: `Paginator`/iterasi penuh membaca kolom berat hanya
+    untuk baris yang benar-benar dibutuhkan — lihat catatan modul di atas.
+
+    `count()`/`__len__`/`__bool__` tidak pernah query lagi (jumlah baris
+    sudah diketahui dari scan fase-1). `__getitem__`/`__iter__` menjalankan
+    SATU query tambahan yang di-PK (`id__in`) untuk baris yang diminta.
+    """
+
+    def __init__(self, urut_ids, meta_by_id, banyak):
+        self._ids = urut_ids
+        self._meta = meta_by_id
+        self._banyak = banyak
+
+    def count(self):
+        return len(self._ids)
+
+    def __len__(self):
+        return len(self._ids)
+
+    def __bool__(self):
+        return bool(self._ids)
+
+    def _detail(self, ids):
+        """Query kedua, di-PK — TIDAK mengulang filter kategori mahal.
+
+        `.order_by()` eksplisit: kita hanya butuh dict per-id (urutan tampil
+        datang dari `self._ids`, bukan dari query ini) — tanpa ini, `Meta`
+        yang kelak dapat `ordering` akan diam-diam menambah sort atas
+        `id__in` untuk nol manfaat.
+        """
+        if not ids:
+            return {}
+        anotasi = {f"fr_{k.lower()}": KeyTextTransform(k, "raw") for k in _KOLOM_BERAT}
+        kolom = ["id"] + [f"fr_{k.lower()}" for k in _KOLOM_BERAT]
+        qs = (Transaction.objects.filter(id__in=ids).annotate(**anotasi)
+              .order_by().values_list(*kolom))
+        return {baris[0]: baris[1:] for baris in qs}
+
+    def _bentuk(self, pk, detail):
+        meta = self._meta[pk]
+        # Urutan tuple `detail` = urutan `_KOLOM_BERAT` ("Bank","Member",
+        # "Username","Expense") — kopling posisional yang disengaja, jaga
+        # keduanya sinkron kalau menambah/mengubah kolom berat.
+        bank, member, username, expense = detail
+        baris = {
+            "id": pk, "tanggal": meta["tanggal"], "jam": meta["jam"],
+            "account": str(bank or "").strip() or "(Tanpa Akun)",
+            "kategori": meta["kategori"],
+            "member": str(member or "").strip() or str(username or "").strip(),
+            "keterangan": str(expense or "").strip(),
+            "nominal": meta["nominal"],
+        }
+        if self._banyak:
+            baris["toko"] = meta["toko"]
+        return baris
+
+    def __iter__(self):
+        kosong = (None, None, None, None)
+        detail = self._detail(self._ids)
+        for pk in self._ids:
+            yield self._bentuk(pk, detail.get(pk, kosong))
+
+    def __getitem__(self, key):
+        kosong = (None, None, None, None)
+        if isinstance(key, slice):
+            ids = self._ids[key]
+            detail = self._detail(ids)
+            return [self._bentuk(pk, detail.get(pk, kosong)) for pk in ids]
+        idx = key if key >= 0 else key + len(self._ids)
+        if idx < 0 or idx >= len(self._ids):
+            raise IndexError("_HutangRows index out of range")
+        pk = self._ids[idx]
+        detail = self._detail([pk])
+        return self._bentuk(pk, detail.get(pk, kosong))
+
+
 def hutang_piutang(toko, dari=None, sampai=None):
     """Baris bracket berkategori Hutang/Piutang + ringkasan total.
 
@@ -163,8 +249,10 @@ def hutang_piutang(toko, dari=None, sampai=None):
     lama tak perlu tahu apa-apa tentang mode ini.
 
     Filter kategori didorong ke DB (iregex pada key JSON) supaya scan tetap
-    ringan di volume produksi; slug final tetap lewat `_slug_kategori` agar
-    normalisasi varian ejaan satu pintu.
+    SATU kali; slug final tetap lewat `_slug_kategori` agar normalisasi
+    varian ejaan satu pintu. `"rows"` adalah `_HutangRows` (lazy, lihat
+    docstring modul) — berperilaku seperti list untuk iterasi/indeks/
+    `Paginator`, tapi menunda kolom berat ke baris yang benar-benar dibaca.
 
     Bila toko tunggal + ada `HutangManual` pada bulan dalam rentang,
     `total_hutang` / `total_piutang` / `netto` memakai nilai override per bulan
@@ -177,54 +265,59 @@ def hutang_piutang(toko, dari=None, sampai=None):
         qs = qs.filter(posted_date__gte=dari)
     if sampai:
         qs = qs.filter(posted_date__lte=sampai)
-    kolom = ["id", "posted_date", "money_delta", "fr_bank", "fr_kategori",
-             "fr_jam", "fr_member", "fr_username", "fr_expense"]
-    if banyak:
-        kolom.append("toko__name")
+
+    # Fase 1 — SATU scan mahal (regex kategori, tanpa index). Kolom SEMPIT:
+    # hanya yang perlu utk filter + urutan + total. Bank/Member/Username/
+    # Expense ditunda ke `_HutangRows` (fase 2, di-PK).
+    kolom_ringan = ["id", "posted_date", "money_delta"]
     qs = (
         qs.annotate(
-            fr_bank=KeyTextTransform("Bank", "raw"),
             fr_kategori=KeyTextTransform("Kategori", "raw"),
             fr_jam=KeyTextTransform("Jam", "raw"),
-            fr_member=KeyTextTransform("Member", "raw"),
-            fr_username=KeyTextTransform("Username", "raw"),
-            fr_expense=KeyTextTransform("Expense", "raw"),
         )
         .filter(fr_kategori__iregex=r"^\s*(hutang|piutang)\s*$")
-        .values_list(*kolom)
     )
-    rows, total_h, total_p = [], NOL, NOL
-    for nilai in qs:
-        (pk, tanggal, delta, bank, kategori, jam, member, username,
-         expense) = nilai[:9]
+    kolom_ringan += ["fr_kategori", "fr_jam"]
+    if banyak:
+        kolom_ringan.append("toko__name")
+
+    meta_by_id = {}
+    urutan = []  # (tanggal_key, jam_key, id) — kunci sort, id = tiebreak
+    total_h, total_p = NOL, NOL
+    auto_bulan = defaultdict(lambda: {"hutang": NOL, "piutang": NOL})
+
+    for baris in qs.values_list(*kolom_ringan).iterator():
+        pk, tanggal, delta, kategori, jam = baris[:5]
         slug = _slug_kategori(kategori)
-        delta = delta or NOL
-        baris = {
-            "id": pk, "tanggal": tanggal, "jam": str(jam or ""),
-            "account": str(bank or "").strip() or "(Tanpa Akun)",
-            "kategori": slug,
-            "member": str(member or "").strip() or str(username or "").strip(),
-            "keterangan": str(expense or "").strip(),
-            "nominal": delta,
-        }
+        delta = NOL if delta is None else delta
+        jam_s = str(jam or "")
+        meta = {"tanggal": tanggal, "jam": jam_s, "kategori": slug, "nominal": delta}
         if banyak:
-            baris["toko"] = nilai[9]
-        rows.append(baris)
+            meta["toko"] = baris[5]
+        meta_by_id[pk] = meta
+        urutan.append((tanggal, jam_s, pk))
         if slug == "hutang":
             total_h += delta
         else:
             total_p += delta
-    rows.sort(key=lambda r: (r["tanggal"] or date.min, r["jam"], r["id"]), reverse=True)
+        if tanggal is not None:
+            periode = date(tanggal.year, tanggal.month, 1)
+            auto_bulan[periode][slug] += delta
+
+    urutan.sort(key=lambda k: (k[0] or date.min, k[1], k[2]), reverse=True)
+    urut_ids = [k[2] for k in urutan]
+
+    rows = _HutangRows(urut_ids, meta_by_id, banyak)
 
     total_h_out, total_p_out, manual = _overlay_total_bulanan(
-        toko, dari, sampai, total_h, total_p, rows)
+        toko, dari, sampai, total_h, total_p, auto_bulan)
 
     return {
         "rows": rows,
         "total_hutang": total_h_out,
         "total_piutang": total_p_out,
         "netto": total_h_out + total_p_out,
-        "count": len(rows),
+        "count": len(urut_ids),
         "manual": manual,
         # Total mentah FR (pra-overlay) — berguna UI admin & tes.
         "total_hutang_auto": total_h,

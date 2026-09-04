@@ -1,9 +1,12 @@
 """Hutang/Piutang: agregasi murni web.hutang + view /hutang-piutang/."""
+import re
 from datetime import date, datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from core.models import AuditLog
@@ -250,3 +253,95 @@ class HutangManualAdminViewTests(_HutangData):
         })
         self.assertEqual(r.status_code, 302)
         self.assertFalse(HutangManual.objects.exists())
+
+
+class PerfHutangQueryTests(TestCase):
+    """D2 (2026-09-04): perbaikan performa mode Semua Toko — lihat CLAUDE.md
+    "Performa (v1.23.0)". Dua invarian yang WAJIB dijaga tes, bukan cuma
+    diyakini benar oleh mata:
+
+    1. Jumlah query **konstan** terhadap jumlah toko (preseden: dua tes N+1
+       dashboard mode Semua Toko).
+    2. Baris "berat" (Bank/Member/Username/Expense) hanya diambil untuk baris
+       yang BENAR-BENAR dibaca (satu halaman `Paginator`), bukan seluruh
+       baris yang cocok kategori hutang/piutang.
+    """
+
+    def setUp(self):
+        self.bracket = SourceType.objects.get_or_create(
+            key="bracket", defaults={"name": "Bracket"})[0]
+        self._n = 0
+
+    def _fr(self, toko, up, kategori, total, tanggal, jam="10:00"):
+        self._n += 1
+        return Transaction.objects.create(
+            upload=up, source_type=self.bracket, toko=toko,
+            jenis="lainnya", amount=abs(Decimal(total)), money_delta=Decimal(total),
+            posted_date=tanggal,
+            occurred_at=datetime(tanggal.year, tanggal.month, tanggal.day, 10, 0),
+            row_hash=f"perf{self._n}",
+            raw={"Bank": "BANK BCA | X | DEPOSIT", "Kategori": kategori,
+                 "Jam": jam, "Member": "BUDI"},
+        )
+
+    def _seed(self, prefix, n_toko, n_baris_per_toko):
+        tokos = []
+        for i in range(n_toko):
+            t = Toko.objects.create(key=f"{prefix}{i}", name=f"{prefix}{i}".upper(),
+                                     panel="nexus")
+            up = Upload.objects.create(source_type=self.bracket, toko=t)
+            for j in range(n_baris_per_toko):
+                self._fr(t, up, "Hutang" if j % 2 == 0 else "Piutang",
+                         "-1000" if j % 2 == 0 else "1000", TGL)
+            tokos.append(t)
+        return tokos
+
+    def _pakai_seperti_view(self, data):
+        """Yang dibaca view/template dari `data`: bool (empty-state), count
+        (label baris), dan satu halaman lewat `Paginator` (40/hal)."""
+        bool(data["rows"])
+        _ = data["count"]
+        _ = data["rows"][0:40]
+
+    def test_query_konstan_terhadap_jumlah_toko(self):
+        tokos = self._seed("qh", n_toko=3, n_baris_per_toko=5)
+        with CaptureQueriesContext(connection) as before:
+            data = hutang_piutang(tokos, dari=TGL, sampai=TGL)
+            self._pakai_seperti_view(data)
+
+        tokos = tokos + self._seed("qh2_", n_toko=12, n_baris_per_toko=5)
+        with CaptureQueriesContext(connection) as after:
+            data = hutang_piutang(tokos, dari=TGL, sampai=TGL)
+            self._pakai_seperti_view(data)
+
+        self.assertEqual(
+            len(before.captured_queries), len(after.captured_queries),
+            f"query tumbuh {len(before.captured_queries)}→"
+            f"{len(after.captured_queries)} saat toko bertambah (N+1)")
+        # Dua query: satu scan kategori sempit (fase 1) + satu ambil kolom
+        # berat utk halaman yang dibaca (fase 2, di-PK `id__in`).
+        self.assertEqual(len(before.captured_queries), 2)
+
+    def test_slice_kecil_tak_menyeret_seluruh_baris_cocok(self):
+        tokos = self._seed("lebar", n_toko=1, n_baris_per_toko=50)
+        data = hutang_piutang(tokos[0], dari=TGL, sampai=TGL)
+        self.assertEqual(data["count"], 50)
+
+        with CaptureQueriesContext(connection) as ctx:
+            halaman = data["rows"][0:5]
+        self.assertEqual(len(halaman), 5)
+        # Persis SATU query tambahan (fase 2), dan lebarnya cuma 5 id —
+        # bukan 50. Ini yang membuat kartu "N baris" tak perlu menyeret
+        # Bank/Member/Username/Expense utk baris yang tak pernah ditampilkan.
+        self.assertEqual(len(ctx.captured_queries), 1)
+        sql = ctx.captured_queries[0]["sql"]
+        in_clause = re.search(r'"id" IN \(([^)]*)\)', sql).group(1)
+        self.assertEqual(len(in_clause.split(",")), 5)
+
+    def test_indeks_negatif_dan_iterasi_penuh_tetap_konsisten(self):
+        tokos = self._seed("neg", n_toko=1, n_baris_per_toko=4)
+        data = hutang_piutang(tokos[0], dari=TGL, sampai=TGL)
+        semua = list(data["rows"])
+        self.assertEqual(len(semua), 4)
+        self.assertEqual(data["rows"][-1], semua[-1])
+        self.assertEqual(data["rows"][0], semua[0])
