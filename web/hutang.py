@@ -296,11 +296,17 @@ def hutang_piutang(toko, dari=None, sampai=None):
             meta["toko"] = baris[5]
         meta_by_id[pk] = meta
         urutan.append((tanggal, jam_s, pk))
+        # Guard dua-cabang eksplisit (M5, 04-09-2026): regex kategori hari
+        # ini hanya meloloskan dua nilai ini, tapi begitu ada yang memperlebar
+        # KATEGORI_HUTANG_PIUTANG_REGEX (mis. `utang`), `else` diam-diam
+        # menumpuk ke piutang dan `auto_bulan[periode][slug]` KeyError -> 500
+        # di halaman Hutang/Piutang. Slug lain: tetap tampil di daftar, tapi
+        # tidak masuk total mana pun -- lebih jujur daripada salah kolom.
         if slug == "hutang":
             total_h += delta
-        else:
+        elif slug == "piutang":
             total_p += delta
-        if tanggal is not None:
+        if tanggal is not None and slug in ("hutang", "piutang"):
             periode = date(tanggal.year, tanggal.month, 1)
             auto_bulan[periode][slug] += delta
 

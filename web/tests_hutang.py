@@ -79,6 +79,33 @@ class AgregasiHutangTests(_HutangData):
         self.assertEqual(nominal, [Decimal("-200"), Decimal("300"), Decimal("-100"), Decimal("-50")])
 
 
+class GuardSlugKategoriTests(_HutangData):
+    """M5 (04-09-2026): agregasi tak boleh 500 bila regex kategori diperlebar.
+
+    Hari ini `KATEGORI_HUTANG_PIUTANG_REGEX` hanya meloloskan hutang/piutang,
+    jadi satu-satunya cara memaksa slug ketiga masuk loop adalah mem-patch
+    `_slug_kategori` — persis situasi yang akan terjadi begitu ada yang
+    menambah `utang` ke regex tanpa menyentuh agregasinya."""
+
+    def test_slug_ketiga_tidak_meledak_dan_tidak_masuk_total(self):
+        from unittest import mock
+
+        self.fr("Hutang", "-500000")
+        self.fr("Piutang", "250000")
+        asli = __import__("web.hutang", fromlist=["_slug_kategori"])._slug_kategori
+
+        def _slug_lebar(k):
+            return "utang" if (k or "").lower() == "hutang" else asli(k)
+
+        with mock.patch("web.hutang._slug_kategori", side_effect=_slug_lebar):
+            data = hutang_piutang(self.toko)   # sebelum guard: KeyError -> 500
+
+        self.assertEqual(data["count"], 2)
+        self.assertEqual(data["total_hutang"], Decimal("0"))       # 'utang' tak diklaim hutang
+        self.assertEqual(data["total_piutang"], Decimal("250000"))  # ...maupun piutang
+        self.assertEqual({r["kategori"] for r in data["rows"]}, {"utang", "piutang"})
+
+
 class OverlayHutangManualTests(_HutangData):
     """Override total bulanan via HutangManual — baris FR tetap auto."""
 
