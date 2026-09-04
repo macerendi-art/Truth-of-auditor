@@ -315,15 +315,24 @@ class ReviewQueuePerformaTests(TestCase):
     def test_jumlah_query_terkunci_dan_konstan_terhadap_jumlah_baris(self):
         for i in range(3):
             self._hasil(bracket=(i % 2 == 0))
-        # 19 query: session+auth+allowlist-IP (3), active_toko (1), 3x
+        # Request pemanasan: request PERTAMA sebuah sesi memodifikasi lalu
+        # menyimpannya (SAVEPOINT + UPDATE django_session + RELEASE = 3 query)
+        # -- itu bootstrap sesi, bukan biaya view ini, dan sejak v1.25.0
+        # mencabut SESSION_SAVE_EVERY_REQUEST ia hanya muncul sekali. Tanpa
+        # pemanasan, angka di bawah bergantung pada apakah tes lain sudah
+        # menyentuh sesi ini lebih dulu -- itulah sebab tes ini gagal HANYA di
+        # suite penuh pada 04-09-2026 (16 != 19). Kami mengukur keadaan MANTAP,
+        # yaitu yang dialami produksi.
+        self.client.get("/tinjau/")
+        # 16 query: session+auth+allowlist-IP (3), active_toko (1), 3x
         # tab_counts (bucket cocok/tidak_cocok/tidak_ada_panel, 1 tiap),
         # reasons chip (1), bank chip (1), btitle chip (1), totals aggregate
         # (1), semua id batch toko utk r.home_no (1, INI yg menggantikan 1
         # query COUNT per baris lama), COUNT paginator (1), SELECT halaman
         # (1), toko lagi via context processor (1), COUNT MatchResult badge
-        # sidebar (1), lalu BEGIN/session UPDATE/COMMIT (3). Dikunci supaya
-        # query baru di jalur ini terlihat eksplisit, BUKAN N+1 diam-diam.
-        with self.assertNumQueries(19):
+        # sidebar (1). Dikunci supaya query baru di jalur ini terlihat
+        # eksplisit, BUKAN N+1 diam-diam.
+        with self.assertNumQueries(16):
             r1 = self.client.get(reverse("review_queue"))
         self.assertEqual(r1.status_code, 200)
 
@@ -334,8 +343,9 @@ class ReviewQueuePerformaTests(TestCase):
         self.assertEqual(r2.status_code, 200)
         # Kode lama: 3 baris -> ~24 query, 38 baris (dipotong ke 40/halaman)
         # -> ~88+ query (naik ~2/baris — dua N+1: left__source_type DAN
-        # home_no). Kode baru: flat 19 berapa pun barisnya.
-        self.assertEqual(len(ctx_besar.captured_queries), 19)
+        # home_no). Kode baru: flat 16 berapa pun barisnya (sesi sudah
+        # dipersist request pemanasan di atas, jadi angka ini murni biaya view).
+        self.assertEqual(len(ctx_besar.captured_queries), 16)
 
     def test_baris_fr_bracket_tampil_benar(self):
         """Baris left ber-source_type bracket (mis. panel Vigor/TM Gaming

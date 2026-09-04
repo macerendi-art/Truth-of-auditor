@@ -132,17 +132,25 @@ class BatchDetailHomeNoPerformaTests(TestCase):
 
     def test_jumlah_query_terkunci_dan_konstan_terhadap_banyak_resolved_here(self):
         kecil = self._buat_skenario(2, date(2026, 6, 1))
-        # 16 query (user tes ber-role admin -> IPAllowlistMiddleware dorman,
+        # Request pemanasan: request PERTAMA sebuah sesi memodifikasi lalu
+        # menyimpannya (SAVEPOINT + UPDATE django_session + RELEASE = 3 query)
+        # -- bootstrap sesi, bukan biaya view ini, dan sejak v1.25.0 mencabut
+        # SESSION_SAVE_EVERY_REQUEST ia hanya muncul sekali. Tanpa pemanasan,
+        # angka di bawah bergantung pada apakah tes lain sudah menyentuh sesi
+        # ini lebih dulu -- itulah sebab tes ini gagal HANYA di suite penuh
+        # pada 04-09-2026 (13 != 16). Kami mengukur keadaan MANTAP.
+        self.client.get(f"/batch/{kecil.pk}/")
+        # 13 query (user tes ber-role admin -> IPAllowlistMiddleware dorman,
         # tak menambah query): session (1), auth user (1), ReconBatch via
         # get_object_or_404 (1), Toko (1), SEMUA id batch toko utk bisect —
         # dipakai batch_no DAN setiap r.home_no (1, INI yg menggantikan 1+N
         # query COUNT per-baris lama), resolved_here (1), settled_elsewhere
         # (1), per_bank money_rows (1), riwayat AuditLog (1), Toko lagi via
         # context processor (1), COUNT MatchResult badge sidebar (1),
-        # ToleranceProfile lewat batch.tolerance di template (1), runs (1),
-        # lalu SAVEPOINT/session UPDATE/RELEASE SAVEPOINT (3). Dikunci supaya
-        # query baru di jalur ini terlihat eksplisit, BUKAN diam-diam N+1 lagi.
-        with self.assertNumQueries(16):
+        # ToleranceProfile lewat batch.tolerance di template (1), runs (1).
+        # Dikunci supaya query baru di jalur ini terlihat eksplisit, BUKAN
+        # diam-diam N+1 lagi.
+        with self.assertNumQueries(13):
             r1 = self.client.get(reverse("batch_detail", args=[kecil.id]))
         self.assertEqual(r1.status_code, 200)
 
@@ -151,8 +159,10 @@ class BatchDetailHomeNoPerformaTests(TestCase):
             r2 = self.client.get(reverse("batch_detail", args=[besar.id]))
         self.assertEqual(r2.status_code, 200)
         # Kode lama: N=2 -> ~19 query, N=25 -> ~42 query (naik ~1/baris).
-        # Kode baru: flat 16 berapa pun n_resolved — bukti langsung anti-N+1.
-        self.assertEqual(len(ctx_besar.captured_queries), 16)
+        # Kode baru: flat 13 berapa pun n_resolved — bukti langsung anti-N+1
+        # (sesi sudah dipersist request pemanasan di atas, jadi angka ini murni
+        # biaya view).
+        self.assertEqual(len(ctx_besar.captured_queries), 13)
 
     def test_nomor_batch_asal_benar_walau_bercampur_batch_lain(self):
         # Batch LAIN (tak terhubung resolve apa pun) ikut membentuk populasi
