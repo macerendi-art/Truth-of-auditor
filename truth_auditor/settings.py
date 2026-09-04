@@ -191,7 +191,13 @@ LOGOUT_REDIRECT_URL = 'login'
 CSRF_FAILURE_VIEW = 'web.views.csrf_failure'
 
 MEDIA_URL = 'media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# Bisa ditimpa env (A2, produksi Railway) supaya berkas unggahan hidup di
+# volume terpasang, bukan disk kontainer yang lenyap tiap deploy — `or`
+# (bukan cuma `.get(..., default)`) sengaja dipakai karena Railway bisa
+# menyuntik env kosong-string, bukan cuma tak-ada; default TETAP path lama
+# persis (`BASE_DIR / 'media'`) sampai env di-set — lihat
+# docs/runbook-media-volume-2026-09-04.md untuk langkah pemasangan volume.
+MEDIA_ROOT = Path(os.environ.get('MEDIA_ROOT') or (BASE_DIR / 'media'))
 
 # --- Sesi: data finansial, jangan hidup 2 minggu (default Django) ---
 # Aktif di dev DAN produksi (bukan hardening khusus-prod seperti HSTS) —
