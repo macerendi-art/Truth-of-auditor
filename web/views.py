@@ -70,7 +70,7 @@ from web.breakdown import (
     ringkas_bracket_hari,
     ringkas_bracket_rentang,
 )
-from web.channels import breakdown_metode
+from web.channels import breakdown_metode, snapshot_metode_panel, tren_bulanan
 from web.detail_fr import detail_fr as hitung_detail_fr
 from web.forms import GantiPasswordForm
 from web.hutang import (
@@ -276,6 +276,155 @@ def _filter_rentang(request):
     return (sampai, dari) if dari > sampai else (dari, sampai)
 
 
+def _parse_bulan(raw):
+    """`?bulan=YYYY-MM` → (year, month) atau None bila tak sah."""
+    raw = (raw or "").strip()
+    if len(raw) != 7 or raw[4] != "-":
+        return None
+    try:
+        year, month = int(raw[:4]), int(raw[5:7])
+    except ValueError:
+        return None
+    if not (1 <= month <= 12 and 2000 <= year <= 2100):
+        return None
+    return year, month
+
+
+def _rentang_bulan(year, month):
+    """(tgl 1, tgl akhir) untuk year/month."""
+    dari = date_cls(year, month, 1)
+    return dari, hutang_akhir_bulan(dari)
+
+
+def _bulan_sebelum(year, month):
+    if month == 1:
+        return year - 1, 12
+    return year, month - 1
+
+
+def _filter_dashboard(request):
+    """Resolusi filter dashboard: bulan TERPISAH dari tanggal spesifik.
+
+    Prioritas: `?bulan=YYYY-MM` menang (isi rentang tgl 1–akhir bulan).
+    Tanpa bulan → ladder `?dari=&sampai=` lama. Keduanya kosong → default.
+    Kembalian: (dari, sampai, mode_filter, mode_bulan, ym|None).
+    """
+    ym = _parse_bulan(request.GET.get("bulan", ""))
+    if ym is not None:
+        dari, sampai = _rentang_bulan(*ym)
+        return dari, sampai, True, True, ym
+    dari, sampai = _filter_rentang(request)
+    return dari, sampai, dari is not None, False, None
+
+
+def _opsi_bulan_dashboard(tokos):
+    """Daftar tgl-1 bulan yang punya batch (baru → lama) untuk dropdown."""
+    if not tokos:
+        return []
+    qs = ReconBatch.objects.filter(toko__in=tokos, recon_date__isnull=False)
+    if hasattr(tokos, "count") and not isinstance(tokos, (list, tuple)):
+        pass  # queryset already fine
+    pairs = sorted(
+        {(d.year, d.month) for d in qs.values_list("recon_date", flat=True) if d},
+        reverse=True,
+    )
+    return [date_cls(y, m, 1) for y, m in pairs]
+
+
+def _panel_qs_batch_ids(batch_ids):
+    if not batch_ids:
+        return Transaction.objects.none()
+    return Transaction.objects.filter(
+        consumed_by_batch_id__in=batch_ids,
+        source_type__key="panel",
+        is_duplicate=False,
+    )
+
+
+def _tren_bulan_untuk(tokos, year, month, cur_batch_ids=None):
+    """Tren volume panel bulan ini vs bulan lalu untuk lingkup toko.
+
+    ``cur_batch_ids`` opsional — kalau sudah dihitung di view, dipakai ulang.
+    Hasil: ``{"tren": tren_bulanan(...), "label_prev": "Jul 2026",
+    "per_toko": {toko_id: tren} | None}``.
+    ``per_toko`` hanya diisi bila len(tokos) > 1.
+    """
+    py, pm = _bulan_sebelum(year, month)
+    tokos = list(tokos)
+    multi = len(tokos) > 1
+
+    if cur_batch_ids is None:
+        cur_batches = list(
+            ReconBatch.objects.filter(
+                toko__in=tokos, recon_date__year=year, recon_date__month=month,
+            ).values("id", "toko_id")
+        )
+    else:
+        # id saja → perlu toko_id untuk pecah multi
+        cur_batches = list(
+            ReconBatch.objects.filter(id__in=cur_batch_ids).values("id", "toko_id")
+        )
+    prev_batches = list(
+        ReconBatch.objects.filter(
+            toko__in=tokos, recon_date__year=py, recon_date__month=pm,
+        ).values("id", "toko_id")
+    )
+    cur_ids = [b["id"] for b in cur_batches]
+    prev_ids = [b["id"] for b in prev_batches]
+
+    cur_snap = snapshot_metode_panel(_panel_qs_batch_ids(cur_ids))
+    prev_snap = snapshot_metode_panel(_panel_qs_batch_ids(prev_ids))
+    tren = tren_bulanan(cur_snap, prev_snap)
+    label_prev = date_filter(date_cls(py, pm, 1), "M Y")
+
+    per_toko = None
+    if multi:
+        # satu query gabungan cur+prev, pecah di Python
+        all_ids = cur_ids + prev_ids
+        snaps_cur = {t.id: {
+            "trx_n": 0, "trx_v": 0.0,
+            "QRIS": {"n": 0, "v": 0.0}, "Bank": {"n": 0, "v": 0.0},
+            "E-wallet": {"n": 0, "v": 0.0},
+        } for t in tokos}
+        snaps_prev = {t.id: {
+            "trx_n": 0, "trx_v": 0.0,
+            "QRIS": {"n": 0, "v": 0.0}, "Bank": {"n": 0, "v": 0.0},
+            "E-wallet": {"n": 0, "v": 0.0},
+        } for t in tokos}
+        if all_ids:
+            from web.channels import _kelas_tren
+            agg = (
+                _panel_qs_batch_ids(all_ids)
+                .filter(jenis__in=["depo", "wd"])
+                .values("toko_id", "consumed_by_batch_id", "jenis", "bank_title")
+                .annotate(n=Count("id"), v=Sum("amount"))
+            )
+            cur_set = set(cur_ids)
+            for r in agg:
+                tid = r["toko_id"]
+                target = snaps_cur if r["consumed_by_batch_id"] in cur_set else snaps_prev
+                if tid not in target:
+                    continue
+                slot_map = target[tid]
+                n = r["n"] or 0
+                v = float(r["v"] or 0)
+                slot_map["trx_n"] += n
+                slot_map["trx_v"] += v
+                k = _kelas_tren(r["jenis"], r["bank_title"])
+                slot_map[k]["n"] += n
+                slot_map[k]["v"] += v
+        per_toko = {
+            t.id: tren_bulanan(snaps_cur[t.id], snaps_prev[t.id]) for t in tokos
+        }
+    return {
+        "tren": tren,
+        "label_prev": label_prev,
+        "per_toko": per_toko,
+        "ym": (year, month),
+        "ym_prev": (py, pm),
+    }
+
+
 def _label_periode(dari, sampai):
     """Label periode manusiawi utk judul kartu — ikut locale id ("23 Jul 2026",
     "13 Jul – 20 Jul 2026", "28 Des 2025 – 3 Jan 2026")."""
@@ -400,8 +549,8 @@ def _ringkas_bracket_gabungan(pasangan=None, *, toko_ids=None, rentang=None):
     }
 
 
-def _dashboard_semua(request, f_dari=None, f_sampai=None):
-    """Dashboard mode "Semua Toko" (khusus admin) — potret gabungan batch
+def _dashboard_semua(request, f_dari=None, f_sampai=None, mode_bulan=False, ym=None):
+    """Dashboard mode multi-toko (Semua / Pusat / Partner) — potret gabungan batch
     TERAKHIR masing-masing toko.
 
     Tanggal batch antar toko boleh berbeda; tabel per-toko menampilkan tanggal
@@ -413,6 +562,9 @@ def _dashboard_semua(request, f_dari=None, f_sampai=None):
     `f_dari`/`f_sampai` (filter tanggal): potret beralih ke SELURUH batch dalam
     jendela itu, lintas toko — cerminan mode filter dashboard satu toko. Jumlah
     query tetap konstan (tak bergantung banyaknya toko) di kedua mode.
+
+    `mode_bulan` + `ym=(y,m)`: filter bulanan terpisah — tambah tren naik/turun
+    trx & metode (QRIS/Bank/E-wallet) vs bulan lalu, plus tabel tren per toko.
     """
     from reconciliation.engine import pending_settlement_counts
 
@@ -513,6 +665,15 @@ def _dashboard_semua(request, f_dari=None, f_sampai=None):
                 st = kandidat
         kal.append({"d": d, "st": st, "n": len(harian), "today": d == today})
 
+    # --- tren bulanan (hanya mode_bulan) ---
+    tren_bulan = tren_label_prev = None
+    tren_per_toko = {}
+    if mode_bulan and ym is not None:
+        info = _tren_bulan_untuk(tokos, ym[0], ym[1], cur_batch_ids=last_ids)
+        tren_bulan = info["tren"]
+        tren_label_prev = info["label_prev"]
+        tren_per_toko = info["per_toko"] or {}
+
     # --- tabel per toko (mode filter: selisih = jumlah batch dalam jendela) ---
     selisih_per_toko, n_batch_per_toko = {}, {}
     for b in batch_tampil:
@@ -526,7 +687,7 @@ def _dashboard_semua(request, f_dari=None, f_sampai=None):
         sel = selisih_per_toko.get(t.id, 0)
         selisih_total += sel
         ps = panel_per_toko.get(t.id) or {}
-        rows.append({
+        row = {
             "toko": t, "last": b, "selisih": sel,
             "status": _status_selisih(sel) if b else "",
             "dp": ps.get("dp", 0.0), "wd": ps.get("wd", 0.0),
@@ -534,11 +695,20 @@ def _dashboard_semua(request, f_dari=None, f_sampai=None):
             "pending": pending_per_toko.get(t.id, 0),
             "has_batch": b is not None,
             "n_batch": n_batch_per_toko.get(t.id, 0),
-        })
+            "tren": tren_per_toko.get(t.id),
+        }
+        rows.append(row)
     rows.sort(key=lambda r: (r["has_batch"], r["selisih"]), reverse=True)
 
     label_periode = _label_periode(f_dari, f_sampai) if mode_filter else None
     bar_dari = f_dari if mode_filter else (tgl_terakhir or today)
+    opsi_bulan = _opsi_bulan_dashboard(tokos)
+    # pastikan bulan aktif selalu ada di dropdown (meski kosong batch)
+    if mode_bulan and ym is not None:
+        aktif = date_cls(ym[0], ym[1], 1)
+        if aktif not in opsi_bulan:
+            opsi_bulan = [aktif] + opsi_bulan
+    sel_bulan = f"{ym[0]:04d}-{ym[1]:02d}" if ym else ""
     return render(request, "web/dashboard_all.html", {
         "semua_toko_page": True,
         "rows": rows,
@@ -552,11 +722,16 @@ def _dashboard_semua(request, f_dari=None, f_sampai=None):
         "kal": kal,
         "tgl_terakhir": tgl_terakhir,
         "mode_filter": mode_filter,
+        "mode_bulan": mode_bulan,
         "f_dari": f_dari, "f_sampai": f_sampai,
         "n_batch": len(batch_tampil),
         "label_periode": label_periode,
         "bar_dari": bar_dari,
         "bar_sampai": f_sampai if mode_filter else bar_dari,
+        "opsi_bulan": opsi_bulan,
+        "sel_bulan": sel_bulan,
+        "tren_bulan": tren_bulan,
+        "tren_label_prev": tren_label_prev,
     })
 
 
@@ -568,14 +743,14 @@ def dashboard(request):
 
     from reconciliation.engine import check_completeness, pending_settlement_count
 
-    # --- filter tanggal (?dari=&sampai=) — tanpa parameter = perilaku lama:
-    # potret batch TERAKHIR. Ladder resolusi tanggal sama dengan /rekening/
-    # dan /bracket/ (satu sisi kosong = 1 hari, terbalik = ditukar).
-    f_dari, f_sampai = _filter_rentang(request)
-    mode_filter = f_dari is not None
+    # --- filter: bulan TERPISAH (?bulan=YYYY-MM) atau tanggal (?dari=&sampai=).
+    # Tanpa parameter = perilaku lama: potret batch TERAKHIR.
+    f_dari, f_sampai, mode_filter, mode_bulan, ym = _filter_dashboard(request)
 
     if mode_semua(request):
-        return _dashboard_semua(request, f_dari, f_sampai)
+        return _dashboard_semua(
+            request, f_dari, f_sampai, mode_bulan=mode_bulan, ym=ym,
+        )
     active = _active_toko(request)
     if active is None:
         return render(request, "web/no_toko.html")
@@ -797,6 +972,23 @@ def dashboard(request):
     bar_dari = f_dari if mode_filter else ((last.recon_date if last else None) or today)
     bar_sampai = f_sampai if mode_filter else bar_dari
 
+    # --- filter bulanan: tren trx + metode vs bulan lalu ---
+    tren_bulan = tren_label_prev = None
+    if mode_bulan and ym is not None:
+        info = _tren_bulan_untuk(
+            [active], ym[0], ym[1],
+            cur_batch_ids=[b.id for b in batch_tampil],
+        )
+        tren_bulan = info["tren"]
+        tren_label_prev = info["label_prev"]
+
+    opsi_bulan = _opsi_bulan_dashboard([active])
+    if mode_bulan and ym is not None:
+        aktif = date_cls(ym[0], ym[1], 1)
+        if aktif not in opsi_bulan:
+            opsi_bulan = [aktif] + opsi_bulan
+    sel_bulan = f"{ym[0]:04d}-{ym[1]:02d}" if ym else ""
+
     ctx = {
         "active_toko": active,
         "tx_total": tx_total,
@@ -817,10 +1009,15 @@ def dashboard(request):
         "comp": comp,
         "next_date": next_date,
         "mode_filter": mode_filter,
+        "mode_bulan": mode_bulan,
         "f_dari": f_dari, "f_sampai": f_sampai,
         "n_batch": len(batch_tampil),
         "label_periode": label_periode,
         "bar_dari": bar_dari, "bar_sampai": bar_sampai,
+        "opsi_bulan": opsi_bulan,
+        "sel_bulan": sel_bulan,
+        "tren_bulan": tren_bulan,
+        "tren_label_prev": tren_label_prev,
     }
     return render(request, "web/dashboard.html", ctx)
 

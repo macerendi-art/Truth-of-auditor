@@ -14,16 +14,32 @@
   </div>
 </div>
 
-{# ---- FILTER TANGGAL (default = potret rekon terakhir) ---- #}
+{# ---- FILTER: tanggal spesifik TERPISAH dari filter bulanan ---- #}
 <div class="card reveal" style="margin-bottom:16px">
-  <form method="get" class="row">
-    <div class="field"><label>Dari</label><input type="date" name="dari" value="{{ bar_dari|date:'Y-m-d' }}"></div>
-    <div class="field"><label>Sampai</label><input type="date" name="sampai" value="{{ bar_sampai|date:'Y-m-d' }}"></div>
-    <button class="btn primary" type="submit">Terapkan</button>
+  <div class="row" style="flex-wrap:wrap;gap:10px 14px;align-items:flex-end">
+    <form method="get" class="row" style="flex-wrap:wrap;gap:10px 14px;align-items:flex-end;margin:0">
+      <div class="field" style="min-width:140px"><label>Dari <span class="faint" style="font-weight:500">(tgl spesifik)</span></label>
+        <input type="date" name="dari" value="{% if mode_filter and not mode_bulan %}{{ bar_dari|date:'Y-m-d' }}{% endif %}"></div>
+      <div class="field" style="min-width:140px"><label>Sampai</label>
+        <input type="date" name="sampai" value="{% if mode_filter and not mode_bulan %}{{ bar_sampai|date:'Y-m-d' }}{% endif %}"></div>
+      <button class="btn" type="submit">Terapkan tgl</button>
+    </form>
+    <span style="width:1px;height:28px;background:var(--line);margin:0 4px"></span>
+    <form method="get" class="row" style="flex-wrap:wrap;gap:10px 14px;align-items:flex-end;margin:0">
+      <div class="field" style="min-width:160px"><label>Bulan <span class="faint" style="font-weight:500">(terpisah)</span></label>
+        <select name="bulan" onchange="this.form.submit()">
+          <option value="">— pilih bulan —</option>
+          {% for m in opsi_bulan %}
+          <option value="{{ m|date:'Y-m' }}" {% if sel_bulan == m|date:'Y-m' %}selected{% endif %}>{{ m|date:"M Y" }}</option>
+          {% endfor %}
+        </select></div>
+      <noscript><button class="btn primary" type="submit">Terapkan bulan</button></noscript>
+    </form>
     {% if mode_filter %}<a class="btn" href="{% url 'dashboard' %}">Terbaru ↺</a>{% endif %}
     <span class="spacer"></span>
-    <span class="faint" style="font-size:12px">{% if mode_filter %}menampilkan {{ n_batch }} batch · {{ label_periode }}{% else %}tanpa filter — potret rekon terakhir{% endif %}</span>
-  </form>
+    <span class="faint" style="font-size:12px">{% if mode_bulan %}bulan <b>{{ f_dari|date:"M Y" }}</b> · {{ n_batch }} batch{% elif mode_filter %}menampilkan {{ n_batch }} batch · {{ label_periode }}{% else %}tanpa filter — potret rekon terakhir{% endif %}</span>
+  </div>
+  <p class="faint" style="margin:8px 0 0;font-size:11.5px;line-height:1.5">Filter <b>bulan</b> (contoh Agu 2026) terpisah dari tanggal spesifik. Pilih bulan → tgl 1–akhir + tren vs bulan lalu. Isi Dari/Sampai → rentang harian tanpa tren bulanan.</p>
 </div>
 
 {# ---- KARTU STATUS ---- #}
@@ -63,6 +79,43 @@
 {% if mode_filter and n_batch == 0 %}
 <div class="card reveal" style="margin-top:16px">
   <p class="faint" style="margin:0">Tidak ada batch rekonsiliasi dalam rentang <b>{{ label_periode }}</b> — angka panel &amp; metode kosong. Kartu Bracket tetap tampil bila ada baris FR pada rentang ini.</p>
+</div>
+{% endif %}
+
+{# ---- TREN BULANAN (hanya mode filter bulan) ---- #}
+{% if mode_bulan and tren_bulan %}
+<style>
+.tren-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.tren-cell{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2)}
+.tren-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.tren-n{font-size:22px;font-weight:800;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.tren-d{font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}
+.tren-d.naik{color:var(--ok)}.tren-d.turun{color:var(--bad)}.tren-d.datar{color:var(--faint)}
+.tren-sub{font-size:11.5px;color:var(--faint)}
+@media (max-width:800px){.tren-grid{grid-template-columns:1fr 1fr}}
+</style>
+<div class="card reveal" style="margin-top:16px">
+  <div class="h-row" style="margin-bottom:10px"><h3>Tren volume — {{ f_dari|date:"M Y" }}</h3>
+    <span class="faint" style="font-size:11.5px">vs {{ tren_label_prev }} · acuan baris panel terkunci batch · naik/turun by jumlah trx</span></div>
+  <div class="tren-grid">
+    <div class="tren-cell">
+      <span class="tren-k">Total trx</span>
+      <span class="tren-n mono">{{ tren_bulan.trx.n|intcomma }}</span>
+      <span class="tren-d {{ tren_bulan.trx.arah }}">{% if tren_bulan.trx.arah == "naik" %}▲{% elif tren_bulan.trx.arah == "turun" %}▼{% else %}●{% endif %}
+        {% if tren_bulan.trx.pct is not None %}{{ tren_bulan.trx.pct|floatformat:1 }}%{% elif tren_bulan.trx.n %}baru{% else %}—{% endif %}
+        <span class="tren-sub">({{ tren_bulan.trx.n_prev|intcomma }} → {{ tren_bulan.trx.n|intcomma }})</span></span>
+    </div>
+    {% for m in tren_bulan.metode %}
+    <div class="tren-cell">
+      <span class="tren-k">{{ m.label }}</span>
+      <span class="tren-n mono">{{ m.n|intcomma }}</span>
+      <span class="tren-d {{ m.arah }}">{% if m.arah == "naik" %}▲{% elif m.arah == "turun" %}▼{% else %}●{% endif %}
+        {% if m.pct is not None %}{{ m.pct|floatformat:1 }}%{% elif m.n %}baru{% else %}—{% endif %}
+        <span class="tren-sub">({{ m.n_prev|intcomma }} → {{ m.n|intcomma }})</span></span>
+      <span class="tren-sub mono">Rp {{ m.v|floatformat:0|intcomma }}</span>
+    </div>
+    {% endfor %}
+  </div>
 </div>
 {% endif %}
 
