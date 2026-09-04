@@ -155,3 +155,32 @@ class PerintahStartTests(SimpleTestCase):
                     posisi["gunicorn"],
                     f"[{label}] migrate harus selesai SEBELUM gunicorn melayani permintaan",
                 )
+
+    # -- 4. format log akses — tanpa Referer ------------------------------
+
+    def test_access_logformat_tanpa_referer(self):
+        """`%(f)s` (Referer) TIDAK BOLEH ada di `--access-logformat`.
+
+        `%(U)s` sengaja dipilih (bukan `%(r)s`/query string penuh) supaya
+        pencarian lewat `?q=` di `web/views.py` (username/ticket_no/reference/
+        counterparty — nama pemain & nama pemilik rekening lawan transaksi)
+        tidak tercatat di access log. `%(f)s` diam-diam membatalkan niat itu:
+        Referer membawa URL HALAMAN SEBELUMNYA lengkap dengan query string-nya,
+        dan `SECURE_REFERRER_POLICY` tidak menolong karena itu mengatur apa yang
+        DIKIRIM browser ke pihak lain, bukan apa yang MASUK ke log server kita
+        sendiri untuk navigasi same-origin (yang mayoritas terjadi di app ini).
+        Jangan mengembalikan `%(f)s` demi "kelengkapan log" tanpa menutup dulu
+        celah ini di kode/desain — lihat docs/rencana-log-drain-2026-09-04.md.
+        """
+        for label, perintah in (
+            ("Procfile", self.cmd_procfile),
+            ("railway.json", self.cmd_railway),
+        ):
+            with self.subTest(berkas=label):
+                self.assertNotIn(
+                    "%(f)s",
+                    perintah,
+                    f"[{label}] --access-logformat memuat %(f)s (Referer) — ini "
+                    "membawa query string HALAMAN SEBELUMNYA (mis. ?q=nama pemain) "
+                    "ke log, membatalkan alasan %(U)s dipakai alih-alih %(r)s.",
+                )
