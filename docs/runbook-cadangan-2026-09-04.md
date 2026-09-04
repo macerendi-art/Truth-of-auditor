@@ -61,9 +61,13 @@ oleh systemd timer. Urutan kerjanya:
 4. **Checksum.** `sha256sum` atas **seluruh isi** direktori dump (format `directory` = banyak
    berkas per tabel/blob, bukan satu berkas tunggal) → `dump-$STAMP.sha256`, bisa diverifikasi
    ulang dengan `sha256sum -c` dari dalam `/var/backups/toa`.
-5. **Retensi `-mtime +1`** (BUKAN `+7`). Alasan: `docs/rencana-migrasi-contabo-2026-08-31.md`
-   sekitar baris 1040–1065 — 8 salinan × ~0,4×ukuran DB menjebol disk sekitar bulan ke-6.
-   Retensi pendek ini sengaja hanya menyisakan cadangan hari ini + kemarin di disk lokal.
+5. **Retensi `-mtime +7`** — diubah dari `+1` pada 04-09-2026. Alasan lama
+   (`docs/rencana-migrasi-contabo-2026-08-31.md` ±baris 1040–1065) memperkirakan dump ≈ 0,4×DB
+   ≈ 7,2 GB, sehingga 8 salinan ≈ 58 GB terasa mahal. **Dump sungguhan ternyata 1,6 GB**
+   (zstd:3 jauh lebih rapat) → 8 salinan ≈ 12,8 GB dari 262 GB kosong: ±4,5× lebih murah dari
+   perkiraan yang melahirkan keputusan itu. Sementara harga `+1` nyata — kerusakan data yang
+   baru ketahuan di hari ketiga menemukan salinan sehat terdekat **sudah terhapus**.
+   Periksa ulang bila satu dump menembus ~5 GB.
    Kegagalan membersihkan salinan lama tidak menggagalkan cadangan hari itu (sudah terbukti
    valid lewat langkah 3–4 di atas).
 6. **Berkas status** `~/cadangan/status.json` ditulis/diperbarui di SETIAP akhir jalan (sukses
@@ -275,7 +279,7 @@ sungguhan, bukan skrip dijalankan tangan)
 - **Tak tersentuh**: `DB toa` tetap ada (dicek lewat `pg_database`), `~/baseline.txt` tetap 17
   baris dengan md5 tak berubah dari sebelum pekerjaan ini dimulai.
 - **Retensi terbukti bekerja pada percobaan pertama**: dump gladi migrasi lama (`dump-2026-09-01`,
-  3 hari) otomatis terhapus oleh langkah retensi `-mtime +1` pada run ini — bukti retensi bukan
+  3 hari) otomatis terhapus oleh langkah retensi (saat itu masih `-mtime +1`) pada run ini — bukti retensi bukan
   cuma kode mati.
 - **Jalur `OnFailure` diuji sungguhan** (bukan dengan merusak unit asli): unit sekali-pakai
   `toa-cadangan-uji-gagal.service` dipasang sementara (`ExecStart=/bin/false`,

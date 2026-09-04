@@ -31,7 +31,14 @@
 # Argumen: $1 = pesan ringkas satu baris dari unit alarm pemanggil.
 set -uo pipefail
 
-PESAN="${1:-(tanpa pesan)}"
+# `--uji` : kirim pesan percobaan lewat SEMUA saluran yang terpasang, tanpa merusak apa pun.
+# Ada supaya pemilik bisa membuktikan salurannya benar-benar sampai SEBELUM mempercayainya --
+# tanpa harus memalsukan kegagalan pemantauan lebih dulu.
+if [ "${1:-}" = "--uji" ]; then
+  PESAN="UJI SALURAN $(date '+%F %T %Z') dari $(hostname) -- ini bukan alarm sungguhan."
+else
+  PESAN="${1:-(tanpa pesan)}"
+fi
 ENV_FILE="${ALARM_ENV_FILE:-/home/toa/pemantauan/alarm.env}"
 
 # Journal selalu jalan -- FALLBACK yang SUDAH ADA dan TERBUKTI (lihat bukti di
@@ -51,6 +58,13 @@ logger -p user.err -t toa-alarm "ALARM toa: $PESAN"
 # --- AKTIFKAN DI SINI -- opsi A: webhook generik (Slack incoming webhook / Discord / n8n / dst.
 #     -- semuanya menerima POST JSON serupa; sesuaikan bentuk $body kalau formatnya beda) -----
 if [ -n "${WEBHOOK_URL:-}" ]; then
+  # BERISIK, bukan diam: WEBHOOK_URL terisi berarti pemilik MENGIRA alarm terkirim. Kalau `jq`
+  # tidak ada, versi lama melewati blok ini tanpa sepatah kata pun -- persis kelas kegagalan
+  # senyap yang seluruh rilis ini ada untuk menutupnya.
+  if ! command -v jq >/dev/null 2>&1; then
+    logger -p user.err -t toa-alarm \
+      "ALARM toa: WEBHOOK_URL terpasang TAPI \`jq\` tidak ada -- webhook TIDAK terkirim. Pasang: sudo apt install jq"
+  fi
   body="$(jq -n --arg text "ALARM toa: $PESAN" '{text: $text}' 2>/dev/null)"
   if [ -n "$body" ]; then
     curl -fsS -m 10 -X POST -H 'Content-Type: application/json' -d "$body" "$WEBHOOK_URL" \
@@ -60,9 +74,18 @@ fi
 
 # --- AKTIFKAN DI SINI -- opsi B: SMTP lewat msmtp (butuh `apt install msmtp` + ~/.msmtprc
 #     TERISI oleh pemilik lebih dulu; keduanya di luar cakupan skrip ini) ----------------------
-if [ -n "${ALARM_EMAIL_TO:-}" ] && command -v msmtp >/dev/null 2>&1; then
-  printf 'Subject: [toa] ALARM pemantauan\n\n%s\n' "$PESAN" | msmtp "$ALARM_EMAIL_TO" \
-    || logger -p user.err -t toa-alarm "ALARM toa: email GAGAL terkirim ke saluran terpasang"
+if [ -n "${ALARM_EMAIL_TO:-}" ]; then
+  # Sama seperti webhook di atas: kondisi `&& command -v msmtp` yang lama membuat blok ini
+  # dilewati DIAM-DIAM ketika msmtp belum terpasang -- pemilik mengisi ALARM_EMAIL_TO, mengira
+  # email menyala, dan tidak pernah menerima apa pun. Diperiksa 04-09-2026 di VPS: msmtp memang
+  # BELUM ada. Jadi ketiadaannya sekarang berbunyi.
+  if command -v msmtp >/dev/null 2>&1; then
+    printf 'Subject: [toa] ALARM pemantauan\n\n%s\n' "$PESAN" | msmtp "$ALARM_EMAIL_TO" \
+      || logger -p user.err -t toa-alarm "ALARM toa: email GAGAL terkirim ke saluran terpasang"
+  else
+    logger -p user.err -t toa-alarm \
+      "ALARM toa: ALARM_EMAIL_TO terpasang TAPI \`msmtp\` tidak ada -- email TIDAK terkirim. Pasang: sudo apt install msmtp + isi ~/.msmtprc"
+  fi
 fi
 
 exit 0

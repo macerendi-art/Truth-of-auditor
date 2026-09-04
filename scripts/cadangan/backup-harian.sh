@@ -156,17 +156,28 @@ if ! ( cd "$BACKUP_DIR" && find "dump-$STAMP" -type f -print0 | sort -z | xargs 
 fi
 log "sha256 tersimpan: $(wc -l < "$SHA_FILE") berkas -> $SHA_FILE"
 
-# --- Retensi: -mtime +1 (BUKAN +7) ---------------------------------------
-# 8 salinan x ~0,4xDB menjebol disk sekitar bulan ke-6
-# (docs/rencana-migrasi-contabo-2026-08-31.md, ±baris 1040-1065). Retensi
-# pendek ini sengaja hanya menyisakan hari ini + kemarin di disk lokal.
+# --- Retensi: -mtime +7 --------------------------------------------------
+# Sebelumnya `-mtime +1` (hanya hari ini + kemarin), mengikuti
+# docs/rencana-migrasi-contabo-2026-08-31.md ±baris 1040-1065: "8 salinan
+# x ~0,4xDB menjebol disk sekitar bulan ke-6". DIUBAH JADI 7 HARI 04-09-2026,
+# setelah premis angkanya diperiksa terhadap ukuran dump SUNGGUHAN:
+#
+#     perkiraan dokumen : 0,4 x 18 GB ~ 7,2 GB/dump -> 8 salinan ~ 58 GB
+#     terukur           : 1,6 GB/dump (zstd:3 jauh lebih rapat)
+#                         -> 8 salinan ~ 12,8 GB, dari 262 GB kosong
+#
+# Biayanya ~4,5x lebih kecil dari perkiraan yang melahirkan keputusan `+1`,
+# sedangkan harga `+1` nyata: kerusakan data yang baru ketahuan di hari ketiga
+# menemukan salinan sehat terdekat SUDAH TERHAPUS. Bahkan pada laju tumbuh
+# yang terkoreksi (~500 rb baris/hari) 7 salinan tetap jauh di bawah 40 GB
+# pada bulan ke-6 -- periksa ulang bila satu dump menembus ~5 GB.
 # Best-effort: gagal membersihkan salinan lama TIDAK menggagalkan cadangan
 # hari ini (sudah terbukti valid lewat TOC+sha256 di atas).
-find "$BACKUP_DIR" -maxdepth 1 -name 'dump-*' -type d -mtime +1 -print -exec rm -rf {} + >> "$LOG_FILE" 2>&1 \
+find "$BACKUP_DIR" -maxdepth 1 -name 'dump-*' -type d -mtime +7 -print -exec rm -rf {} + >> "$LOG_FILE" 2>&1 \
   || log "PERINGATAN: retensi dump-* lama mengalami kendala (lihat log)"
-find "$BACKUP_DIR" -maxdepth 1 -name 'toc-*.txt' -mtime +1 -print -delete >> "$LOG_FILE" 2>&1 \
+find "$BACKUP_DIR" -maxdepth 1 -name 'toc-*.txt' -mtime +7 -print -delete >> "$LOG_FILE" 2>&1 \
   || log "PERINGATAN: retensi toc-*.txt lama mengalami kendala (lihat log)"
-find "$BACKUP_DIR" -maxdepth 1 -name 'dump-*.sha256' -mtime +1 -print -delete >> "$LOG_FILE" 2>&1 \
+find "$BACKUP_DIR" -maxdepth 1 -name 'dump-*.sha256' -mtime +7 -print -delete >> "$LOG_FILE" 2>&1 \
   || log "PERINGATAN: retensi dump-*.sha256 lama mengalami kendala (lihat log)"
 
 tulis_status "OK" "cadangan berhasil" 0

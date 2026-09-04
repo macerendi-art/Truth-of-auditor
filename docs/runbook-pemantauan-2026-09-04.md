@@ -266,6 +266,21 @@ kosong** — cek ulang dengan `-t toa-alarm` (atau `-p err` tanpa filter unit) s
 
 ## Memasang saluran pemberitahuan nyata — TITIK TUNGGAL
 
+> **Diperbarui 04-09-2026 — dua hal berubah di sini.**
+>
+> 1. **Jalur webhook sudah DIBUKTIKAN ujung-ke-ujung**, bukan cuma ditulis: `kirim-alarm.sh`
+>    dijalankan terhadap penerima HTTP lokal sementara, dan badan JSON-nya benar-benar tiba
+>    (`{"text": "ALARM toa: UJI SALURAN …"}`). Jadi yang tersisa untukmu **hanya menempel satu
+>    baris `WEBHOOK_URL=…`** ke `alarm.env`. `jq` dan `curl` sudah terpasang di VPS (diperiksa).
+> 2. **Ada mode uji mandiri:** `~/pemantauan/kirim-alarm.sh --uji` mengirim pesan percobaan lewat
+>    SEMUA saluran yang terpasang tanpa merusak apa pun — kamu tidak perlu memalsukan kegagalan
+>    pemantauan lebih dulu untuk membuktikan salurannya sampai.
+>
+> ⚠️ **`msmtp` BELUM terpasang di VPS** (diperiksa 04-09). Dulu blok SMTP dilewati **diam-diam**
+> saat itu terjadi — kamu mengisi `ALARM_EMAIL_TO`, mengira email menyala, dan tidak pernah
+> menerima apa pun. Sekarang ketiadaannya **berbunyi** di journal. Kalau memilih jalur email:
+> `sudo apt install msmtp` + isi `~/.msmtprc` lebih dulu.
+
 Repo ini tidak punya SMTP/Slack/webhook terkonfigurasi, dan memilih (apalagi membayar) layanan
 semacam itu adalah **keputusan pemilik** — bukan sesuatu yang dipasang sendiri oleh pekerjaan
 ini. Yang dibangun: mekanisme **gagal dengan berisik dan bisa dicolok** — `OnFailure` systemd +
