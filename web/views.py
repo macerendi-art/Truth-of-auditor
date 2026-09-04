@@ -2124,8 +2124,13 @@ def review_queue(request):
     bucket = request.GET.get("bucket", "perlu_tinjau")
     if bucket not in ("perlu_tinjau", "tidak_cocok", "tidak_ada_panel"):
         bucket = "perlu_tinjau"  # param ngawur -> default (back-compat URL lama)
+    # left__source_type: template `_result_row.html` membaca r.left.source_type.key
+    # (cabang FR/Sesama-CM) utk SETIAP baris ber-left — tanpa ini di select_related,
+    # tiap baris memicu 1 query terpisah (D5, N+1 per item antrian, tak berkorelasi
+    # dgn jumlah baris toko melainkan dgn UKURAN HALAMAN 40).
     base = MatchResult.objects.filter(run__batch__toko=active).select_related(
-        "left", "right", "right__source_type", "right__upload", "run", "run__batch"
+        "left", "left__source_type",
+        "right", "right__source_type", "right__upload", "run", "run__batch"
     )
     flow = request.GET.get("flow", "")
     if flow not in ("depo", "wd"):
@@ -2196,12 +2201,18 @@ def review_queue(request):
     )
 
     page = Paginator(_annot_alasan_review(qs), 40).get_page(request.GET.get("page"))
-    # nomor batch per-toko untuk tiap hasil di halaman ini
+    # Nomor batch per-toko untuk tiap hasil di halaman ini — konvensi bisect
+    # yg sama dgn dashboard & batch_detail (web/views.py ~baris 827: "bisect_
+    # right(terurut, x) === COUNT(id <= x)"). SATU query mengambil semua id
+    # batch toko ini, dipakai utk semua baris (D5): sebelumnya 1 COUNT query
+    # PER BARIS halaman (s/d 40/halaman) — N+1 yg besarnya mengikuti UKURAN
+    # HALAMAN, bukan jumlah baris toko (persis gejala yg dilaporkan).
+    semua_batch_id = sorted(
+        ReconBatch.objects.filter(toko=active).values_list("id", flat=True)
+    )
     for r in page.object_list:
         b = r.run.batch
-        r.home_no = (
-            ReconBatch.objects.filter(toko=active, id__lte=b.id).count() if b else None
-        )
+        r.home_no = bisect.bisect_right(semua_batch_id, b.id) if b else None
     return render(request, "web/review_queue.html", {
         "page": page, "active_toko": active,
         "bucket": bucket, "tab_counts": tab_counts, "totals": totals,

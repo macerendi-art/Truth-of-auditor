@@ -4,7 +4,9 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from reconciliation.models import MatchResult, MatchRun, ReconBatch, ToleranceProfile
@@ -248,3 +250,113 @@ class AreaPengecekanTests(ReviewQueueTests):
         r = self.client.get(reverse("review_queue"), {"bucket": "ngawur"})
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, "D-TINJAU")
+
+
+class ReviewQueuePerformaTests(TestCase):
+    """D5 (2026-09-04): /tinjau/ butuh 94 query di produksi, TAK berkorelasi
+    dgn jumlah baris toko (halaman selalu memaginasi 40/halaman) — petunjuk
+    N+1 PER ITEM ANTREAN, bukan soal ukuran data toko.
+
+    Dua N+1 tersembunyi, keduanya di LUAR select_related `base` yg sudah ada:
+
+    1. Template `_result_row.html` membaca `r.left.source_type.key` (cabang
+       FR/Sesama-CM) utk SETIAP baris ber-left. `left` sendiri sudah
+       select_related, tapi `left__source_type` TIDAK (hanya
+       `right__source_type` yg ada) — asimetri inilah bug-nya: 1 query
+       ekstra per baris ber-left.
+    2. `r.home_no` dihitung lewat COUNT query DI DALAM LOOP per baris
+       halaman (s/d 40/halaman) — pola N+1 yg SAMA PERSIS dgn D3
+       (batch_detail): 1 query ekstra per baris.
+
+    ~2 query ekstra/baris x s/d 40 baris/halaman + baseline ~14-18 cocok
+    dgn 94 yg dilaporkan di produksi."""
+
+    def setUp(self):
+        User.objects.create_user("audp", "ap@a.co", "pw12345", role="supervisor")
+        self.client.login(username="audp", password="pw12345")
+        self.lbs = Toko.objects.get(key="lbs")
+        self.tol = ToleranceProfile.objects.get_or_create(
+            name="Default", defaults={"date_window_days": 1}
+        )[0]
+        self.panel = SourceType.objects.get_or_create(key="panel", defaults={"name": "Panel"})[0]
+        self.bracket = SourceType.objects.get_or_create(
+            key="bracket", defaults={"name": "Bracket"}
+        )[0]
+        self.bank = SourceType.objects.get_or_create(key="bank", defaults={"name": "Bank"})[0]
+        self.client.post(reverse("set_toko"), {"toko_id": self.lbs.id})
+        self.batch = ReconBatch.objects.create(toko=self.lbs, tolerance=self.tol)
+
+    def _hasil(self, *, bracket=False):
+        """Satu MatchResult perlu_tinjau lengkap (left+right), opsional
+        left ber-source_type bracket (cabang FR/Sesama-CM di template)."""
+        st_left = self.bracket if bracket else self.panel
+        up_left = Upload.objects.create(source_type=st_left, toko=self.lbs)
+        up_right = Upload.objects.create(source_type=self.bank, toko=self.lbs)
+        run = MatchRun.objects.create(
+            relation=MatchRun.Relation.PANEL_BANK, tolerance=self.tol, batch=self.batch
+        )
+        n = next(_seq)
+        left = Transaction.objects.create(
+            upload=up_left, source_type=st_left, toko=self.lbs, jenis="depo",
+            amount=Decimal("50000"), occurred_at=datetime(2026, 6, 27, 10, 0),
+            ticket_no=f"D{n}", row_hash=f"perf-l-{n}", raw={},
+        )
+        right = Transaction.objects.create(
+            upload=up_right, source_type=self.bank, toko=self.lbs, jenis="depo",
+            amount=Decimal("50000"), money_delta=Decimal("50000"),
+            counterparty="X", occurred_at=datetime(2026, 6, 27, 10, 5),
+            row_hash=f"perf-r-{n}", raw={},
+        )
+        return MatchResult.objects.create(
+            run=run, bucket=MatchResult.Bucket.TINJAU, reason_code="amount_mismatch",
+            left=left, right=right,
+        )
+
+    def test_jumlah_query_terkunci_dan_konstan_terhadap_jumlah_baris(self):
+        for i in range(3):
+            self._hasil(bracket=(i % 2 == 0))
+        # 19 query: session+auth+allowlist-IP (3), active_toko (1), 3x
+        # tab_counts (bucket cocok/tidak_cocok/tidak_ada_panel, 1 tiap),
+        # reasons chip (1), bank chip (1), btitle chip (1), totals aggregate
+        # (1), semua id batch toko utk r.home_no (1, INI yg menggantikan 1
+        # query COUNT per baris lama), COUNT paginator (1), SELECT halaman
+        # (1), toko lagi via context processor (1), COUNT MatchResult badge
+        # sidebar (1), lalu BEGIN/session UPDATE/COMMIT (3). Dikunci supaya
+        # query baru di jalur ini terlihat eksplisit, BUKAN N+1 diam-diam.
+        with self.assertNumQueries(19):
+            r1 = self.client.get(reverse("review_queue"))
+        self.assertEqual(r1.status_code, 200)
+
+        for _ in range(35):
+            self._hasil(bracket=True)
+        with CaptureQueriesContext(connection) as ctx_besar:
+            r2 = self.client.get(reverse("review_queue"))
+        self.assertEqual(r2.status_code, 200)
+        # Kode lama: 3 baris -> ~24 query, 38 baris (dipotong ke 40/halaman)
+        # -> ~88+ query (naik ~2/baris — dua N+1: left__source_type DAN
+        # home_no). Kode baru: flat 19 berapa pun barisnya.
+        self.assertEqual(len(ctx_besar.captured_queries), 19)
+
+    def test_baris_fr_bracket_tampil_benar(self):
+        """Baris left ber-source_type bracket (mis. panel Vigor/TM Gaming
+        Sesama CM) tetap render cabang FR-nya benar — bukti select_related
+        left__source_type baru tak mengubah keluaran, cuma cara ambilnya."""
+        self._hasil(bracket=True)
+        r = self.client.get(reverse("review_queue"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "FR ·")
+
+    def test_home_no_benar_dgn_batch_lain_bercampur(self):
+        # self.batch (setUp) adalah batch PERTAMA toko ini -> nomor urut #1.
+        # Dua batch lain menyusul SESUDAHNYA (tak terhubung resolve apa pun)
+        # supaya nomor urut yg benar bukan kebetulan "yang terakhir dibuat".
+        self.assertEqual(
+            list(ReconBatch.objects.filter(toko=self.lbs).order_by("id"))[0].id,
+            self.batch.id,
+        )
+        ReconBatch.objects.create(toko=self.lbs, tolerance=self.tol)
+        ReconBatch.objects.create(toko=self.lbs, tolerance=self.tol)
+        self._hasil(bracket=False)
+        r = self.client.get(reverse("review_queue"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, ">#1</a>")
