@@ -23,7 +23,7 @@ from pathlib import Path
 from unittest import mock
 
 from django.conf import settings
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from truth_auditor.security import configure_sentry
@@ -120,11 +120,67 @@ class CspHeaderTests(TestCase):
 
 # ------------------------------------------------------------- C3: sesi ----
 
-class SesiHardeningTests(SimpleTestCase):
-    def test_sesi_8_jam_rolling_expire_saat_browser_tutup(self):
+class SesiHardeningTests(TestCase):
+    """C3 + K1 (tinjauan akhir 04-09-2026): sesi 8 jam ABSOLUT, bukan rolling.
+
+    `SESSION_SAVE_EVERY_REQUEST=True` (dipasang C3, dicabut K1) membuat
+    `SessionMiddleware.process_response` menulis balik salinan sesi yang
+    dimuat DI AWAL request — pada setiap response, walau tak ada yang berubah.
+    Request lambat (Mutasi Bank 46 dtk, rekonsiliasi 22–29 dtk) yang selesai
+    belakangan menulis ulang `active_toko_id` LAMA dan membatalkan `set_toko`
+    yang terjadi di tab lain di antaranya; POST berikutnya (upload, jalankan
+    rekonsiliasi) mendarat di toko yang salah tanpa pesan kesalahan.
+
+    `_balapan` mereproduksi persis urutan itu dengan `SessionMiddleware`
+    sungguhan + backend sesi DB: (1) request A memuat sesi berisi toko 1;
+    (2) "tab lain" menulis toko 2 lewat `SessionStore` kedua; (3) response A
+    selesai. Yang harus bertahan di DB adalah toko 2. Kembaran
+    `override_settings(SESSION_SAVE_EVERY_REQUEST=True)` mengassert klobber
+    memang terjadi — bukti tesnya diskriminatif, bukan tautologi.
+    """
+
+    def test_sesi_8_jam_absolut_expire_saat_browser_tutup(self):
         self.assertEqual(settings.SESSION_COOKIE_AGE, 8 * 3600)
-        self.assertTrue(settings.SESSION_SAVE_EVERY_REQUEST)
+        # Default Django False; settings.py SENGAJA tidak menyalakannya (K1).
+        self.assertFalse(getattr(settings, "SESSION_SAVE_EVERY_REQUEST", False))
         self.assertTrue(settings.SESSION_EXPIRE_AT_BROWSER_CLOSE)
+
+    def _balapan(self):
+        from django.contrib.sessions.backends.db import SessionStore
+        from django.contrib.sessions.middleware import SessionMiddleware
+        from django.http import HttpResponse
+        from django.test import RequestFactory
+
+        awal = SessionStore()
+        awal["active_toko_id"] = 1
+        awal.save()
+        key = awal.session_key
+
+        mw = SessionMiddleware(lambda r: HttpResponse())
+        req_a = RequestFactory().get("/mutasi-bank/")
+        req_a.COOKIES[settings.SESSION_COOKIE_NAME] = key
+        mw.process_request(req_a)
+        # Request lambat A memuat sesi ke cache in-memory-nya: toko 1.
+        self.assertEqual(req_a.session["active_toko_id"], 1)
+
+        # Sementara A masih berjalan, set_toko di tab lain menulis toko 2.
+        tab_lain = SessionStore(session_key=key)
+        tab_lain["active_toko_id"] = 2
+        tab_lain.save()
+
+        # A selesai — process_response memutuskan menulis balik atau tidak.
+        mw.process_response(req_a, HttpResponse())
+        return SessionStore(session_key=key).get("active_toko_id")
+
+    def test_request_lambat_tidak_membatalkan_set_toko_di_tab_lain(self):
+        self.assertEqual(self._balapan(), 2)
+
+    @override_settings(SESSION_SAVE_EVERY_REQUEST=True)
+    def test_pembanding_save_every_request_memang_menimpa(self):
+        # Kalau ini berhenti menghasilkan 1, mekanisme balapannya berubah dan
+        # tes di atas tak lagi membuktikan apa-apa — periksa ulang, jangan
+        # sekadar menyesuaikan angkanya.
+        self.assertEqual(self._balapan(), 1)
 
 
 # ------------------------------------------------------ B2: pelacak error --

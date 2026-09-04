@@ -202,8 +202,21 @@ MEDIA_ROOT = Path(os.environ.get('MEDIA_ROOT') or (BASE_DIR / 'media'))
 # --- Sesi: data finansial, jangan hidup 2 minggu (default Django) ---
 # Aktif di dev DAN produksi (bukan hardening khusus-prod seperti HSTS) —
 # tak ada alasan sesi auditor tetap valid 2 minggu di lingkungan mana pun.
-SESSION_COOKIE_AGE = 8 * 3600          # idle timeout 8 jam...
-SESSION_SAVE_EVERY_REQUEST = True      # ...digeser tiap request (rolling)
+#
+# SESSION_SAVE_EVERY_REQUEST SENGAJA TIDAK dinyalakan (tinjauan akhir
+# 04-09-2026, K1). Sesi 8 jam di sini ABSOLUT sejak login, bukan idle-rolling.
+# Alasannya balapan, bukan selera: SessionMiddleware menulis balik salinan
+# sesi yang dimuat DI AWAL request. Dengan save-every-request, request LAMBAT
+# (Mutasi Bank 46 dtk, rekonsiliasi 22–29 dtk) yang selesai belakangan menulis
+# ulang `active_toko_id` LAMA dan membatalkan `set_toko` yang terjadi di tab
+# lain di antaranya — POST berikutnya (upload, jalankan rekonsiliasi: 24 view
+# membaca `_active_toko`) mendarat di toko yang salah tanpa pesan kesalahan.
+# Tanpa setelan itu hanya request yang MENGUBAH sesi (`set_toko`, login,
+# `ip_blokir`) yang menulis, jadi tidak ada penulis basi. Untuk aplikasi
+# internal ini, kedaluwarsa absolut justru lebih ketat — bukan kerugian.
+# Dijaga `web/tests_hardening.py::SesiHardeningTests` (tes balapan nyata,
+# bukan pin konfigurasi).
+SESSION_COOKIE_AGE = 8 * 3600          # 8 jam ABSOLUT sejak login (bukan rolling)
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 # --- C4: pembatas percobaan login (lockout per username+IP) ---
