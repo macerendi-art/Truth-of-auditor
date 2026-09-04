@@ -33,7 +33,7 @@ from decimal import Decimal
 
 from django.db.models.fields.json import KeyTextTransform
 
-from transactions.models import Transaction
+from transactions.models import KATEGORI_HUTANG_PIUTANG_REGEX, Transaction
 from web.breakdown import _slug_kategori
 
 NOL = Decimal("0")
@@ -275,7 +275,7 @@ def hutang_piutang(toko, dari=None, sampai=None):
             fr_kategori=KeyTextTransform("Kategori", "raw"),
             fr_jam=KeyTextTransform("Jam", "raw"),
         )
-        .filter(fr_kategori__iregex=r"^\s*(hutang|piutang)\s*$")
+        .filter(fr_kategori__iregex=KATEGORI_HUTANG_PIUTANG_REGEX)
     )
     kolom_ringan += ["fr_kategori", "fr_jam"]
     if banyak:
