@@ -12,8 +12,20 @@ from io import StringIO
 from django.core.management import call_command
 from django.db import connection, models
 from django.test import SimpleTestCase, TestCase
+from django.test.utils import CaptureQueriesContext
 
+from sources.models import SourceType, Toko
 from transactions.models import Transaction
+
+# `web.hutang` di-import HANYA di tes (bukan di models.py) — bukti bahwa
+# predikat index `tx_hutang_piutang_idx` (D2, di bawah) benar-benar
+# byte-per-byte sama dengan filter kategori yang dipakai halaman
+# `/hutang-piutang/` hari ini. Arah impor ini "terbalik" dari konvensi app
+# biasa (transactions lebih rendah dari web) — sengaja, khusus tes ini,
+# karena satu-satunya cara membuktikan dua sisi kode yang TIDAK saling
+# mengimpor konstanta yang sama tetap identik adalah menjalankan keduanya
+# dan membandingkan SQL asli.
+from web.hutang import hutang_piutang
 
 
 def _index_ddl(name):
@@ -138,6 +150,83 @@ class D4IndexAktifTests(TestCase):
         self.assertIn("WHERE", sql.upper())
         self.assertIn("consumed_by_batch_id", sql)
         self.assertIn("is_duplicate", sql)
+
+
+class D2KategoriIndexTests(TestCase):
+    """Eskalasi D2 — index parsial `tx_hutang_piutang_idx` (migrasi 0012).
+
+    Predikatnya (`raw->>'Kategori' ~* '^\\s*(hutang|piutang)\\s*$'`) HARUS
+    identik byte-per-byte dengan filter kategori `web/hutang.py::
+    hutang_piutang` (`KeyTextTransform("Kategori","raw").iregex`) — Postgres
+    membuktikan kecocokan index parsial lewat `predicate_implied_by`, sebuah
+    pembanding STRUKTURAL, bukan semantik. Satu karakter melenceng (spasi,
+    escape, flag) berarti index diam-diam TIDAK PERNAH dipakai planner,
+    tanpa error apa pun yang kelihatan. Tes ini menjalankan `hutang_piutang`
+    SUNGGUHAN, menangkap SQL aslinya, dan membandingkan fragmen WHERE
+    kategorinya dengan kompilasi kondisi index milik model — drift di SALAH
+    SATU sisi (`transactions/models.py` atau `web/hutang.py`) memerahkan
+    tes ini.
+    """
+
+    def setUp(self):
+        self.toko = Toko.objects.create(key="tst-d2kat", name="Test D2 Kategori")
+        self.bracket = SourceType.objects.get_or_create(
+            key="bracket", defaults={"name": "Bracket"}
+        )[0]
+
+    def _index(self):
+        return next(
+            i for i in Transaction._meta.indexes if i.name == "tx_hutang_piutang_idx"
+        )
+
+    def _fragmen_kondisi_index(self):
+        """Kompilasi kondisi index (`condition=Q(...)`) jadi teks SQL NYATA
+        yang benar-benar dieksekusi (bukan `str(qs.query)` — representasi
+        debug Django itu TIDAK selalu mengutip literal string dengan benar,
+        beda dari SQL asli yang dikirim ke DB-API). Fragmen WHERE-nya HARUS
+        jadi satu-satunya isi (tak ada filter lain di queryset ini)."""
+        with CaptureQueriesContext(connection) as ctx:
+            # `.values("pk")` (bukan `.exists()`) — TIDAK menambah `LIMIT 1`
+            # yang akan ikut tertangkap sebagai bagian fragmen WHERE.
+            list(Transaction.objects.filter(self._index().condition).values("pk"))
+        sql = ctx.captured_queries[0]["sql"]
+        return sql.split(" WHERE ", 1)[1]
+
+    def test_index_ada_di_skema_dengan_kolom_benar(self):
+        with connection.cursor() as cursor:
+            constraints = connection.introspection.get_constraints(
+                cursor, Transaction._meta.db_table
+            )
+        self.assertIn("tx_hutang_piutang_idx", constraints)
+        self.assertEqual(
+            constraints["tx_hutang_piutang_idx"]["columns"],
+            ["toko_id", "source_type_id", "posted_date"],
+        )
+
+    def test_skema_nyata_predikat_regex_ada(self):
+        sql = _index_ddl("tx_hutang_piutang_idx")
+        self.assertIsNotNone(sql)
+        self.assertIn("WHERE", sql.upper())
+        self.assertIn("hutang", sql.lower())
+        self.assertIn("piutang", sql.lower())
+
+    def test_predikat_index_identik_dengan_filter_hutang_piutang_asli(self):
+        """Bukti nol-drift: panggil `hutang_piutang()` SUNGGUHAN (bukan
+        salinan pola query), tangkap SQL fase-1-nya, dan pastikan fragmen
+        kategori index ini muncul VERBATIM di dalamnya."""
+        fragmen_index = self._fragmen_kondisi_index()
+        with CaptureQueriesContext(connection) as ctx:
+            hutang_piutang(self.toko)
+        self.assertEqual(len(ctx.captured_queries), 1)
+        sql_asli = ctx.captured_queries[0]["sql"]
+        self.assertIn(fragmen_index, sql_asli)
+
+    def test_predikat_tidak_menambah_is_duplicate(self):
+        """`hutang_piutang()` TIDAK menyaring `is_duplicate` sama sekali —
+        predikat index ini TIDAK BOLEH menambahnya (beda dari D4): syarat
+        ekstra membuat index lebih sempit dari query, `predicate_implied_by`
+        gagal membuktikan implikasi, dan index tak akan pernah dipakai."""
+        self.assertNotIn("is_duplicate", self._fragmen_kondisi_index())
 
 
 class MigrasiTertinggalTests(SimpleTestCase):

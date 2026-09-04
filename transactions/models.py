@@ -5,6 +5,18 @@ from django.db.models.fields.json import KeyTextTransform
 
 from core.models import TimeStampedModel
 
+# Regex kategori Hutang/Piutang — SATU SUMBER untuk predikat index parsial
+# `tx_hutang_piutang_idx` di bawah. `web/hutang.py` (di luar wewenang tulis
+# migrasi ini) memakai literal yang SAMA lewat
+# `KeyTextTransform("Kategori", "raw").iregex` — kedua sisi WAJIB tetap identik
+# byte-per-byte (dikunci tes `transactions/tests_index.py`
+# `D2KategoriIndexTests`), karena `predicate_implied_by` Postgres membuktikan
+# kecocokan index parsial lewat kesetaraan STRUKTURAL klausa, bukan makna
+# semantiknya — satu karakter melenceng berarti index diam-diam tak terpakai
+# tanpa error apa pun. Follow-up yang disarankan (di luar wewenang tugas ini):
+# `web/hutang.py` sebaiknya mengimpor konstanta ini alih-alih menyalin literal.
+KATEGORI_HUTANG_PIUTANG_REGEX = r"^\s*(hutang|piutang)\s*$"
+
 # Peta token -> label sumber spesifik. Kunci = huruf/angka saja (tanpa spasi),
 # dicocokkan per-token utuh dari nama file / provider — BUKAN substring, dan
 # TIDAK PERNAH menebak dari teks counterparty.
@@ -285,6 +297,83 @@ class Transaction(TimeStampedModel):
                 KeyTextTransform("Bank", "raw"),
                 models.F("posted_date"),
                 name="tx_fr_bank_posted_idx",
+            ),
+            # Eskalasi dari D2 (`.superpowers/sdd/.../3b-report.md`): biaya
+            # dominan `web/hutang.py::hutang_piutang` adalah SATU scan yang
+            # memaksa Postgres mengekstrak `raw->>'Kategori'` lalu menjalankan
+            # regex per baris bracket dalam rentang toko×tanggal — TANPA index.
+            # Kolom (toko, source_type, posted_date) SUDAH tercakup
+            # `tx_toko_src_posted_idx` di atas, tapi query ini SELALU juga
+            # butuh `money_delta` (kolom heap biasa, tak ada di index mana
+            # pun) untuk baris yang lolos filter — jadi index EKSPRESI biasa
+            # ala `tx_fr_bank_posted_idx` (menaruh `raw->>'Kategori'` sebagai
+            # KOLOM index) TIDAK menolong: `money_delta` memblokir Index-Only
+            # Scan untuk seluruh query, dan `~*` regex tak bisa jadi Index
+            # Cond pada btree biasa — jadi planner tetap harus membuka heap
+            # utk SETIAP baris kandidat (toko, bracket, rentang), index atau
+            # tidak. Sebaliknya: regexnya KONSTAN di kode (persis dua nilai,
+            # `hutang`/`piutang`, longgar spasi+kapital) — jadi ia dipindah
+            # ke PREDIKAT parsial, bukan kolom, meniru logika D4
+            # (`tx_aktif_toko_src_jenis_idx`) bukan bentuk kolom
+            # `tx_fr_bank_posted_idx`. Postgres membuktikan kecocokan index
+            # parsial lewat `predicate_implied_by` — kesetaraan STRUKTURAL
+            # klausa `raw->>'Kategori' ~* '...'` pada query vs index, bukan
+            # makna. Index inilah yang hanya berisi ~2% baris bracket
+            # (hutang/piutang) — heap HANYA dibuka utk baris itu, bukan
+            # seluruh bracket dalam rentang.
+            #
+            # ⚠️ TIDAK dibuktikan dengan EXPLAIN Postgres nyata (tak ada akses
+            # Postgres di lingkungan tugas ini, hanya SQLite). Yang terverifikasi
+            # lokal: kompilasi SQL kondisi ini (`raw__Kategori__iregex`) IDENTIK
+            # byte-per-byte dengan kompilasi filter asli `web/hutang.py`
+            # (`KeyTextTransform("Kategori","raw").iregex`) — dikunci
+            # `D2KategoriIndexTests` di `tests_index.py`. Risiko yang tersisa,
+            # HANYA bisa diverifikasi di Postgres nyata: psycopg Django secara
+            # baku melakukan bind CLIENT-SIDE (literal disisipkan sebelum
+            # dikirim), jadi predikat mestinya sampai ke planner sebagai
+            # literal (bukan `$1`) — TAPI kalau `EXPLAIN` menunjukkan index ini
+            # TIDAK dipakai, periksa dulu `pg_stat_statements`/teks kueri
+            # aktual apakah regexnya benar tersubstitusi sebagai literal, bukan
+            # parameter — itulah kegagalan implikasi yang paling mungkin.
+            #
+            # Predikat SENGAJA TIDAK menambah `is_duplicate=False` (beda dari
+            # D4/tx_aktif_toko_src_jenis_idx): `hutang_piutang()` memang tidak
+            # menyaring `is_duplicate` sama sekali — predikat index harus
+            # persis seketat query, menambah syarat ekstra membuat index ini
+            # LEBIH SEMPIT dari yang query minta sehingga `predicate_implied_by`
+            # gagal (planner tak bisa membuktikan setiap baris hasil query pasti
+            # `is_duplicate=False`) dan index tak akan pernah dipilih.
+            #
+            # Ukuran: hanya ~2% baris bracket (rasio hutang/piutang, ASUMSI 3b,
+            # BUKAN terukur produksi) × 3 kolom sempit (toko_id, source_type_id,
+            # posted_date int/date) — kecil dibanding index penuh tabel. Biaya
+            # tulis: regex dievaluasi tiap INSERT bracket (±185rb/hari porsi
+            # bracket dari ±500rb total) HANYA utk memutuskan masuk index atau
+            # tidak — evaluasi regex atas satu string pendek, murah dibanding
+            # index penuh-tabel manapun di atas.
+            #
+            # DDL runbook (kompilasi Django di Postgres, + kata CONCURRENTLY):
+            #
+            #     CREATE INDEX CONCURRENTLY "tx_hutang_piutang_idx"
+            #         ON "transactions_transaction" ("toko_id", "source_type_id", "posted_date")
+            #         WHERE ("raw" ->> 'Kategori') ~* '^\s*(hutang|piutang)\s*$';
+            #
+            # Verifikasi pemakaian planner (jalankan pemilik, bentuk query
+            # PERSIS `web/hutang.py::hutang_piutang` fase-1, toko+rentang nyata):
+            #
+            #     EXPLAIN (ANALYZE, BUFFERS)
+            #     SELECT id, posted_date, money_delta,
+            #            raw ->> 'Kategori' AS fr_kategori, raw ->> 'Jam' AS fr_jam
+            #       FROM transactions_transaction
+            #      WHERE toko_id = <id> AND source_type_id = <id bracket>
+            #        AND posted_date BETWEEN <dari> AND <sampai>
+            #        AND (raw ->> 'Kategori') ~* '^\s*(hutang|piutang)\s*$';
+            #
+            # Setelah deploy: `manage.py periksa_index`.
+            models.Index(
+                fields=["toko", "source_type", "posted_date"],
+                name="tx_hutang_piutang_idx",
+                condition=models.Q(raw__Kategori__iregex=KATEGORI_HUTANG_PIUTANG_REGEX),
             ),
         ]
         constraints = [
