@@ -88,4 +88,27 @@ if [ -n "${ALARM_EMAIL_TO:-}" ]; then
   fi
 fi
 
+# --- AKTIFKAN DI SINI -- opsi C: Telegram bot -------------------------------------------------
+# Butuh DUA nilai di alarm.env: TELEGRAM_BOT_TOKEN (dari @BotFather) dan TELEGRAM_CHAT_ID.
+# TELEGRAM_API_BASE hanya untuk PENGUJIAN (diarahkan ke penerima lokal); biarkan kosong di produksi.
+#
+# Sengaja BERISIK saat setengah terisi: mengisi satu tapi lupa satunya adalah kesalahan yang
+# paling mungkin terjadi, dan versi diam akan membuat pemilik mengira alarm menyala.
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+  if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+    logger -p user.err -t toa-alarm \
+      "ALARM toa: Telegram setengah terpasang (butuh TELEGRAM_BOT_TOKEN DAN TELEGRAM_CHAT_ID) -- pesan TIDAK terkirim"
+  else
+    tg_base="${TELEGRAM_API_BASE:-https://api.telegram.org}"
+    # Token TIDAK pernah masuk log: hanya kode HTTP yang dicatat saat gagal.
+    tg_kode="$(curl -sS -m 15 -o /dev/null -w '%{http_code}' \
+      -X POST "$tg_base/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+      --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+      --data-urlencode "text=ALARM toa: $PESAN" 2>/dev/null || echo 000)"
+    if [ "$tg_kode" != "200" ]; then
+      logger -p user.err -t toa-alarm "ALARM toa: Telegram GAGAL terkirim (HTTP $tg_kode)"
+    fi
+  fi
+fi
+
 exit 0
