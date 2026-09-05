@@ -44,9 +44,11 @@
     </div>
     {% endif %}
     {% endwith %}
-    {# Ticket mutasi: QRIS ELITE kolom TICKET (D…/W…) + gateway ber-tiket lain.
-       Di bucket "Tak ada di panel" (hide_left) ini satu-satunya tempat kode tiket
-       terlihat — sebelumnya cuma "—" karena counterparty gateway kosong. #}
+    {% comment %}
+    Ticket mutasi: QRIS ELITE kolom TICKET (D…/W…) + gateway ber-tiket lain.
+    Di bucket "Tak ada di panel" (hide_left) ini satu-satunya tempat kode tiket
+    terlihat — sebelumnya cuma "—" karena counterparty gateway kosong.
+    {% endcomment %}
     {% if r.right.ticket_no %}
     <div class="mono" style="font-size:13px;font-weight:600;margin-top:2px;color:var(--ink)" title="Ticket dari mutasi/gateway">{{ r.right.ticket_no }}</div>
     {% endif %}
