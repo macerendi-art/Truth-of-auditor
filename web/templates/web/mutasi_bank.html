@@ -53,15 +53,18 @@
 <div class="card pad0 reveal mutasi-card">
   <div class="table-wrap tall mutasi-scroll" style="border:none">
   <table id="mutasi-table" class="selectable">
-    <thead><tr><th style="width:56px" class="num">No</th><th style="width:110px">Tanggal</th><th style="width:150px">Sumber</th><th>Nama (sesuai mutasi)</th><th>Keterangan</th><th style="width:86px">Jenis</th><th class="num" style="width:110px">Nominal</th><th class="num" style="width:120px">Fee</th></tr></thead>
+    <thead><tr><th style="width:56px" class="num">No</th><th style="width:110px">Tanggal</th><th style="width:150px">Sumber</th><th style="width:118px">Ticket</th><th>Nama (sesuai mutasi)</th><th>Keterangan</th><th style="width:86px">Jenis</th><th class="num" style="width:110px">Nominal</th><th class="num" style="width:120px">Fee</th></tr></thead>
     <tbody>
     {% for t in page %}
     <tr>
       <td class="num mono faint">{{ page.start_index|add:forloop.counter0 }}</td>
       <td><div class="mono" style="font-size:12.5px">{% if sel_upload and t.upload_id != sel_upload.id %}<span title="Tercatat lewat file: {{ t.upload.original_name }}" style="text-decoration:underline dotted;text-underline-offset:3px;cursor:help">{{ t.occurred_at|date:"d/m H:i"|default:"—" }}</span>{% else %}{{ t.occurred_at|date:"d/m H:i"|default:"—" }}{% endif %}</div></td>
       <td style="font-size:12px"><b>{{ t.source_label_full }}</b></td>
+      {# Ticket: QRIS ELITE kolom TICKET (D…/W… Nexus) + gateway ber-tiket lain. Bank/Done kosong → —. #}
+      <td class="mono" style="font-size:12.5px">{% if t.ticket_no %}{{ t.ticket_no }}{% else %}<span class="faint">—</span>{% endif %}</td>
       <td class="cell-tr" style="font-size:12.5px">
         {% if t.counterparty %}<span title="{{ t.counterparty }}">{{ t.counterparty }}</span>
+        {% elif t.username %}<span class="mono" title="Username gateway/panel">{{ t.username }}</span>
         {% elif t.phone %}<span class="mono">{{ t.phone }}</span>{% if t.player_name %} · <span title="Nama dari data panel (perkiraan)">≈ {{ t.player_name }}</span>{% endif %}
         {% elif t.player_name %}<span title="Nama dari deskripsi mutasi (varian tanpa kode ESB)">{{ t.player_name }}</span>
         {% else %}<span class="faint">—</span>{% endif %}
@@ -72,7 +75,7 @@
       <td class="num mono">{% if t.fee %}{{ t.fee|abs_num|floatformat:0|intcomma }}{% else %}<span class="faint">—</span>{% endif %}</td>
     </tr>
     {% empty %}
-    <tr><td colspan="8" class="cell-empty">Belum ada mutasi bank/gateway untuk filter ini.</td></tr>
+    <tr><td colspan="9" class="cell-empty">Belum ada mutasi bank/gateway untuk filter ini.</td></tr>
     {% endfor %}
     </tbody>
   </table>

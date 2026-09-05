@@ -33,13 +33,15 @@ class MutasiBankBase(TestCase):
         )
 
     def _tx(self, up, st, *, toko=None, jenis="depo", counterparty="", description="",
-            amount="10000", balance=None, fee="0", dt=datetime(2026, 6, 27, 10, 0)):
+            amount="10000", balance=None, fee="0", ticket_no="", username="",
+            dt=datetime(2026, 6, 27, 10, 0)):
         return Transaction.objects.create(
             upload=up, source_type=st, toko=toko or self.lbs, jenis=jenis,
             amount=Decimal(amount), money_delta=Decimal(amount),
             fee=Decimal(fee),
             balance_after=None if balance is None else Decimal(balance),
             occurred_at=dt, counterparty=counterparty, description=description,
+            ticket_no=ticket_no, username=username,
             raw={}, row_hash=f"mb-{next(_seq)}",
         )
 
@@ -903,6 +905,51 @@ class MutasiBankFeeTests(MutasiBankBase):
         self.assertEqual(len(r.context["page"].object_list), 50)
         self.assertEqual(r.context["fee_all_n"], 55)
         self.assertContains(r, "(50 baris)")
+
+
+class MutasiBankTicketTests(MutasiBankBase):
+    """Kolom Ticket di Mutasi Bank — QRIS ELITE TICKET D…/W… (sampel Nexus).
+
+    Parser `qris_elite` sudah mengisi `ticket_no` dari kolom TICKET bila
+    bentuknya tiket panel (bukan status Done Vigor/TM). UI harus menampilkan
+    kode itu; baris bank/tanpa tiket tetap —. Username gateway mengisi Nama
+    bila counterparty kosong (MEMBER di file ELITE).
+    """
+
+    def test_header_ticket(self):
+        up = self._up(self.gateway, "04_09_DP_QRIS_ELITE.csv")
+        self._tx(up, self.gateway, ticket_no="D2370410", username="soju29")
+        r = self.client.get(reverse("bank_mutations"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, ">Ticket</th>")
+
+    def test_qris_elite_ticket_dan_username(self):
+        # Contoh dari screenshot commander: TICKET D2370410 · MEMBER soju29
+        up = self._up(self.gateway, "04-09-2026 DP QRIS ELITE.csv")
+        self._tx(
+            up, self.gateway,
+            ticket_no="D2370410", username="soju29",
+            description="QRIS ELITE THERYX", amount="9700", fee="824",
+            counterparty="",
+        )
+        r = self.client.get(reverse("bank_mutations"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "D2370410")
+        self.assertContains(r, "soju29")
+        html = r.content.decode()
+        # Ticket di sel mono, bukan hanya di raw tersembunyi
+        self.assertIn("D2370410", html)
+        self.assertIn('title="Username gateway/panel"', html)
+
+    def test_bank_tanpa_ticket_tetap_strip(self):
+        up = self._up(self.bank, "bri.csv", owner="HENDI")
+        self._tx(up, self.bank, counterparty="SUPRIADI", ticket_no="")
+        r = self.client.get(reverse("bank_mutations"))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, ">Ticket</th>")
+        self.assertContains(r, "SUPRIADI")
+        # tidak memalsukan ticket kosong jadi teks lain
+        self.assertNotContains(r, "D237")
 
 
 class MutasiBankCoverageTests(MutasiBankBase):
