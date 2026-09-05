@@ -93,14 +93,52 @@ class PanelFieldsRunDetailTests(TestCase):
         resp = self.client.get(reverse("run_detail", args=[self.run.pk]))
         self.assertEqual(resp.status_code, 200)
 
+    def test_qris_elite_ticket_tampil_di_sisi_mutasi(self):
+        """Panel↔Mutasi · Tak ada di panel: ticket gateway ELITE dari mutasi (kanan).
+
+        Screenshot commander: posisi "—" di bawah Rekening a/n ELITE harus
+        menampilkan kode TICKET file (D…) — diambil dari right.ticket_no.
+        """
+        gw = SourceType.objects.get_or_create(key="gateway", defaults={"name": "Gateway"})[0]
+        up_gw = Upload.objects.create(
+            source_type=gw, toko=self.lbs, original_name="04-09 DP QRIS ELITE.csv",
+            owner_name="ELITE",
+        )
+        right = Transaction.objects.create(
+            upload=up_gw, source_type=gw, toko=self.lbs, jenis="depo",
+            amount=Decimal("25000"), money_delta=Decimal("25000"),
+            occurred_at=datetime(2026, 9, 4, 23, 59),
+            ticket_no="D2370410", username="kaizen01",
+            description="QRIS ELITE KAIZEN DIGITECH LNC",
+            counterparty="", raw={}, row_hash="elite-tix-1",
+        )
+        MatchResult.objects.create(
+            run=self.run, bucket=MatchResult.Bucket.TIDAK,
+            left=None, right=right,
+            reason_code="no_panel",
+            reason_detail="Ticket gateway tak dikenal panel",
+        )
+        # Tab "Tidak Ada di Panel" = TIDAK + left null → hide_left
+        resp = self.client.get(
+            reverse("run_detail", args=[self.run.pk]),
+            {"bucket": "tidak_ada_panel"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "D2370410")
+        self.assertContains(resp, "kaizen01")
+        self.assertContains(resp, 'title="Ticket dari mutasi/gateway"')
+        self.assertContains(resp, "QRIS ELITE KAIZEN DIGITECH LNC")
+
 
 class ResultRowTemplateRenderTests(TestCase):
     """Render langsung _result_row.html via Template — pastikan tag {% load %} & filter jalan."""
 
     TEMPLATE = "{% load humanize %}{% load web_extras %}{% include \"web/_result_row.html\" %}"
 
-    def _render(self, r):
-        return Template(self.TEMPLATE).render(Context({"r": r}))
+    def _render(self, r, **extra):
+        ctx = {"r": r}
+        ctx.update(extra)
+        return Template(self.TEMPLATE).render(Context(ctx))
 
     def test_partial_labels_when_only_handler_present(self):
         class FakeLeft:
@@ -127,3 +165,53 @@ class ResultRowTemplateRenderTests(TestCase):
         self.assertIn("Bot.qrisflyer", html)  # Handler tampil di kolomnya
         self.assertIn("budi", html)  # username di kolom User ID
         self.assertNotIn("Handler:", html)  # label lama (satu sel) sudah tidak ada
+
+    def test_right_ticket_qris_elite_mengganti_strip(self):
+        """Sisi mutasi: ticket_no mono + username; "—" hilang bila ticket ada."""
+
+        class FakeSrc:
+            key = "gateway"
+            name = "Gateway"
+
+        class FakeUpload:
+            owner_name = "ELITE"
+            original_name = "elite.csv"
+
+        class FakeRight:
+            source_type = FakeSrc()
+            upload = FakeUpload()
+            ticket_no = "D2370410"
+            username = "soju29"
+            counterparty = ""
+            player_name = ""
+            description = "QRIS ELITE THERYX"
+            jenis = "depo"
+            occurred_at = None
+            balance_after = None
+            amount = Decimal("9700")
+            money_delta = Decimal("9700")
+            raw = {}
+            source_label_full = "QRIS a/n ELITE"
+
+        class FakeRow:
+            pk = 99
+            bucket = "unmatched_money"
+            left = None
+            right = FakeRight()
+            reason_code = "no_panel"
+            reason_detail = "Ticket gateway tak dikenal panel"
+            score = 0
+            alasan_manual = ""
+            catatan_manual = ""
+
+            def get_bucket_display(self):
+                return "Tidak Cocok"
+
+        html = self._render(FakeRow(), hide_left=True)
+        self.assertIn("D2370410", html)
+        self.assertIn("soju29", html)
+        self.assertIn('title="Ticket dari mutasi/gateway"', html)
+        self.assertIn("QRIS a/n ELITE", html)
+        # Jangan tampil "—" palsu di slot nama bila ticket sudah ada
+        # (boleh "—" di sel kiri kosong — hide_left=True menekan kiri).
+        self.assertNotIn(">——<", html.replace(" ", ""))

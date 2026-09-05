@@ -44,12 +44,20 @@
     </div>
     {% endif %}
     {% endwith %}
+    {# Ticket mutasi: QRIS ELITE kolom TICKET (D…/W…) + gateway ber-tiket lain.
+       Di bucket "Tak ada di panel" (hide_left) ini satu-satunya tempat kode tiket
+       terlihat — sebelumnya cuma "—" karena counterparty gateway kosong. #}
+    {% if r.right.ticket_no %}
+    <div class="mono" style="font-size:13px;font-weight:600;margin-top:2px;color:var(--ink)" title="Ticket dari mutasi/gateway">{{ r.right.ticket_no }}</div>
+    {% endif %}
     <div class="cell-tr" style="font-size:12.5px;margin-top:2px">
       {% if r.right.counterparty %}
         <span title="Nama di mutasi: {{ r.right.counterparty }}">{{ r.right.counterparty }}</span>
+      {% elif r.right.username %}
+        <span class="mono" title="Username gateway (MEMBER)">{{ r.right.username }}</span>
       {% elif r.right.player_name %}
         <span title="Nama dari deskripsi mutasi">{{ r.right.player_name }}</span>
-      {% else %}
+      {% elif not r.right.ticket_no %}
         <span class="faint">—</span>
       {% endif %}
       {% with norek=r.right.raw|raw_get:"NOREK" %}
