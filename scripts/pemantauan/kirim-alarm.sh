@@ -100,11 +100,54 @@ if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
       "ALARM toa: Telegram setengah terpasang (butuh TELEGRAM_BOT_TOKEN DAN TELEGRAM_CHAT_ID) -- pesan TIDAK terkirim"
   else
     tg_base="${TELEGRAM_API_BASE:-https://api.telegram.org}"
+
+    # --- Bentuk pesan Telegram -------------------------------------------------------------
+    # Jurnal systemd tetap menerima satu baris polos di atas (`logger`) -- itu untuk mesin.
+    # Yang di bawah ini untuk MANUSIA yang melihatnya di layar HP, di tengah obrolan grup:
+    #   * ikon keparahan supaya bisa dipindai sekilas tanpa membaca;
+    #   * judul tebal, terpisah dari perintah diagnosisnya;
+    #   * tiap perintah dalam <code> -- di Telegram itu bisa disalin SEKALI SENTUH, dan
+    #     itulah gunanya: yang menerima alarm jam 3 pagi tidak sedang ingin mengetik ulang
+    #     `journalctl -u ... -n 100` dari layar kecil.
+    # Unit pemanggil tidak perlu tahu apa pun soal ini -- mereka tetap mengirim satu string
+    # apa adanya, dan pemformatan hidup di SATU tempat (titik tunggal yang sama).
+    esc() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+
+    case "$PESAN" in
+      *"UJI SALURAN"*)                        ikon="🧪" ;;
+      *GAGAL*|*BAHAYA*|*"TIDAK MENJAWAB"*)    ikon="🔴" ;;
+      *) ikon="⚠️" ;;
+    esac
+
+    judul="${PESAN%% -- cek:*}"
+    if [ "$judul" != "$PESAN" ]; then diag="${PESAN#* -- cek: }"; else diag=""; fi
+
+    teks="$ikon <b>$(esc "$judul")</b>"
+    if [ -n "$diag" ]; then
+      teks="$teks
+
+<i>Diagnosa — jalankan di VPS:</i>"
+      # Perintah dipisah oleh "  |  " di pesan asli; pecah jadi baris sendiri-sendiri.
+      lama_ifs="$IFS"; IFS='|'
+      for cmd in $diag; do
+        cmd="$(printf '%s' "$cmd" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        [ -n "$cmd" ] && teks="$teks
+<code>$(esc "$cmd")</code>"
+      done
+      IFS="$lama_ifs"
+    fi
+    teks="$teks
+
+<i>$(esc "$(hostname)") · $(date '+%d-%m-%Y %H:%M:%S %Z')</i>"
+
     # Token TIDAK pernah masuk log: hanya kode HTTP yang dicatat saat gagal.
     tg_kode="$(curl -sS -m 15 -o /dev/null -w '%{http_code}' \
       -X POST "$tg_base/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
       --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
-      --data-urlencode "text=ALARM toa: $PESAN" 2>/dev/null || echo 000)"
+      --data-urlencode "parse_mode=HTML" \
+      --data-urlencode "disable_web_page_preview=true" \
+      --data-urlencode "text=$teks" 2>/dev/null || echo 000)"
+
     if [ "$tg_kode" != "200" ]; then
       logger -p user.err -t toa-alarm "ALARM toa: Telegram GAGAL terkirim (HTTP $tg_kode)"
       [ "${1:-}" = "--uji" ] && echo "Telegram: GAGAL (HTTP $tg_kode)" >&2
