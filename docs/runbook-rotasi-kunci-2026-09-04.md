@@ -75,12 +75,56 @@ Yang perlu diketahui sebelum menekan tombol:
 
 ## Langkah 2 — kredensial basis data
 
-Rotasi kata sandi Postgres dilakukan dari sisi Railway (dashboard service Postgres). Sesudahnya
-`DATABASE_URL` pada service `web` harus menunjuk kredensial baru.
+⚠️ **DIKOREKSI 05-09-2026 setelah memeriksa variabel Railway yang sebenarnya.** Versi pertama
+dokumen ini menulis "rotasi dilakukan dari dashboard Railway" dan itu **menyesatkan**: service
+Postgres memang punya `POSTGRES_PASSWORD`, tapi variabel itu hanya dibaca entrypoint Postgres
+**saat basis data PERTAMA KALI diinisialisasi**. Database ini sudah berjalan sejak Juli, jadi
+mengubah variabel itu **TIDAK mengubah sandi role yang sesungguhnya** — ia hanya membuat aplikasi
+memakai sandi yang salah, dan hasilnya bukan rotasi melainkan pemadaman.
 
-⚠️ **Aplikasi akan kehilangan koneksi selama jendela ini.** `CONN_MAX_AGE=600` menahan koneksi
-lama sampai sepuluh menit, jadi jangan menyimpulkan "masih aman" dari halaman yang masih terbuka —
-koneksi yang sudah ada bisa saja belum diputus. Rotasi ini sebaiknya dilakukan di jam sepi.
+Urutan yang benar: **ubah di dalam Postgres dulu, baru samakan variabelnya.**
+
+### 2a. Siapkan sandi baru
+```bash
+LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 40; echo
+```
+Sengaja hanya huruf+angka: sandi yang memuat `@ : / ?` merusak parsing URL koneksi, dan itu jenis
+kerusakan yang baru terlihat saat cadangan gagal jam 3 pagi.
+
+⚠️ Sebelum lanjut, **buka dashboard Railway service Postgres di tab lain dan siapkan sandi barunya
+di clipboard.** Antara langkah 2b dan 2c aplikasi tidak bisa membuka koneksi BARU (koneksi lama
+bertahan sampai `CONN_MAX_AGE=600`), jadi jendela itu harus pendek. Kerjakan di jam sepi, dan
+JANGAN di 03:00–03:30 (cadangan sedang memegang transaksi panjang).
+
+### 2b. Ubah sandi di dalam Postgres
+```bash
+ssh -t toa 'psql -d "$(cat ~/.prod-url)"'
+```
+Lalu di prompt psql:
+```
+\password postgres
+\q
+```
+`\password` meminta sandi dua kali tanpa menggemakannya, dan mengirim `ALTER USER` dengan nilai
+yang sudah di-hash — sandinya tidak pernah muncul di `argv`, di `~/.psql_history`, maupun di log
+server. **Jangan** memakai `psql -c "ALTER USER ... PASSWORD '...'"`: itu menaruh sandi di
+`/proc/<pid>/cmdline` dan di riwayat.
+
+### 2c. Perbarui `~/.pgpass` VPS SEGERA (lihat Langkah 3)
+Lakukan ini **sebelum** menyentuh dashboard — cadangan adalah hal yang paling tidak boleh mati,
+dan langkah ini yang menjaganya.
+
+### 2d. Samakan variabel di Railway
+Di service **Postgres**, ubah `PGPASSWORD` **dan** `POSTGRES_PASSWORD` ke sandi baru.
+`DATABASE_URL` dan `DATABASE_PUBLIC_URL` diturunkan darinya dan ikut berubah.
+
+⚠️ Lalu periksa service **web**: buka variabel `DATABASE_URL` di dashboard.
+- Kalau isinya **`${{Postgres.DATABASE_URL}}`** (referensi) → ia ikut otomatis, tidak perlu apa-apa.
+- Kalau isinya **string mentah** yang memuat sandi → ubah juga di sana, kalau tidak aplikasi tetap
+  memakai sandi lama.
+
+Perubahan variabel memicu redeploy; itu wajar. Start command menjalankan `migrate` lebih dulu —
+tak ada migrasi tertunda, jadi cepat.
 
 ## Langkah 3 — perbarui `~/.pgpass` di VPS (WAJIB)
 
