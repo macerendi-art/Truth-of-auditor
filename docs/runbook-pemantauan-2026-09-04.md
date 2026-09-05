@@ -1,5 +1,9 @@
 # Runbook — Pemantauan kesehatan produksi (B1) + alarm layanan mati (B6) + F6 (2026-09-04)
 
+> **Menerima alarm dan tidak tahu harus berbuat apa?** Kartu triase per situasi ada di
+> [`runbook-situasi-2026-09-05.md`](runbook-situasi-2026-09-05.md) — dokumen ini menjelaskan
+> BAGAIMANA pemantauannya bekerja; yang itu menjawab APA yang harus dilakukan.
+
 Sumber tugas: `docs/daftar-perbaikan-2026-09-03.md` butir B1, B6, F6.
 
 Kalimat penutup daftar perbaikannya:
