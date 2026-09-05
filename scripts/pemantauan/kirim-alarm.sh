@@ -107,6 +107,13 @@ if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
       --data-urlencode "text=ALARM toa: $PESAN" 2>/dev/null || echo 000)"
     if [ "$tg_kode" != "200" ]; then
       logger -p user.err -t toa-alarm "ALARM toa: Telegram GAGAL terkirim (HTTP $tg_kode)"
+      [ "${1:-}" = "--uji" ] && echo "Telegram: GAGAL (HTTP $tg_kode)" >&2
+    else
+      # Mode uji dijalankan MANUSIA yang sedang menatap layar; diam total di sini tak bisa
+      # dibedakan dari gagal. Terjadi sungguhan 05-09-2026: pemilik menjalankan --uji dua kali,
+      # keduanya BERHASIL (HTTP 200), tapi layar tidak menampilkan apa pun sehingga ia
+      # menyimpulkan gagal. Alarm otomatis tetap senyap di stdout -- systemd yang membacanya.
+      [ "${1:-}" = "--uji" ] && echo "Telegram: terkirim (HTTP 200) ke chat $TELEGRAM_CHAT_ID"
     fi
   fi
 fi
