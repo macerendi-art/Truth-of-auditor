@@ -14,6 +14,21 @@ set -uo pipefail
 ENV_FILE="${ALARM_ENV_FILE:-$HOME/pemantauan/alarm.env}"
 API="${TELEGRAM_API_BASE:-https://api.telegram.org}"
 
+# TANPA TTY, `read -rs` TIDAK BISA mematikan gema: yang menggemakan adalah terminal LOKAL
+# pemanggil, di luar jangkauan skrip ini. Terjadi sungguhan 05-09-2026 -- dijalankan lewat
+# `ssh toa '...'` (tanpa -t) dan token bot tampil polos di layar lalu masuk scrollback.
+# Menolak jalan lebih baik daripada berpura-pura aman.
+if [ ! -t 0 ]; then
+  cat >&2 <<'PESAN'
+BERHENTI: tidak ada TTY, jadi ketikan tokenmu AKAN TERLIHAT di layar.
+Jalankan ulang dengan -t:
+
+    ssh -t toa '~/pemantauan/pasang-telegram.sh'
+
+PESAN
+  exit 2
+fi
+
 printf 'Token bot dari @BotFather (tidak akan terlihat saat diketik): '
 read -rs TOKEN; echo
 [ -n "$TOKEN" ] || { echo "Token kosong — dibatalkan."; exit 1; }
@@ -31,16 +46,27 @@ echo "                pesan yang menyebut namanya atau perintah bergaya /perinta
 echo "                Mengirim 'halo' biasa TIDAK akan terlihat, dan deteksi di bawah gagal.)"
 echo "  - Ke PRIBADI: cukup kirim pesan apa saja ke @$NAMA."
 echo
-printf 'Tekan Enter setelah pesannya terkirim... '
-read -r _
+echo "Aku akan menunggu dan memeriksa berulang selama ~60 detik -- kirim pesannya SEKARANG."
+echo "(Tak perlu buru-buru menekan apa pun; urutannya tidak lagi menentukan.)"
 
-PILIHAN="$(curl -sS -m 15 "$API/bot$TOKEN/getUpdates" 2>/dev/null | jq -r '
+ambil_pilihan() {
+  curl -sS -m 15 "$API/bot$TOKEN/getUpdates" 2>/dev/null | jq -r '
   [ .result[]?
     | (.message // .channel_post // .my_chat_member) as $m
     | select($m != null) | $m.chat
     | { id, tipe: .type, nama: (.title // ((.first_name // "") + " " + (.last_name // "")) | gsub("^ +| +$";"")) }
   ] | unique_by(.id) | reverse | .[]
-  | "\(.id)\t\(.tipe)\t\(.nama)"' 2>/dev/null)"
+  | "\(.id)\t\(.tipe)\t\(.nama)"' 2>/dev/null
+}
+
+PILIHAN=""
+for _ in $(seq 1 12); do
+  PILIHAN="$(ambil_pilihan)"
+  [ -n "$PILIHAN" ] && break
+  printf '.'
+  sleep 5
+done
+echo
 
 if [ -n "$PILIHAN" ]; then
   echo "Tujuan yang terlihat oleh bot ini:"
@@ -54,6 +80,7 @@ if [ -n "$PILIHAN" ]; then
 else
   echo "Tidak ada tujuan terbaca. Kalau ini GRUP, penyebab paling umum adalah privacy mode:"
   echo "kirim  /start@$NAMA  DI DALAM grup (bukan 'halo' biasa), lalu ulangi skrip ini."
+  echo "Pastikan juga botnya MEMANG sudah anggota grup itu, bukan sekadar dicari namanya."
   printf 'Atau masukkan chat id manual (grup biasanya diawali -100...), Enter untuk batal: '
   read -r CHAT
   [ -n "$CHAT" ] || { echo "Dibatalkan."; exit 1; }
