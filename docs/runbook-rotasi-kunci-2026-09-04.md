@@ -75,6 +75,12 @@ Yang perlu diketahui sebelum menekan tombol:
 
 ## Langkah 2 — kredensial basis data
 
+> **Ada alternatif tanpa jendela rusak:** [`runbook-rotasi-tanpa-pemadaman-2026-09-05.md`](runbook-rotasi-tanpa-pemadaman-2026-09-05.md)
+> — buat role baru, pindahkan sambil dibuktikan tiap langkah, matikan kredensial yang bocor
+> PALING AKHIR. Lebih panjang, tapi tidak ada momen di mana produksi bergantung pada sesuatu yang
+> belum terbukti. **Itu yang disarankan.** Langkah di bawah ini tetap sah untuk keadaan darurat
+> yang menuntut kecepatan di atas segalanya.
+
 ⚠️ **DIKOREKSI 05-09-2026 setelah memeriksa variabel Railway yang sebenarnya.** Versi pertama
 dokumen ini menulis "rotasi dilakukan dari dashboard Railway" dan itu **menyesatkan**: service
 Postgres memang punya `POSTGRES_PASSWORD`, tapi variabel itu hanya dibaca entrypoint Postgres
