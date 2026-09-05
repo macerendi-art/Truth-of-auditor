@@ -7,6 +7,7 @@ urlpatterns = [
     path("set-toko/", views.set_toko, name="set_toko"),
     path("ganti-password/", views.ganti_password, name="ganti_password"),
     path("upload/", views.upload, name="upload"),
+    path("upload/<int:pk>/berkas/", views.unduh_upload, name="unduh_upload"),
     path("transactions/", views.transactions, name="transactions"),
     path("reconcile/", views.reconcile, name="reconcile"),
     path("batch/<int:pk>/", views.batch_detail, name="batch_detail"),

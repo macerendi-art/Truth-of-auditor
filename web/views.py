@@ -17,7 +17,7 @@ from django.core.paginator import Paginator
 from django.db.models import BooleanField, Count, Exists, ExpressionWrapper, Max, Min, OuterRef, Q, Subquery, Sum, TextField
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast
-from django.http import HttpResponse, HttpResponseBadRequest
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.defaultfilters import date as date_filter
 from django.template.loader import render_to_string
@@ -1220,6 +1220,11 @@ def upload(request):
                     # Nilai dari form → hanya basename-nya yang dipakai; kosong
                     # (klien lama) → service memakai fallback path staging.
                     original_name=(Path(orig_names[i]).name if i < len(orig_names) else ""),
+                    # Jejak audit: salin berkas aslinya ke storage permanen.
+                    # Berkas staging tetap dihapus di `finally` di bawah — yang
+                    # disimpan adalah SALINANNYA, jadi alur staging/sweep lama
+                    # tidak berubah sedikit pun.
+                    simpan_berkas=True,
                 )
                 n_ok += 1
                 # Penandaan tiban terjadi DI DALAM ingest; di sini cuma laporannya.
@@ -1292,6 +1297,38 @@ def upload(request):
         "q": q,
         "semua_toko_tulis": mode_semua(request),
     })
+
+
+@login_required
+def unduh_upload(request, pk):
+    """Unduh berkas asli sebuah unggahan — jejak audit "berkas mana yang
+    melahirkan baris ini?".
+
+    Berkas TIDAK boleh dilayani lewat `MEDIA_URL`: `django.conf.urls.static`
+    hanya aktif saat DEBUG (jadi di produksi tak ada jalurnya sama sekali), dan
+    kalaupun ada, URL media tak mengenal siapa pun — ekspor mutasi bank berisi
+    nama pemain, nomor rekening, dan nominal. Jadi satu-satunya jalannya lewat
+    view ber-scope `tokos_for` ini, persis gerbang yang dipakai `delete_upload`.
+
+    Unggahan tanpa toko (jalur CLI) tak bisa di-scope siapa pun → 404 dengan
+    sendirinya; itu memang perilaku yang diinginkan.
+    """
+    up = get_object_or_404(Upload, pk=pk, toko__in=tokos_for(request.user))
+    if not up.file:
+        # Seluruh baris Upload dari sebelum fitur ini ada berada di sini —
+        # bukan kesalahan, cuma tak ada berkas yang bisa diberikan.
+        raise Http404("Berkas asli tidak tersimpan untuk unggahan ini.")
+    try:
+        fh = up.file.open("rb")
+    except (FileNotFoundError, OSError):
+        # Baris menunjuk berkas yang lenyap dari disk (mis. deploy sebelum
+        # volume media terpasang). Jangan 500 — halaman riwayat harus tetap bisa
+        # dibuka; yang hilang cuma satu unduhan.
+        raise Http404("Berkas asli sudah tidak ada di penyimpanan.")
+    return FileResponse(
+        fh, as_attachment=True,
+        filename=up.original_name or Path(up.file.name).name,
+    )
 
 
 @login_required

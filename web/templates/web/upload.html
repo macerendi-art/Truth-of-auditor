@@ -61,6 +61,11 @@
   .file-row .frm{border:none;background:none;color:var(--faint);cursor:pointer;padding:2px;display:grid;place-items:center;border-radius:6px}
   .file-row .frm:hover{color:var(--bad);background:var(--bad-bg)}
   .file-row .frm svg{width:15px;height:15px}
+  /* Ikon unduh berkas asli di Riwayat Upload — sengaja diam sampai
+     hover: kolom nama file harus tetap terbaca sebagai teks. */
+  a.unduh{color:var(--faint);display:inline-grid;place-items:center;vertical-align:-3px;padding:1px;border-radius:5px}
+  a.unduh:hover{color:var(--brand);background:var(--info-bg)}
+  a.unduh svg{width:15px;height:15px}
 </style>
 <script>
 (function(){
@@ -251,7 +256,7 @@
     {% for u in uploads %}
       <tr>
         {% if boleh_hapus_data %}<td>{% if not u.locked %}<input type="checkbox" class="rowchk" name="upload_ids" value="{{ u.pk }}" aria-label="Pilih {{ u.original_name|default:u.pk }}">{% endif %}</td>{% endif %}
-        <td>{{ u.original_name|default:u.pk }}</td>
+        <td>{{ u.original_name|default:u.pk }}{% if u.file %} <a class="unduh" href="{% url 'unduh_upload' u.pk %}" title="Unduh berkas asli — jejak audit sumber baris ini" aria-label="Unduh berkas asli {{ u.original_name|default:u.pk }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg></a>{% endif %}</td>
         <td>{{ u.source_type.name }}</td>
         <td>{{ u.provider|default:"—" }}</td>
         <td>{{ u.flow|default:"—" }}</td>

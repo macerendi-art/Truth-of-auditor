@@ -5,6 +5,7 @@ import tempfile
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.files import File
 from django.db import IntegrityError, transaction as db_tx
 from django.utils import timezone
 
@@ -165,12 +166,20 @@ def periksa_hasil_bertanggal(rows, parser_key):
     )
 
 
-def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=None, toko=None, provider="", password="", original_name=""):
+def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=None, toko=None, provider="", password="", original_name="", simpan_berkas=False):
     """Parse `file_path` dengan parser `parser_key`, simpan sebagai Transaction.
 
     File terenkripsi (Mandiri e-statement) didekripsi dulu memakai `password`.
     `original_name` = nama file APA ADANYA dari pengunggah; `file_path` menunjuk
     file staging yang namanya bisa dibubuhi sufiks acak oleh storage Django.
+
+    `simpan_berkas=True` menyalin berkas asli ke storage permanen dan menautkannya
+    ke `Upload.file` (jejak audit "berkas mana yang melahirkan baris ini?").
+    Sengaja OPT-IN, bukan bawaan: jalur ingest produksi (unggah web dan
+    `manage.py ingest`) menyalakannya sendiri, sedangkan harness kalibrasi
+    `validate_brands` dan seluruh tes memanggil ingest ribuan kali atas berkas
+    yang sudah ada di disk pemanggil — menyalinnya di sana murni pemborosan, dan
+    beberapa tes bahkan memakai path yang tidak ada sama sekali (`/nofile`).
     Mengembalikan (upload, created, duplicate).
     """
     if parser_key not in PARSERS:
@@ -193,12 +202,14 @@ def ingest(parser_key, file_path, recon_date=None, account=None, flow="", user=N
         meta = getattr(parser, "meta", {}) or {}
         owner = meta.get("owner_name", "") or owner_from_filename(Path(file_path).name)
         try:
-            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner, original_name)
+            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner, original_name, simpan_berkas)
         except IntegrityError:
             # Balapan ingest ganda (double-submit / dua worker): constraint DB
             # menolak baris kembar. Ulang SEKALI — percobaan kedua membaca ulang
             # row_hash yang baru saja di-commit proses lain → terhitung duplikat.
-            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner, original_name)
+            # Percobaan pertama sudah membersihkan berkas yang sempat ditulisnya
+            # (lihat `_persist_rows`), jadi pengulangan ini tak menggandakannya.
+            return _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner, original_name, simpan_berkas)
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -269,9 +280,41 @@ def _tandai_tiban(up, st, toko, file_hashes, user):
               lama=cand.original_name, baru=up.original_name, upload_baru=up.pk)
 
 
-def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner="", original_name=""):
-    """Simpan hasil parse sebagai Upload + Transaction (atomic, dedup row_hash)."""
-    with db_tx.atomic():
+def _simpan_berkas_asli(up, file_path):
+    """Salin berkas SEPERTI DITERIMA ke storage permanen, tautkan ke `up.file`.
+
+    Yang disalin `file_path` (berkas asli), BUKAN `parse_path` — untuk e-statement
+    Mandiri keduanya berbeda: `parse_path` adalah hasil dekripsi sementara. Bukti
+    audit yang sah adalah berkas seperti diterima dari klien; menyimpan hasil
+    dekripsi justru membuang perlindungan yang dipasang klien, sementara
+    passwordnya sendiri memang tidak disimpan di mana pun.
+
+    Nama simpan diturunkan dari `original_name` lewat `upload_to` bawaan
+    FileField, jadi storage boleh menyanitasinya (spasi → garis bawah) dan
+    membubuhi sufiks acak saat bentrok. Kolom `original_name` sendiri TIDAK ikut
+    berubah — kolom itu kunci pencocokan "ketiban" (`_tandai_tiban`), dan
+    menggesernya akan mengubah perilaku dedup yang sudah teruji.
+
+    Penyimpanan berkas TIDAK ikut `atomic()`, jadi pemanggil wajib menghapusnya
+    lagi bila transaksi DB-nya ternyata gagal (lihat `_persist_rows`).
+    """
+    nama = Path(up.original_name or file_path).name
+    with open(file_path, "rb") as fh:
+        up.file.save(nama, File(fh), save=False)
+
+
+def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, provider, owner="", original_name="", simpan_berkas=False):
+    """Simpan hasil parse sebagai Upload + Transaction (atomic, dedup row_hash).
+
+    `simpan_berkas` menyalin berkas aslinya ke storage. Penulisan berkas BUKAN
+    bagian dari `atomic()` — filesystem tidak ikut rollback — jadi setiap jalur
+    keluar yang gagal WAJIB menghapusnya lagi, kalau tidak setiap rollback
+    (termasuk percobaan pertama pada retry IntegrityError di `ingest`)
+    meninggalkan berkas yatim yang tak dirujuk baris Upload mana pun.
+    """
+    up = None
+    try:
+        with db_tx.atomic():
             up = Upload.objects.create(
                 source_type=st,
                 account=account,
@@ -334,10 +377,25 @@ def _persist_rows(rows, st, file_path, recon_date, account, flow, user, toko, pr
                 )
             up.rows_parsed = len(objs)
             up.rows_duplicate = dup
-            up.save(update_fields=["rows_parsed", "rows_duplicate"])
+            kolom = ["rows_parsed", "rows_duplicate"]
+            if simpan_berkas:
+                # Ditulis SETELAH bulk_create supaya kegagalan yang paling
+                # mungkin (baris tak valid) tak sempat menyentuh disk sama
+                # sekali; sisa jendelanya ditutup `except` di bawah.
+                _simpan_berkas_asli(up, file_path)
+                kolom.append("file")
+            up.save(update_fields=kolom)
             # `dup_tercatat | hash baris baru` = seluruh isi file ini. Hanya bila
             # file MENAMBAH baris (upload ulang identik: no-op). Di dalam atomic()
             # → penandaan ikut ter-rollback bila percobaan pertama gagal.
             if objs:
                 _tandai_tiban(up, st, toko, dup_tercatat | {o.row_hash for o in objs}, user)
+    except Exception:
+        # DB sudah ter-rollback oleh `atomic()`; berkasnya tidak — hapus manual,
+        # kalau tidak baris Upload-nya lenyap tapi berkasnya menetap selamanya.
+        # Dibaca dari `up.file` (bukan nilai balik helper) supaya penulisan yang
+        # gagal separuh jalan pun ikut terbersihkan selama namanya sempat terpasang.
+        if up is not None and up.file:
+            up.file.delete(save=False)
+        raise
     return up, len(objs), dup

@@ -119,6 +119,53 @@ BULAN_ID = {
 # yang tersimpan di docs/superpowers/specs/.
 RILIS: tuple[Rilis, ...] = (
     Rilis(
+        versi="1.26.0",
+        tanggal=_dt.date(2026, 9, 5),
+        nama="Berkas Asli Unggahan Tersimpan sebagai Jejak Audit",
+        jenis=MINOR,
+        commit="",
+        sorotan=(
+            "**Berkas yang Anda unggah kini benar-benar disimpan.** Sebelum ini "
+            "aplikasi memakai berkas Anda untuk membaca isinya, lalu "
+            "membuangnya di detik yang sama — tidak ada satu pun berkas asli "
+            "yang tersimpan, sejak hari pertama aplikasi ini ada. Pertanyaan "
+            "audit \"baris ini datang dari berkas yang mana?\" karena itu tak "
+            "pernah bisa dijawab dari dalam aplikasi.",
+            "**Tombol unduh di Riwayat Upload.** Baris yang punya berkas "
+            "tersimpan menampilkan ikon unduh di sebelah nama berkasnya; "
+            "klik untuk mengambil berkas persis seperti saat diunggah, dengan "
+            "nama file aslinya. Berkas hanya bisa diambil oleh orang yang "
+            "memang berhak atas toko itu.",
+            "**Berkas lama tidak bisa dipulihkan.** Unggahan sebelum rilis ini "
+            "tidak menampilkan tombol unduh — berkasnya memang tidak pernah "
+            "ada. Yang tersimpan mulai berlaku untuk unggahan baru saja.",
+            "**Untuk berkas terkunci password (e-statement Mandiri), yang "
+            "disimpan adalah berkas terkunci apa adanya** — bukan hasil "
+            "bukaannya. Passwordnya tidak ikut disimpan di mana pun.",
+            "Tidak ada yang berubah pada cara aplikasi membaca, mencocokkan, "
+            "atau menghitung apa pun. Angka rekonsiliasi Anda hari ini sama "
+            "persis dengan kemarin.",
+        ),
+        catatan=(
+            "Berkas disimpan di MEDIA_ROOT (`uploads/%Y/%m/`) lewat "
+            "`Upload.file`, yang sejak commit pertama ada di model tapi tidak "
+            "pernah diisi kode mana pun. Penyimpanan bersifat OPT-IN di "
+            "`services.ingest(simpan_berkas=…)`: dinyalakan oleh unggahan web "
+            "dan `manage.py ingest`, dimatikan untuk harness kalibrasi "
+            "`validate_brands` dan seluruh tes. Ukuran diukur dua jalur yang "
+            "bertemu: 182,5 byte/baris (hari nyata OKE25, 31.675 baris dari "
+            "5,78 MB) × 500 rb baris/hari ≈ 91 MB/hari, dan 5,6 MB/hari/toko "
+            "× 16 toko ≈ 90 MB/hari — ±33 GB/tahun. Retensi yang berlaku "
+            "'simpan selamanya', dengan alat pangkas manual "
+            "`manage.py pangkas_berkas_unggahan` yang sengaja tidak "
+            "dijadwalkan. CATATAN PENTING: `MEDIA_ROOT` sudah bisa diatur env "
+            "(A2, v1.25.0) tapi volume Railway-nya BELUM terpasang — sampai "
+            "itu terjadi berkas tetap lenyap tiap deploy. Saran ukuran volume "
+            "40 GB, dan `periksa_kesehatan` belum memantau mount media. Lihat "
+            "docs/keputusan-berkas-asli-2026-09-05.md."
+        ),
+    ),
+    Rilis(
         versi="1.25.0",
         tanggal=_dt.date(2026, 9, 4),
         nama="Cadangan, Alarm, dan Staging — Otomasi di Sekeliling Aplikasi",
