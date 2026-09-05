@@ -24,19 +24,41 @@ NAMA="$(curl -sS -m 15 "$API/bot$TOKEN/getMe" 2>/dev/null | jq -r 'select(.ok) |
 echo "Token sah — bot @$NAMA."
 
 echo
-echo "Sekarang KIRIM satu pesan apa saja ke @$NAMA dari Telegram-mu,"
-echo "lalu tekan Enter di sini."
+echo "Sekarang picu satu pesan supaya bot ini bisa melihat tujuannya:"
+echo "  - Ke GRUP  : tambahkan @$NAMA ke grupnya, lalu kirim  /start@$NAMA  DI DALAM grup itu."
+echo "               (Bot Telegram default-nya privacy mode AKTIF -- di grup ia HANYA melihat"
+echo "                pesan yang menyebut namanya atau perintah bergaya /perintah@nama."
+echo "                Mengirim 'halo' biasa TIDAK akan terlihat, dan deteksi di bawah gagal.)"
+echo "  - Ke PRIBADI: cukup kirim pesan apa saja ke @$NAMA."
+echo
+printf 'Tekan Enter setelah pesannya terkirim... '
 read -r _
 
-CHAT="$(curl -sS -m 15 "$API/bot$TOKEN/getUpdates" 2>/dev/null \
-  | jq -r '[.result[]?.message.chat.id] | last // empty')"
-if [ -z "$CHAT" ]; then
-  echo "Belum ada pesan masuk yang terbaca."
-  printf 'Masukkan chat id secara manual (atau Enter untuk batal): '
+PILIHAN="$(curl -sS -m 15 "$API/bot$TOKEN/getUpdates" 2>/dev/null | jq -r '
+  [ .result[]?
+    | (.message // .channel_post // .my_chat_member) as $m
+    | select($m != null) | $m.chat
+    | { id, tipe: .type, nama: (.title // ((.first_name // "") + " " + (.last_name // "")) | gsub("^ +| +$";"")) }
+  ] | unique_by(.id) | reverse | .[]
+  | "\(.id)\t\(.tipe)\t\(.nama)"' 2>/dev/null)"
+
+if [ -n "$PILIHAN" ]; then
+  echo "Tujuan yang terlihat oleh bot ini:"
+  echo "$PILIHAN" | nl -w2 -s') ' | sed 's/\t/  |  /g'
+  echo
+  printf 'Nomor tujuan yang dipakai untuk alarm (Enter = nomor 1): '
+  read -r NOMOR; NOMOR="${NOMOR:-1}"
+  BARIS="$(echo "$PILIHAN" | sed -n "${NOMOR}p")"
+  CHAT="$(printf '%s' "$BARIS" | cut -f1)"
+  echo "Dipilih: $(printf '%s' "$BARIS" | sed 's/\t/  |  /g')"
+else
+  echo "Tidak ada tujuan terbaca. Kalau ini GRUP, penyebab paling umum adalah privacy mode:"
+  echo "kirim  /start@$NAMA  DI DALAM grup (bukan 'halo' biasa), lalu ulangi skrip ini."
+  printf 'Atau masukkan chat id manual (grup biasanya diawali -100...), Enter untuk batal: '
   read -r CHAT
   [ -n "$CHAT" ] || { echo "Dibatalkan."; exit 1; }
 fi
-echo "Chat id: $CHAT"
+[ -n "${CHAT:-}" ] || { echo "Chat id kosong -- dibatalkan."; exit 1; }
 
 umask 077
 TMP="$(mktemp "${ENV_FILE}.XXXXXX")"
