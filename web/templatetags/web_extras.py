@@ -27,6 +27,7 @@ REASON_LABELS = {
     "owner_fr+counterparty_cm": ("Rekening FR · lawan CM", "ok"),
     "owner_fr+rek_cm":  ("Rekening FR · norek lawan", "ok"),
     "owner_fr+kredit_masuk": ("Rekening FR · kredit masuk", "ok"),
+    "alias_history":    ("Rekening langganan (riwayat)", "ok"),
     # perlu tinjau
     "amount_fee":       ("Selisih biaya transfer",   "warn"),
     "amount_mismatch":  ("Selisih nominal",          "warn"),
@@ -34,6 +35,7 @@ REASON_LABELS = {
     "date_before":      ("Uang tiba H-1",            "warn"),
     "name_partial":     ("Nama mirip",               "warn"),
     "weak_name":        ("Nama belum yakin",         "warn"),  # data lama (pra-anchor)
+    "pulsa_manual":     ("DP Pulsa — cek konversi manual", "warn"),
     # tertunda / info / keputusan manusia
     "late_settlement":  ("Settle terlambat",         "src"),
     "manual_override":  ("Ditandai manual",          "src"),
@@ -42,6 +44,7 @@ REASON_LABELS = {
     "no_panel":         ("Tak ada di panel",         "bad"),
     "no_money":         ("Belum ada uang masuk",     "bad"),
     "no_fr":            ("Tak ada di FR Sesama CM",  "bad"),
+    "gateway_unpaid":   ("QR belum settle",          "bad"),
 }
 
 
